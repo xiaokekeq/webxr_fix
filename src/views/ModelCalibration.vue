@@ -204,7 +204,7 @@ onMounted( () => {
 <template>
 	<div class="calibration-page" :class="{ 'ar-active': hasArSession }" @click="store.actions.handleArUiInteraction()">
 		<div class="page-scroll">
-			<header class="page-header">
+			<header class="page-header" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
 				<div>
 					<div class="page-title">{{ TEXT.title }}</div>
 					<div class="page-subtitle">{{ currentModelName }}</div>
@@ -216,7 +216,12 @@ onMounted( () => {
 				<div ref="canvasHost" class="scene-layer"></div>
 				<div ref="xrButtonHost" class="scene-hidden"></div>
 
-				<div v-if="!hasArSession" class="launch-overlay">
+				<div
+					v-if="!hasArSession"
+					class="launch-overlay"
+					@pointerdown.stop="store.actions.handleArUiInteraction()"
+					@click.stop
+				>
 					<div class="launch-badge">AR</div>
 					<div class="launch-title">{{ TEXT.enterArTitle }}</div>
 					<p class="launch-subtitle">{{ TEXT.enterArSub }}</p>
@@ -262,11 +267,26 @@ onMounted( () => {
 
 			<div v-if="sliderVisible" class="side-slider">
 				<div class="side-slider-text">{{ sliderText }}</div>
-				<input v-model="sliderValue" class="side-slider-range" type="range" min="0" max="100" step="1" />
+				<input
+					v-model="sliderValue"
+					class="side-slider-range"
+					type="range"
+					min="0"
+					max="100"
+					step="1"
+					@pointerdown.stop="store.actions.handleArUiInteraction()"
+					@click.stop
+				/>
 			</div>
 		</div>
 
-		<nav v-if="hasArSession" class="action-dock" aria-label="AR 配准操作">
+		<nav
+			v-if="hasArSession"
+			class="action-dock"
+			aria-label="AR 配准操作"
+			@pointerdown.stop="store.actions.handleArUiInteraction()"
+			@click.stop
+		>
 			<button type="button" class="dock-item" @click.stop="openPanel('placement')">
 				<span class="dock-icon">放</span>
 				<span class="dock-label">{{ TEXT.placement }}</span>
@@ -286,7 +306,12 @@ onMounted( () => {
 		</nav>
 
 		<transition name="sheet-fade">
-			<section v-if="hasArSession && ui.drawerOpen" class="bottom-sheet">
+			<section
+				v-if="hasArSession && ui.drawerOpen"
+				class="bottom-sheet"
+				@pointerdown.stop="store.actions.handleArUiInteraction()"
+				@click.stop
+			>
 				<div class="sheet-header">
 					<div class="sheet-tabs">
 						<button

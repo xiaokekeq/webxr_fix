@@ -21,16 +21,11 @@ const TEXT = {
 	placing: '正在放置模型',
 	placed: '巡查中',
 	viewMode: '查看模式',
-	manualCalibration: '手动校准',
 	inspectionRecord: '巡查记录',
 	collapsePanel: '收起面板',
 	browseMode: '查看模式',
 	inspectionMode: '巡查记录',
 	sectionPlane: '剖切方向',
-	startCalibration: '开始校准',
-	captureCorner: '采集角点',
-	solveApply: '完成校准',
-	resetCalibration: '重置校准',
 	inspectionResult: '结果',
 	inspectionType: '类型',
 	inspectionSeverity: '等级',
@@ -39,8 +34,7 @@ const TEXT = {
 	exportRecords: '导出记录',
 	takeSnapshot: '截屏',
 	exit: '退出',
-	calibrationTool: '校准',
-	recordTool: '记录',
+	panelTool: '面板',
 	unknownModel: '未选择模型'
 } as const;
 
@@ -134,22 +128,13 @@ function activateWorkspace(mode: 'browse' | 'inspection'): void {
 	store.actions.activatePanel( mode );
 }
 
-function openCalibrationPanel(): void {
-	if ( ui.value.drawerOpen && engine.value.workspaceMode === 'browse' ) {
+function openWorkspacePanel(): void {
+	if ( ui.value.drawerOpen ) {
 		store.actions.toggleDrawer();
 		return;
 	}
 
-	store.actions.activatePanel( 'browse' );
-}
-
-function openInspectionPanel(): void {
-	if ( ui.value.drawerOpen && engine.value.workspaceMode === 'inspection' ) {
-		store.actions.toggleDrawer();
-		return;
-	}
-
-	store.actions.activatePanel( 'inspection' );
+	store.actions.activatePanel( engine.value.workspaceMode === 'inspection' ? 'inspection' : 'browse' );
 }
 
 function exitPage(): void {
@@ -169,7 +154,7 @@ onMounted( () => {
 <template>
 	<div class="inspect-page" :class="{ 'ar-active': hasArSession }" @click="store.actions.handleArUiInteraction()">
 		<div class="page-scroll">
-			<header class="page-header">
+			<header class="page-header" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
 				<div class="page-title">{{ TEXT.title }}</div>
 				<div class="status-chip">{{ TEXT.status }}：{{ sessionStatusText }}</div>
 			</header>
@@ -178,7 +163,12 @@ onMounted( () => {
 				<div ref="canvasHost" class="scene-layer"></div>
 				<div ref="xrButtonHost" class="scene-hidden"></div>
 
-				<div v-if="!hasArSession" class="launch-overlay">
+				<div
+					v-if="!hasArSession"
+					class="launch-overlay"
+					@pointerdown.stop="store.actions.handleArUiInteraction()"
+					@click.stop
+				>
 					<div class="launch-badge">AR</div>
 					<div class="launch-title">{{ TEXT.enterArTitle }}</div>
 					<p class="launch-subtitle">{{ TEXT.enterArSub }}</p>
@@ -198,22 +188,27 @@ onMounted( () => {
 
 			<div v-if="sliderVisible" class="side-slider">
 				<div class="side-slider-text">{{ sliderText }}</div>
-				<input v-model="sliderValue" class="side-slider-range" type="range" min="0" max="100" step="1" />
+				<input
+					v-model="sliderValue"
+					class="side-slider-range"
+					type="range"
+					min="0"
+					max="100"
+					step="1"
+					@pointerdown.stop="store.actions.handleArUiInteraction()"
+					@click.stop
+				/>
 			</div>
 		</div>
 
-		<nav class="action-dock" aria-label="AR 操作">
-			<button type="button" class="dock-item" @click.stop="openCalibrationPanel">
-				<span class="dock-icon">校</span>
-				<span class="dock-label">{{ TEXT.calibrationTool }}</span>
+		<nav class="action-dock action-dock-compact" aria-label="AR 操作" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
+			<button type="button" class="dock-item dock-item-primary" @click.stop="openWorkspacePanel">
+				<span class="dock-icon">板</span>
+				<span class="dock-label">{{ TEXT.panelTool }}</span>
 			</button>
 			<button type="button" class="dock-item" @click.stop="store.actions.takeSnapshot()">
 				<span class="dock-icon">拍</span>
 				<span class="dock-label">{{ TEXT.takeSnapshot }}</span>
-			</button>
-			<button type="button" class="dock-item dock-item-primary" @click.stop="openInspectionPanel">
-				<span class="dock-icon">记</span>
-				<span class="dock-label">{{ TEXT.recordTool }}</span>
 			</button>
 			<button type="button" class="dock-item" @click.stop="exitPage">
 				<span class="dock-icon">退</span>
@@ -222,7 +217,12 @@ onMounted( () => {
 		</nav>
 
 		<transition name="sheet-fade">
-			<section v-if="ui.drawerOpen" class="bottom-sheet">
+			<section
+				v-if="ui.drawerOpen"
+				class="bottom-sheet"
+				@pointerdown.stop="store.actions.handleArUiInteraction()"
+				@click.stop
+			>
 				<div class="sheet-header">
 					<div class="sheet-tabs">
 						<button
@@ -276,24 +276,6 @@ onMounted( () => {
 								@click="store.actions.setSectionCutPlaneMode(item.value)"
 							>
 								{{ item.label }}
-							</button>
-						</div>
-					</div>
-
-					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.manualCalibration }}</div>
-						<div class="chip-grid">
-							<button type="button" class="chip-button" @click="store.actions.startCurrentSessionMarkerCalibration()">
-								{{ TEXT.startCalibration }}
-							</button>
-							<button type="button" class="chip-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
-								{{ TEXT.captureCorner }}
-							</button>
-							<button type="button" class="chip-button active" @click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()">
-								{{ TEXT.solveApply }}
-							</button>
-							<button type="button" class="chip-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
-								{{ TEXT.resetCalibration }}
 							</button>
 						</div>
 					</div>
@@ -570,6 +552,10 @@ onMounted( () => {
 	backdrop-filter: blur(18px);
 	border: 1px solid rgba(255, 255, 255, 0.08);
 	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
+.action-dock-compact {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .dock-item {

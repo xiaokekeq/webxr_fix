@@ -2264,7 +2264,7 @@ export class ThreeEngine {
 			sampleCount: solution.correspondenceCount
 		};
 
-		const appliedToPlacedModel = this.placementSession.applyArLocalizationSolution( {
+		let appliedToPlacedModel = this.placementSession.applyArLocalizationSolution( {
 			modelTemplate: this.modelTemplate,
 			registrationSolution: this.registrationSolution,
 			arFromEnuSolution: solution.arFromEnuSolution,
@@ -2277,6 +2277,10 @@ export class ThreeEngine {
 		if ( appliedToPlacedModel ) {
 			this.applyModelLayerVisibility();
 			this.arSessionStateRuntime.markPlacementCommitted( true );
+		} else if ( this.workflowMode === 'ar-inspection' ) {
+			this.pointerSelection.suppressSelectionFor( 1200 );
+			this.requestAutoPlacement();
+			appliedToPlacedModel = this.placementSession.getPlacedModel() !== null;
 		}
 
 		this.syncMarkerCalibrationState( {
@@ -2329,9 +2333,11 @@ export class ThreeEngine {
 		this.setStatus(
 			appliedToPlacedModel
 				? this.workflowMode === 'ar-inspection'
-					? '空间校正完成。'
+					? '空间校正完成，模型已自动放置。'
 					: '当前会话 Marker 校正已应用到模型。'
-				: '当前会话 Marker 校正已生成，但尚未应用到模型。'
+				: this.workflowMode === 'ar-inspection' && this.placementSession.getCoarsePlacementPending()
+					? '空间校正完成，请继续扫描平面，模型将自动放置。'
+					: '当前会话 Marker 校正已生成，但尚未应用到模型。'
 		);
 		this.emit();
 		return true;
