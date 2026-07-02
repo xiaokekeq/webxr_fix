@@ -1,26 +1,28 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import AppTabBar from '../components/AppTabBar.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS,
-	getDisplayModeLabel
+	getDisplayModeSliderValueText
 } from '@/features/ar/types/display-modes.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
 const TEXT = {
 	title: '堤防 AR 巡查',
-	subtitle: '进入 AR 后可手动校准并填写巡查记录。',
 	enterArTitle: '进入 AR 巡查',
 	enterArSub: '当前模型选择仅用于调试，后续可由入口默认带入。',
 	enterAr: '进入 AR',
 	selectModel: '选择模型',
 	status: '状态',
+	waiting: '待进入 AR',
+	scanning: '正在识别平面',
+	ready: '可开始放置',
+	placing: '正在放置模型',
+	placed: '巡查中',
 	viewMode: '查看模式',
 	manualCalibration: '手动校准',
 	inspectionRecord: '巡查记录',
-	expandPanel: '展开面板',
 	collapsePanel: '收起面板',
 	browseMode: '查看模式',
 	inspectionMode: '巡查记录',
@@ -38,6 +40,7 @@ const TEXT = {
 	takeSnapshot: '截屏',
 	exit: '退出',
 	calibrationTool: '校准',
+	recordTool: '记录',
 	unknownModel: '未选择模型'
 } as const;
 
@@ -51,13 +54,13 @@ const xrButtonHost = ref<HTMLElement | null>( null );
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
-const currentModelName = computed(
-	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
-);
 const sliderVisible = computed(
-	() => engine.value.displayMode === 'transparent-xray'
-		|| engine.value.displayMode === 'layer-peeling'
-		|| engine.value.displayMode === 'section-cut'
+	() => hasArSession.value
+		&& (
+			engine.value.displayMode === 'transparent-xray'
+			|| engine.value.displayMode === 'layer-peeling'
+			|| engine.value.displayMode === 'section-cut'
+		)
 );
 const sliderValue = computed<number>( {
 	get() {
@@ -74,6 +77,27 @@ const sliderValue = computed<number>( {
 	},
 	set(value: number) {
 		store.actions.setStructureRevealValue( value );
+	}
+} );
+const sliderText = computed( () =>
+	getDisplayModeSliderValueText( engine.value.displayMode, sliderValue.value )
+);
+const sessionStatusText = computed( () => {
+	if ( hasArSession.value === false ) {
+		return TEXT.waiting;
+	}
+
+	switch ( engine.value.arSessionPhase ) {
+		case 'scanning':
+			return TEXT.scanning;
+		case 'ready-to-place':
+			return TEXT.ready;
+		case 'placing':
+			return TEXT.placing;
+		case 'placed':
+			return TEXT.placed;
+		default:
+			return engine.value.runtimeStatus;
 	}
 } );
 
@@ -106,8 +130,12 @@ function handleModelChange(event: Event): void {
 	store.actions.selectModel( target.value );
 }
 
-function togglePanel(): void {
-	if ( ui.value.drawerOpen ) {
+function activateWorkspace(mode: 'browse' | 'inspection'): void {
+	store.actions.activatePanel( mode );
+}
+
+function openCalibrationPanel(): void {
+	if ( ui.value.drawerOpen && engine.value.workspaceMode === 'browse' ) {
 		store.actions.toggleDrawer();
 		return;
 	}
@@ -115,12 +143,13 @@ function togglePanel(): void {
 	store.actions.activatePanel( 'browse' );
 }
 
-function activateWorkspace(mode: 'browse' | 'inspection'): void {
-	store.actions.activatePanel( mode );
-}
+function openInspectionPanel(): void {
+	if ( ui.value.drawerOpen && engine.value.workspaceMode === 'inspection' ) {
+		store.actions.toggleDrawer();
+		return;
+	}
 
-function openCalibrationPanel(): void {
-	store.actions.activatePanel( 'browse' );
+	store.actions.activatePanel( 'inspection' );
 }
 
 function exitPage(): void {
@@ -138,12 +167,11 @@ onMounted( () => {
 </script>
 
 <template>
-	<div class="inspect-page" @click="store.actions.handleArUiInteraction()">
+	<div class="inspect-page" :class="{ 'ar-active': hasArSession }" @click="store.actions.handleArUiInteraction()">
 		<div class="page-scroll">
 			<header class="page-header">
 				<div class="page-title">{{ TEXT.title }}</div>
-				<div class="page-subtitle">{{ TEXT.subtitle }}</div>
-				<div class="status-chip">{{ TEXT.status }}：{{ engine.runtimeStatus }}</div>
+				<div class="status-chip">{{ TEXT.status }}：{{ sessionStatusText }}</div>
 			</header>
 
 			<section class="scene-shell">
@@ -169,32 +197,29 @@ onMounted( () => {
 			</section>
 
 			<div v-if="sliderVisible" class="side-slider">
+				<div class="side-slider-text">{{ sliderText }}</div>
 				<input v-model="sliderValue" class="side-slider-range" type="range" min="0" max="100" step="1" />
 			</div>
-
-			<button type="button" class="panel-toggle" @click.stop="togglePanel">
-				{{ ui.drawerOpen ? TEXT.collapsePanel : TEXT.expandPanel }}
-			</button>
 		</div>
 
-		<div class="floating-tools">
-			<button type="button" class="tool-button" @click.stop="openCalibrationPanel">
-				<span class="tool-icon">校</span>
-				<span class="tool-text">{{ TEXT.calibrationTool }}</span>
+		<nav class="action-dock" aria-label="AR 操作">
+			<button type="button" class="dock-item" @click.stop="openCalibrationPanel">
+				<span class="dock-icon">校</span>
+				<span class="dock-label">{{ TEXT.calibrationTool }}</span>
 			</button>
-			<button type="button" class="tool-button" @click.stop="store.actions.takeSnapshot()">
-				<span class="tool-icon">拍</span>
-				<span class="tool-text">{{ TEXT.takeSnapshot }}</span>
+			<button type="button" class="dock-item" @click.stop="store.actions.takeSnapshot()">
+				<span class="dock-icon">拍</span>
+				<span class="dock-label">{{ TEXT.takeSnapshot }}</span>
 			</button>
-			<button type="button" class="tool-button tool-primary" @click.stop="store.actions.activatePanel('inspection')">
-				<span class="tool-icon">记</span>
-				<span class="tool-text">{{ TEXT.inspectionRecord }}</span>
+			<button type="button" class="dock-item dock-item-primary" @click.stop="openInspectionPanel">
+				<span class="dock-icon">记</span>
+				<span class="dock-label">{{ TEXT.recordTool }}</span>
 			</button>
-			<button type="button" class="tool-button" @click.stop="exitPage">
-				<span class="tool-icon">退</span>
-				<span class="tool-text">{{ TEXT.exit }}</span>
+			<button type="button" class="dock-item" @click.stop="exitPage">
+				<span class="dock-icon">退</span>
+				<span class="dock-label">{{ TEXT.exit }}</span>
 			</button>
-		</div>
+		</nav>
 
 		<transition name="sheet-fade">
 			<section v-if="ui.drawerOpen" class="bottom-sheet">
@@ -323,8 +348,6 @@ onMounted( () => {
 				</template>
 			</section>
 		</transition>
-
-		<AppTabBar />
 	</div>
 </template>
 
@@ -335,13 +358,26 @@ onMounted( () => {
 	color: #eff6ff;
 }
 
+.inspect-page.ar-active {
+	background: transparent;
+}
+
 .page-scroll {
-	padding: max(16px, env(safe-area-inset-top)) 16px calc(120px + env(safe-area-inset-bottom));
+	position: relative;
+	padding: max(16px, env(safe-area-inset-top)) 16px calc(110px + env(safe-area-inset-bottom));
+}
+
+.inspect-page.ar-active .page-scroll {
+	padding: max(12px, env(safe-area-inset-top)) 12px calc(108px + env(safe-area-inset-bottom));
 }
 
 .page-header {
-	display: grid;
-	gap: 8px;
+	position: relative;
+	z-index: 22;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
 }
 
 .page-title {
@@ -349,22 +385,16 @@ onMounted( () => {
 	font-weight: 700;
 }
 
-.page-subtitle {
-	font-size: 13px;
-	line-height: 1.6;
-	color: rgba(210, 225, 255, 0.72);
-}
-
 .status-chip {
 	display: inline-flex;
 	align-items: center;
-	max-width: 100%;
 	padding: 8px 12px;
 	border-radius: 999px;
 	border: 1px solid rgba(69, 208, 255, 0.24);
 	background: rgba(0, 212, 255, 0.08);
 	font-size: 12px;
 	color: #bff3ff;
+	backdrop-filter: blur(10px);
 }
 
 .scene-shell {
@@ -375,6 +405,17 @@ onMounted( () => {
 	overflow: hidden;
 	border: 1px solid rgba(69, 208, 255, 0.18);
 	background: rgba(8, 14, 24, 0.86);
+}
+
+.inspect-page.ar-active .scene-shell {
+	position: fixed;
+	inset: 0;
+	height: 100dvh;
+	margin-top: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	z-index: 1;
 }
 
 .scene-layer,
@@ -454,8 +495,7 @@ onMounted( () => {
 }
 
 .launch-button,
-.panel-toggle,
-.tool-button,
+.dock-item,
 .sheet-tab,
 .sheet-close,
 .chip-button,
@@ -473,24 +513,36 @@ onMounted( () => {
 	font-weight: 700;
 }
 
-.panel-toggle {
-	display: block;
-	margin: 16px auto 0;
-	padding: 12px 22px;
-	border-radius: 999px;
-	background: rgba(255, 255, 255, 0.94);
-	color: #2257d1;
-	font-size: 14px;
-	font-weight: 700;
-}
-
 .side-slider {
 	position: fixed;
-	right: 6px;
+	right: 8px;
 	top: 50%;
 	transform: translateY(-50%);
-	z-index: 28;
+	z-index: 34;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 8px;
+	border-radius: 18px;
+	background: rgba(7, 12, 21, 0.74);
+	backdrop-filter: blur(16px);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
 	pointer-events: none;
+}
+
+.side-slider-text {
+	min-width: 92px;
+	padding: 6px 10px;
+	border-radius: 999px;
+	background: rgba(0, 212, 255, 0.12);
+	color: #d8f8ff;
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+	text-align: center;
+	white-space: nowrap;
 }
 
 .side-slider-range {
@@ -503,51 +555,59 @@ onMounted( () => {
 	pointer-events: auto;
 }
 
-.floating-tools {
+.action-dock {
 	position: fixed;
+	left: 12px;
 	right: 12px;
-	bottom: calc(112px + env(safe-area-inset-bottom));
-	z-index: 26;
-	display: flex;
-	flex-direction: column;
+	bottom: calc(12px + env(safe-area-inset-bottom));
+	z-index: 36;
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
 	gap: 10px;
+	padding: 10px;
+	border-radius: 22px;
+	background: rgba(7, 12, 21, 0.88);
+	backdrop-filter: blur(18px);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
 }
 
-.tool-button {
+.dock-item {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	width: 54px;
-	padding: 8px 6px;
+	gap: 6px;
+	min-height: 54px;
 	border-radius: 16px;
-	background: rgba(12, 18, 30, 0.82);
+	background: rgba(255, 255, 255, 0.04);
+	color: rgba(225, 236, 255, 0.78);
+	border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dock-item-primary {
+	background: rgba(0, 212, 255, 0.16);
+	border-color: rgba(0, 212, 255, 0.32);
 	color: #fff;
-	backdrop-filter: blur(14px);
-	border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.tool-button.tool-primary {
-	background: linear-gradient(180deg, #1b7dff, #0fc3ff);
-}
-
-.tool-icon {
-	font-size: 16px;
+.dock-icon {
+	font-size: 15px;
 	font-weight: 700;
 	line-height: 1;
 }
 
-.tool-text {
-	margin-top: 4px;
-	font-size: 10px;
+.dock-label {
+	font-size: 11px;
+	line-height: 1;
 }
 
 .bottom-sheet {
 	position: fixed;
 	left: 12px;
 	right: 12px;
-	bottom: calc(82px + env(safe-area-inset-bottom));
-	z-index: 32;
+	bottom: calc(96px + env(safe-area-inset-bottom));
+	z-index: 38;
 	max-height: 52vh;
 	padding: 14px;
 	overflow-y: auto;
@@ -675,6 +735,20 @@ onMounted( () => {
 
 	.side-slider-range {
 		width: 152px;
+	}
+
+	.side-slider {
+		right: 4px;
+		padding: 10px 6px;
+	}
+
+	.action-dock {
+		gap: 8px;
+		padding: 8px;
+	}
+
+	.bottom-sheet {
+		bottom: calc(92px + env(safe-area-inset-bottom));
 	}
 }
 </style>
