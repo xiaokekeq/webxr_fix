@@ -11,43 +11,34 @@ import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
 const TEXT = {
 	title: '堤防 AR 巡查',
-	subtitle: '请将手机对准现场控制标志，系统将自动完成空间校正。',
-	startArTitle: '点击进入 AR 巡查',
-	startArSub: '系统会读取现场基准，并在当前 AR 会话里重新完成空间校正。',
-	model: '站点',
-	state: '状态',
-	mode: '模式',
+	subtitle: '进入 AR 后可手动校准并填写巡查记录。',
+	enterArTitle: '进入 AR 巡查',
+	enterArSub: '当前模型选择仅用于调试，后续可由入口默认带入。',
+	enterAr: '进入 AR',
+	selectModel: '选择模型',
+	status: '状态',
+	viewMode: '查看模式',
+	manualCalibration: '手动校准',
+	inspectionRecord: '巡查记录',
 	expandPanel: '展开面板',
 	collapsePanel: '收起面板',
 	browseMode: '查看模式',
 	inspectionMode: '巡查记录',
-	displayMode: '显示模式',
-	stage: '工程阶段',
 	sectionPlane: '剖切方向',
-	propertyInfo: '当前构件',
-	propertyHint: '点击模型构件后，这里会显示当前选中信息。',
-	inspectionSummary: '巡查反馈',
+	startCalibration: '开始校准',
+	captureCorner: '采集角点',
+	solveApply: '完成校准',
+	resetCalibration: '重置校准',
 	inspectionResult: '结果',
 	inspectionType: '类型',
 	inspectionSeverity: '等级',
 	inspectionNote: '备注',
-	saveInspection: '保存反馈',
+	saveInspection: '保存记录',
 	exportRecords: '导出记录',
 	takeSnapshot: '截屏',
 	exit: '退出',
-	unknownModel: '未选择站点',
-	enterAr: '进入 AR',
-	currentMode: '工作模式',
-	baseline: '现场基准',
-	controlTargets: '控制标志',
-	localization: '空间校正',
-	fallbackManual: '手动四角点校正',
-	captureCorner: '采集角点',
-	solveApply: '完成校正',
-	resetMarker: '重置角点',
-	gpsFallback: 'GPS 粗定位提示',
-	gpsFallbackTip: '当前为 GPS 粗定位，可能存在米级偏差。',
-	manualHelp: '自动识别不可用，请按顺序对准控制标志四个角点：左上 -> 右上 -> 右下 -> 左下。'
+	calibrationTool: '校准',
+	unknownModel: '未选择模型'
 } as const;
 
 const route = useRoute();
@@ -86,12 +77,6 @@ const sliderValue = computed<number>( {
 	}
 } );
 
-const topChips = computed( () => [
-	`${TEXT.currentMode} ${engine.value.workflowMode}`,
-	`${TEXT.baseline} ${engine.value.siteCalibrationBaseline.statusText}`,
-	`${TEXT.mode} ${getDisplayModeLabel( engine.value.displayMode )}`
-]);
-
 async function mountEngineHosts(): Promise<void> {
 	await store.initialize();
 	store.actions.setWorkflowMode( 'ar-inspection' );
@@ -99,10 +84,7 @@ async function mountEngineHosts(): Promise<void> {
 		store.actions.selectModel( route.query.siteId );
 	}
 	await nextTick();
-	if (
-		canvasHost.value === null
-		|| xrButtonHost.value === null
-	) {
+	if ( canvasHost.value === null || xrButtonHost.value === null ) {
 		return;
 	}
 
@@ -125,16 +107,20 @@ function handleModelChange(event: Event): void {
 }
 
 function togglePanel(): void {
-	if ( engine.value.workspaceMode === 'registration' ) {
-		store.actions.activatePanel( 'browse' );
+	if ( ui.value.drawerOpen ) {
+		store.actions.toggleDrawer();
 		return;
 	}
 
-	store.actions.toggleDrawer();
+	store.actions.activatePanel( 'browse' );
 }
 
 function activateWorkspace(mode: 'browse' | 'inspection'): void {
 	store.actions.activatePanel( mode );
+}
+
+function openCalibrationPanel(): void {
+	store.actions.activatePanel( 'browse' );
 }
 
 function exitPage(): void {
@@ -155,44 +141,10 @@ onMounted( () => {
 	<div class="inspect-page" @click="store.actions.handleArUiInteraction()">
 		<div class="page-scroll">
 			<header class="page-header">
-				<div>
-					<div class="page-title">{{ TEXT.title }}</div>
-					<div class="page-subtitle">{{ TEXT.subtitle }}</div>
-				</div>
-				<div class="page-model">{{ currentModelName }}</div>
+				<div class="page-title">{{ TEXT.title }}</div>
+				<div class="page-subtitle">{{ TEXT.subtitle }}</div>
+				<div class="status-chip">{{ TEXT.status }}：{{ engine.runtimeStatus }}</div>
 			</header>
-
-			<div class="chip-row">
-				<span v-for="chip in topChips" :key="chip" class="top-chip">{{ chip }}</span>
-			</div>
-
-			<section class="model-card">
-				<div class="section-title">{{ TEXT.model }}</div>
-				<select class="select-field" :value="engine.selectedModelId" @change="handleModelChange">
-					<option v-for="model in engine.availableModels" :key="model.id" :value="model.id">
-						{{ model.name }}
-					</option>
-				</select>
-			</section>
-
-			<section class="status-grid">
-				<div class="status-card">
-					<div class="status-label">{{ TEXT.baseline }}</div>
-					<div class="status-value">{{ engine.siteCalibrationBaseline.statusText }}</div>
-				</div>
-				<div class="status-card">
-					<div class="status-label">{{ TEXT.controlTargets }}</div>
-					<div class="status-value">{{ engine.siteCalibrationBaseline.controlTargetCount }}</div>
-				</div>
-				<div class="status-card">
-					<div class="status-label">{{ TEXT.localization }}</div>
-					<div class="status-value">{{ engine.runtimeStatus }}</div>
-				</div>
-				<div class="status-card">
-					<div class="status-label">{{ TEXT.gpsFallback }}</div>
-					<div class="status-value">{{ engine.gpsBiasCorrection.usingInSession ? TEXT.gpsFallbackTip : '-' }}</div>
-				</div>
-			</section>
 
 			<section class="scene-shell">
 				<div ref="canvasHost" class="scene-layer"></div>
@@ -200,50 +152,43 @@ onMounted( () => {
 
 				<div v-if="!hasArSession" class="launch-overlay">
 					<div class="launch-badge">AR</div>
-					<div class="launch-title">{{ TEXT.startArTitle }}</div>
-					<p class="launch-subtitle">{{ TEXT.startArSub }}</p>
+					<div class="launch-title">{{ TEXT.enterArTitle }}</div>
+					<p class="launch-subtitle">{{ TEXT.enterArSub }}</p>
+					<label class="model-field">
+						<span>{{ TEXT.selectModel }}</span>
+						<select class="select-field" :value="engine.selectedModelId" @change="handleModelChange">
+							<option v-for="model in engine.availableModels" :key="model.id" :value="model.id">
+								{{ model.name }}
+							</option>
+						</select>
+					</label>
 					<button type="button" class="launch-button" @click.stop="startArSession">
 						{{ TEXT.enterAr }}
 					</button>
 				</div>
 			</section>
 
-			<section class="manual-help">
-				<div class="section-title">{{ TEXT.fallbackManual }}</div>
-				<p>{{ TEXT.manualHelp }}</p>
-				<div class="action-row">
-					<button type="button" class="action-button" @click="store.actions.startCurrentSessionMarkerCalibration()">
-						{{ TEXT.fallbackManual }}
-					</button>
-					<button type="button" class="action-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
-						{{ TEXT.captureCorner }}
-					</button>
-					<button type="button" class="action-button primary" @click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()">
-						{{ TEXT.solveApply }}
-					</button>
-					<button type="button" class="action-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
-						{{ TEXT.resetMarker }}
-					</button>
-				</div>
-			</section>
+			<div v-if="sliderVisible" class="side-slider">
+				<input v-model="sliderValue" class="side-slider-range" type="range" min="0" max="100" step="1" />
+			</div>
 
 			<button type="button" class="panel-toggle" @click.stop="togglePanel">
 				{{ ui.drawerOpen ? TEXT.collapsePanel : TEXT.expandPanel }}
 			</button>
 		</div>
 
-		<div v-if="sliderVisible" class="side-slider">
-			<input v-model="sliderValue" class="side-slider-range" type="range" min="0" max="100" step="1" />
-		</div>
-
 		<div class="floating-tools">
+			<button type="button" class="tool-button" @click.stop="openCalibrationPanel">
+				<span class="tool-icon">校</span>
+				<span class="tool-text">{{ TEXT.calibrationTool }}</span>
+			</button>
 			<button type="button" class="tool-button" @click.stop="store.actions.takeSnapshot()">
 				<span class="tool-icon">拍</span>
 				<span class="tool-text">{{ TEXT.takeSnapshot }}</span>
 			</button>
-			<button type="button" class="tool-button tool-primary" @click.stop="store.actions.saveInspectionRecord()">
-				<span class="tool-icon">存</span>
-				<span class="tool-text">{{ TEXT.saveInspection }}</span>
+			<button type="button" class="tool-button tool-primary" @click.stop="store.actions.activatePanel('inspection')">
+				<span class="tool-icon">记</span>
+				<span class="tool-text">{{ TEXT.inspectionRecord }}</span>
 			</button>
 			<button type="button" class="tool-button" @click.stop="exitPage">
 				<span class="tool-icon">退</span>
@@ -279,7 +224,7 @@ onMounted( () => {
 
 				<template v-if="engine.workspaceMode === 'browse'">
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.displayMode }}</div>
+						<div class="section-label">{{ TEXT.viewMode }}</div>
 						<div class="chip-grid">
 							<button
 								v-for="item in DISPLAY_MODE_OPTIONS"
@@ -311,36 +256,27 @@ onMounted( () => {
 					</div>
 
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.stage }}</div>
+						<div class="section-label">{{ TEXT.manualCalibration }}</div>
 						<div class="chip-grid">
-							<button
-								v-for="(stage, index) in engine.timelineStages"
-								:key="stage"
-								type="button"
-								class="chip-button"
-								:class="{ active: engine.currentTimelineStageIndex === index }"
-								@click="store.actions.setTimelineStage(index)"
-							>
-								{{ stage }}
+							<button type="button" class="chip-button" @click="store.actions.startCurrentSessionMarkerCalibration()">
+								{{ TEXT.startCalibration }}
 							</button>
-						</div>
-					</div>
-
-					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.propertyInfo }}</div>
-						<div class="property-card">
-							<div class="property-title">{{ engine.propertyPanel.name }}</div>
-							<div class="property-row"><span>类型</span><strong>{{ engine.propertyPanel.type }}</strong></div>
-							<div class="property-row"><span>材质</span><strong>{{ engine.propertyPanel.material }}</strong></div>
-							<div class="property-row"><span>状态</span><strong>{{ engine.propertyPanel.status }}</strong></div>
-							<p class="property-remark">{{ engine.propertyPanel.remark || TEXT.propertyHint }}</p>
+							<button type="button" class="chip-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
+								{{ TEXT.captureCorner }}
+							</button>
+							<button type="button" class="chip-button active" @click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()">
+								{{ TEXT.solveApply }}
+							</button>
+							<button type="button" class="chip-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
+								{{ TEXT.resetCalibration }}
+							</button>
 						</div>
 					</div>
 				</template>
 
 				<template v-else>
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.inspectionSummary }}</div>
+						<div class="section-label">{{ TEXT.inspectionRecord }}</div>
 						<div class="form-grid">
 							<label class="field">
 								<span>{{ TEXT.inspectionResult }}</span>
@@ -404,10 +340,8 @@ onMounted( () => {
 }
 
 .page-header {
-	display: flex;
-	align-items: flex-start;
-	justify-content: space-between;
-	gap: 12px;
+	display: grid;
+	gap: 8px;
 }
 
 .page-title {
@@ -416,18 +350,16 @@ onMounted( () => {
 }
 
 .page-subtitle {
-	margin-top: 6px;
 	font-size: 13px;
 	line-height: 1.6;
-	color: rgba(210, 225, 255, 0.7);
+	color: rgba(210, 225, 255, 0.72);
 }
 
-.page-model,
-.top-chip {
+.status-chip {
 	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-	padding: 6px 12px;
+	max-width: 100%;
+	padding: 8px 12px;
 	border-radius: 999px;
 	border: 1px solid rgba(69, 208, 255, 0.24);
 	background: rgba(0, 212, 255, 0.08);
@@ -435,67 +367,9 @@ onMounted( () => {
 	color: #bff3ff;
 }
 
-.chip-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-	margin-top: 14px;
-}
-
-.model-card,
-.manual-help,
-.status-grid {
-	margin-top: 16px;
-}
-
-.section-title,
-.status-label {
-	font-size: 12px;
-	font-weight: 600;
-	color: rgba(226, 236, 255, 0.88);
-}
-
-.select-field {
-	width: 100%;
-	margin-top: 10px;
-	padding: 12px 14px;
-	border-radius: 14px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	background: rgba(255, 255, 255, 0.04);
-	color: #eff6ff;
-}
-
-.status-grid {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 10px;
-}
-
-.status-card,
-.manual-help,
-.model-card {
-	padding: 14px;
-	border-radius: 18px;
-	border: 1px solid rgba(69, 208, 255, 0.18);
-	background: rgba(8, 14, 24, 0.86);
-}
-
-.status-value {
-	margin-top: 8px;
-	font-size: 14px;
-	font-weight: 600;
-}
-
-.manual-help p {
-	margin: 8px 0 0;
-	font-size: 12px;
-	line-height: 1.7;
-	color: rgba(210, 225, 255, 0.72);
-}
-
 .scene-shell {
 	position: relative;
-	height: min(46vh, 420px);
+	height: min(52vh, 500px);
 	margin-top: 18px;
 	border-radius: 24px;
 	overflow: hidden;
@@ -525,7 +399,7 @@ onMounted( () => {
 	align-items: center;
 	justify-content: center;
 	padding: 24px;
-	background: linear-gradient(180deg, rgba(8, 13, 24, 0.72), rgba(8, 13, 24, 0.44));
+	background: linear-gradient(180deg, rgba(8, 13, 24, 0.78), rgba(8, 13, 24, 0.56));
 	backdrop-filter: blur(10px);
 	text-align: center;
 	z-index: 5;
@@ -551,10 +425,32 @@ onMounted( () => {
 
 .launch-subtitle {
 	margin: 10px 0 0;
-	max-width: 420px;
+	max-width: 360px;
 	font-size: 13px;
 	line-height: 1.6;
 	color: rgba(220, 234, 255, 0.76);
+}
+
+.model-field {
+	display: grid;
+	gap: 8px;
+	width: min(320px, 100%);
+	margin-top: 18px;
+	text-align: left;
+}
+
+.model-field span {
+	font-size: 12px;
+	color: rgba(210, 225, 255, 0.72);
+}
+
+.select-field {
+	width: 100%;
+	padding: 12px 14px;
+	border-radius: 14px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	background: rgba(255, 255, 255, 0.06);
+	color: #eff6ff;
 }
 
 .launch-button,
@@ -707,45 +603,11 @@ onMounted( () => {
 	color: rgba(226, 236, 255, 0.88);
 }
 
-.chip-grid,
-.action-row {
+.chip-grid {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
 	margin-top: 10px;
-}
-
-.property-card {
-	margin-top: 10px;
-	padding: 12px;
-	border-radius: 16px;
-	background: rgba(255, 255, 255, 0.04);
-	border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.property-title {
-	font-size: 15px;
-	font-weight: 700;
-}
-
-.property-row {
-	display: flex;
-	justify-content: space-between;
-	gap: 10px;
-	margin-top: 8px;
-	font-size: 12px;
-	color: rgba(225, 236, 255, 0.74);
-}
-
-.property-row strong {
-	color: #fff;
-}
-
-.property-remark {
-	margin: 10px 0 0;
-	font-size: 11px;
-	line-height: 1.55;
-	color: rgba(210, 225, 255, 0.64);
 }
 
 .form-grid {
@@ -780,6 +642,13 @@ onMounted( () => {
 	color: #eff6ff;
 }
 
+.action-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-top: 14px;
+}
+
 .sheet-fade-enter-active,
 .sheet-fade-leave-active {
 	transition: opacity 0.22s ease, transform 0.22s ease;
@@ -796,17 +665,11 @@ onMounted( () => {
 		font-size: 21px;
 	}
 
-	.page-model {
-		max-width: 42%;
-		font-size: 11px;
-	}
-
 	.launch-title {
 		font-size: 22px;
 	}
 
-	.form-grid,
-	.status-grid {
+	.form-grid {
 		grid-template-columns: 1fr;
 	}
 
