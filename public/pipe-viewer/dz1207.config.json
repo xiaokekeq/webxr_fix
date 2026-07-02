@@ -1,0 +1,81 @@
+{
+  "modelId": "dz1207",
+  "siteFrame": {
+    "origin": {
+      "lng": 118.735937335447,
+      "lat": 31.9399836566532,
+      "height": 39.5
+    },
+    "axes": "enu"
+  },
+  "anchor": {
+    "lng": 118.735937335447,
+    "lat": 31.9399836566532,
+    "height": 39.5
+  },
+  "yaw": 0,
+  "scale": 1,
+  "registration": {
+    "mode": "rigid",
+    "minControlPoints": 3
+  },
+  "controlPoints": {
+    "CP_01": {
+      "modelLocal": {
+        "x": -2.182275,
+webview-panel:webview-panel/webview-markdown.preview-28052127-ff0a-49b5-96d4-4b9f6fbf3231        "y": 0.067804,
+        "z": 0.802388
+      },
+      "world": {
+        "lng": 118.735937335447,
+        "lat": 31.9399836566532,
+        "height": 39.5
+      }
+    },
+    "CP_02": {
+      "modelLocal": {
+        "x": 2.056397,
+        "y": 0.067804,
+        "z": 0.876878
+      },
+      "world": {
+        "lng": 118.735937887078,
+        "lat": 31.9399561338513,
+        "height": 39.5
+      }
+    },
+    "CP_03": {
+      "modelLocal": {
+        "x": 2.081138,
+        "y": 0.031047,
+        "z": -0.811129
+      },
+      "world": {
+        "lng": 118.735942808114,
+        "lat": 31.9399696317561,
+        "height": 39.5
+      }
+    },
+    "CP_04": {
+      "modelLocal": {
+        "x": -2.157534,
+        "y": 0.031047,
+        "z": -0.885617
+      },
+      "world": {
+        "lng": 118.735933373185,
+        "lat": 31.9399729506,
+        "height": 39.5
+      }
+    }
+  },
+  "markers": [
+    {
+      "id": "dike-marker-001",
+      "bindControlPointId": "CP_01",
+      "sizeMeters": 0.2,
+      "yawDeg": 0
+    }
+  ],
+  "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json"
+}
