@@ -5,61 +5,84 @@ import AppTabBar from '../components/AppTabBar.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS,
-	getDisplayModeLabel
+	getDisplayModeLabel,
+	getDisplayModeSliderValueText
 } from '@/features/ar/types/display-modes.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
+import type { ManualAdjustmentPreset } from '@/localization/manual/manual-registration.js';
+
+type CalibrationPanelView = 'placement' | 'display' | 'calibration';
 
 const TEXT = {
 	title: '现场基准配置',
-	subtitle: '本功能用于建立现场基准。系统不会保存本次 AR 会话的临时坐标矩阵，只保存可复用的工程基准信息。',
-	unknownModel: '未选择站点',
-	enterAr: '进入 AR 配置',
-	saveBaseline: '保存现场基准配置',
-	placeModel: '手动场景定位',
-	placeHitTest: '临时放置模型',
-	exitAr: '退出配置',
-	markerDebug: '打开调试页（Debug）',
-	resetPlacement: '重置放置',
-	currentModel: '站点 / 模型',
-	baselineSummary: '现场基准',
-	sessionStatus: '当前会话状态',
+	enterArTitle: '进入 AR 配准',
+	enterArSub: '先选择模型，再进入 AR 完成放置、微调和现场基准保存。',
+	enterAr: '进入 AR',
+	selectModel: '选择模型',
+	status: '状态',
+	waiting: '待进入 AR',
+	scanning: '正在识别平面',
+	ready: '可开始放置',
+	placing: '正在放置模型',
+	placed: '配准中',
+	placement: '放置',
+	display: '视图',
+	calibration: '校准',
+	exit: '退出',
+	closePanel: '收起面板',
 	placementMode: '放置方式',
-	displayMode: '显示模式',
-	projectStage: '工程阶段',
-	sectionPlane: '剖切方向',
-	coarseRegistration: '粗定位准备',
-	gpsBiasCorrection: 'GPS 偏差记录',
-	markerCorrection: '控制标志校正',
-	markerStatus: '控制标志状态',
-	localizationSource: '当前定位来源',
-	runtimeStatus: '运行状态',
-	arSupport: 'AR 支持',
-	refreshGps: '刷新 GPS',
-	enableCoarse: '启用粗定位',
-	saveGpsBias: '记录 GPS 偏差',
-	clearGpsBias: '清除 GPS 偏差',
-	gpsBiasWarning: '该补偿仅用于后续巡查中的粗定位 fallback，不代表精确配准。',
-	refreshMarker: '刷新调试结果',
-	startCollect: '手动四角点校正',
-	captureCorner: '采集当前角点',
-	solveApply: '求解并应用',
-	resetMarker: '重置角点',
-	clearMarker: '清除当前校正',
 	placementLocalized: '按定位固定',
 	placementTemporary: '临时放到平面',
-	savedAvailable: '已保存',
-	savedUnavailable: '未保存',
-	supportAvailable: '可用',
-	supportChecking: '检测中',
-	supportUnavailable: '不可用',
-	startArTitle: '点击进入 AR 配置',
-	startArSub: '在当前 AR 会话里完成模型放置、控制标志校正、手动场景定位和 GPS 偏差记录。',
+	placeModel: '手动场景定位',
+	placeHitTest: '放到识别平面',
+	resetPlacement: '重置放置',
+	placementSummary: '当前放置',
+	displayMode: '查看模式',
+	sectionPlane: '剖切方向',
+	projectStage: '工程阶段',
+	markerCalibration: '控制标志校准',
+	startCollect: '开始校准',
+	captureCorner: '采集角点',
+	solveApply: '完成校准',
+	resetMarker: '重置角点',
+	clearMarker: '清除校准',
 	cornersCollected: '已采集角点',
 	nextCorner: '下一角点',
-	controlTargetCount: '控制标志数量',
-	baselineGpsBias: 'GPS 偏差基准',
-	currentMode: '工作模式'
+	manualAdjustment: '手动微调',
+	finePreset: '细调',
+	mediumPreset: '中调',
+	coarsePreset: '粗调',
+	xAxis: 'X 轴',
+	yAxis: 'Y 轴',
+	zAxis: 'Z 轴',
+	yaw: '旋转',
+	scale: '缩放',
+	negative: '减',
+	positive: '加',
+	saveManual: '保存微调',
+	resetManual: '重置微调',
+	clearSavedManual: '清除已存微调',
+	gpsBias: 'GPS 偏差',
+	refreshGps: '刷新 GPS',
+	enableCoarse: '启用粗定位',
+	saveGpsBias: '记录当前位置',
+	clearGpsBias: '清除记录',
+	saveBaseline: '保存现场基准',
+	markerDebug: '调试页',
+	unknownModel: '未选择站点'
 } as const;
+
+const PANEL_OPTIONS: Array<{ value: CalibrationPanelView; label: string }> = [
+	{ value: 'placement', label: TEXT.placement },
+	{ value: 'display', label: TEXT.display },
+	{ value: 'calibration', label: TEXT.calibration }
+];
+
+const MANUAL_PRESET_OPTIONS: Array<{ value: ManualAdjustmentPreset; label: string }> = [
+	{ value: 'fine', label: TEXT.finePreset },
+	{ value: 'medium', label: TEXT.mediumPreset },
+	{ value: 'coarse', label: TEXT.coarsePreset }
+];
 
 const route = useRoute();
 const router = useRouter();
@@ -67,30 +90,21 @@ const store = useArShellStore();
 
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
+const activePanelView = ref<CalibrationPanelView>( 'placement' );
 
 const engine = computed( () => store.engine );
+const ui = computed( () => store.ui );
+const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
 const currentModelName = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
 );
-const placementModeLabel = computed( () =>
-	engine.value.placementMode === 'hit-test-temporary'
-		? TEXT.placementTemporary
-		: TEXT.placementLocalized
-);
-const arSupportLabel = computed( () => {
-	switch ( engine.value.arSupportState ) {
-		case 'supported':
-			return TEXT.supportAvailable;
-		case 'checking':
-			return TEXT.supportChecking;
-		default:
-			return TEXT.supportUnavailable;
-	}
-} );
 const sliderVisible = computed(
-	() => engine.value.displayMode === 'transparent-xray'
-		|| engine.value.displayMode === 'layer-peeling'
-		|| engine.value.displayMode === 'section-cut'
+	() => hasArSession.value
+		&& (
+			engine.value.displayMode === 'transparent-xray'
+			|| engine.value.displayMode === 'layer-peeling'
+			|| engine.value.displayMode === 'section-cut'
+		)
 );
 const sliderValue = computed<number>( {
 	get() {
@@ -109,13 +123,27 @@ const sliderValue = computed<number>( {
 		store.actions.setStructureRevealValue( value );
 	}
 } );
+const sliderText = computed( () =>
+	getDisplayModeSliderValueText( engine.value.displayMode, sliderValue.value )
+);
+const sessionStatusText = computed( () => {
+	if ( hasArSession.value === false ) {
+		return TEXT.waiting;
+	}
 
-const sessionCards = computed( () => [
-	{ label: TEXT.currentMode, value: engine.value.workflowMode },
-	{ label: TEXT.localizationSource, value: engine.value.registrationChainDebug.arSessionLocalization.source || 'unknown' },
-	{ label: TEXT.runtimeStatus, value: engine.value.runtimeStatus },
-	{ label: TEXT.markerStatus, value: engine.value.savedMarkerLocalization.available ? 'debug-only' : TEXT.savedUnavailable }
-]);
+	switch ( engine.value.arSessionPhase ) {
+		case 'scanning':
+			return TEXT.scanning;
+		case 'ready-to-place':
+			return TEXT.ready;
+		case 'placing':
+			return TEXT.placing;
+		case 'placed':
+			return TEXT.placed;
+		default:
+			return engine.value.runtimeStatus;
+	}
+} );
 
 async function mountEngineHosts(): Promise<void> {
 	await store.initialize();
@@ -146,6 +174,23 @@ function handleModelChange(event: Event): void {
 	store.actions.selectModel( target.value );
 }
 
+function openPanel(view: CalibrationPanelView): void {
+	if ( ui.value.drawerOpen && activePanelView.value === view ) {
+		store.actions.toggleDrawer();
+		return;
+	}
+
+	activePanelView.value = view;
+	store.actions.activatePanel( 'registration' );
+}
+
+function activatePanelView(view: CalibrationPanelView): void {
+	activePanelView.value = view;
+	if ( ui.value.drawerOpen === false ) {
+		store.actions.activatePanel( 'registration' );
+	}
+}
+
 function openMarkerDebug(): void {
 	void router.push( '/marker-debug' );
 }
@@ -153,265 +198,367 @@ function openMarkerDebug(): void {
 onMounted( () => {
 	void mountEngineHosts();
 	store.actions.setWorkflowMode( 'site-baseline-config' );
-	store.actions.activatePanel( 'registration' );
 } );
 </script>
 
 <template>
-	<div class="calibration-page" @click="store.actions.handleArUiInteraction()">
+	<div class="calibration-page" :class="{ 'ar-active': hasArSession }" @click="store.actions.handleArUiInteraction()">
 		<div class="page-scroll">
-			<header class="hero-card">
-				<div class="hero-main">
-					<div>
-						<div class="hero-title">{{ TEXT.title }}</div>
-						<div class="hero-subtitle">{{ TEXT.subtitle }}</div>
-					</div>
-					<div class="hero-badge">{{ currentModelName }}</div>
+			<header class="page-header">
+				<div>
+					<div class="page-title">{{ TEXT.title }}</div>
+					<div class="page-subtitle">{{ currentModelName }}</div>
 				</div>
-				<div class="hero-chips">
-					<span class="hero-chip">{{ TEXT.arSupport }} {{ arSupportLabel }}</span>
-					<span class="hero-chip">{{ TEXT.currentMode }} {{ engine.workflowMode }}</span>
-					<span class="hero-chip">{{ TEXT.displayMode }} {{ getDisplayModeLabel(engine.displayMode) }}</span>
-				</div>
+				<div class="status-chip">{{ TEXT.status }}：{{ sessionStatusText }}</div>
 			</header>
 
 			<section class="scene-shell">
 				<div ref="canvasHost" class="scene-layer"></div>
 				<div ref="xrButtonHost" class="scene-hidden"></div>
 
-				<div v-if="engine.appMode !== 'ar-session'" class="launch-overlay">
+				<div v-if="!hasArSession" class="launch-overlay">
 					<div class="launch-badge">AR</div>
-					<div class="launch-title">{{ TEXT.startArTitle }}</div>
-					<p class="launch-subtitle">{{ TEXT.startArSub }}</p>
-					<button type="button" class="launch-button" @click.stop="startArSession">
-						{{ TEXT.enterAr }}
-					</button>
+					<div class="launch-title">{{ TEXT.enterArTitle }}</div>
+					<p class="launch-subtitle">{{ TEXT.enterArSub }}</p>
+					<label class="model-field">
+						<span>{{ TEXT.selectModel }}</span>
+						<select class="select-field" :value="engine.selectedModelId" @change="handleModelChange">
+							<option v-for="model in engine.availableModels" :key="model.id" :value="model.id">
+								{{ model.name }}
+							</option>
+						</select>
+					</label>
+					<div class="launch-actions">
+						<button type="button" class="launch-button" @click.stop="startArSession">
+							{{ TEXT.enterAr }}
+						</button>
+						<button type="button" class="secondary-button" @click.stop="openMarkerDebug">
+							{{ TEXT.markerDebug }}
+						</button>
+					</div>
+				</div>
+			</section>
+
+			<section v-if="!hasArSession" class="summary-card">
+				<div class="summary-grid">
+					<div class="summary-item">
+						<span>现场基准</span>
+						<strong>{{ engine.siteCalibrationBaseline.statusText }}</strong>
+					</div>
+					<div class="summary-item">
+						<span>控制点</span>
+						<strong>{{ engine.siteCalibrationBaseline.controlTargetCount }}</strong>
+					</div>
+					<div class="summary-item">
+						<span>GPS 偏差</span>
+						<strong>{{ engine.siteCalibrationBaseline.gpsBiasAvailable ? '已保存' : '未保存' }}</strong>
+					</div>
+					<div class="summary-item">
+						<span>显示模式</span>
+						<strong>{{ getDisplayModeLabel(engine.displayMode) }}</strong>
+					</div>
 				</div>
 			</section>
 
 			<div v-if="sliderVisible" class="side-slider">
+				<div class="side-slider-text">{{ sliderText }}</div>
 				<input v-model="sliderValue" class="side-slider-range" type="range" min="0" max="100" step="1" />
 			</div>
-
-			<section class="action-row">
-				<button type="button" class="action-button primary" @click="startArSession">
-					{{ TEXT.enterAr }}
-				</button>
-				<button type="button" class="action-button primary" @click="store.actions.saveSiteCalibrationBaseline()">
-					{{ TEXT.saveBaseline }}
-				</button>
-				<button
-					v-if="engine.appMode === 'ar-session'"
-					type="button"
-					class="action-button"
-					@click="store.actions.placeModel()"
-				>
-					{{ TEXT.placeModel }}
-				</button>
-				<button
-					v-if="engine.appMode === 'ar-session'"
-					type="button"
-					class="action-button"
-					@click="store.actions.placeModelAtHitTest()"
-				>
-					{{ TEXT.placeHitTest }}
-				</button>
-				<button type="button" class="action-button" @click="store.actions.saveGpsBiasCorrectionFromCurrentPose()">
-					{{ TEXT.saveGpsBias }}
-				</button>
-				<button type="button" class="action-button" @click="openMarkerDebug">
-					{{ TEXT.markerDebug }}
-				</button>
-				<button
-					v-if="engine.appMode === 'ar-session'"
-					type="button"
-					class="action-button"
-					@click="store.actions.exitAr()"
-				>
-					{{ TEXT.exitAr }}
-				</button>
-				<button type="button" class="action-button" @click="store.actions.resetPlacement()">
-					{{ TEXT.resetPlacement }}
-				</button>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.currentModel }}</div>
-				<select class="select-field" :value="engine.selectedModelId" @change="handleModelChange">
-					<option v-for="model in engine.availableModels" :key="model.id" :value="model.id">
-						{{ model.name }}
-					</option>
-				</select>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.baselineSummary }}</div>
-				<div class="status-grid">
-					<div class="status-card">
-						<div class="status-label">状态</div>
-						<div class="status-value">{{ engine.siteCalibrationBaseline.statusText }}</div>
-					</div>
-					<div class="status-card">
-						<div class="status-label">{{ TEXT.controlTargetCount }}</div>
-						<div class="status-value">{{ engine.siteCalibrationBaseline.controlTargetCount }}</div>
-					</div>
-					<div class="status-card">
-						<div class="status-label">{{ TEXT.baselineGpsBias }}</div>
-						<div class="status-value">{{ engine.siteCalibrationBaseline.gpsBiasAvailable ? TEXT.savedAvailable : TEXT.savedUnavailable }}</div>
-					</div>
-					<div class="status-card">
-						<div class="status-label">更新时间</div>
-						<div class="status-value">{{ engine.siteCalibrationBaseline.updatedAtText }}</div>
-					</div>
-				</div>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.sessionStatus }}</div>
-				<div class="status-grid">
-					<div v-for="item in sessionCards" :key="item.label" class="status-card">
-						<div class="status-label">{{ item.label }}</div>
-						<div class="status-value">{{ item.value }}</div>
-					</div>
-				</div>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.placementMode }}</div>
-				<div class="chip-grid">
-					<button
-						type="button"
-						class="chip-button"
-						:class="{ active: engine.placementMode === 'localized' }"
-						@click="store.actions.setPlacementMode('localized')"
-					>
-						{{ TEXT.placementLocalized }}
-					</button>
-					<button
-						type="button"
-						class="chip-button"
-						:class="{ active: engine.placementMode === 'hit-test-temporary' }"
-						@click="store.actions.setPlacementMode('hit-test-temporary')"
-					>
-						{{ TEXT.placementTemporary }}
-					</button>
-				</div>
-				<div class="helper-text">{{ placementModeLabel }}</div>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.displayMode }}</div>
-				<div class="chip-grid">
-					<button
-						v-for="item in DISPLAY_MODE_OPTIONS"
-						:key="item.value"
-						type="button"
-						class="chip-button"
-						:class="{ active: engine.displayMode === item.value }"
-						@click="store.actions.setDisplayMode(item.value)"
-					>
-						{{ item.label }}
-					</button>
-				</div>
-			</section>
-
-			<section v-if="engine.displayMode === 'section-cut'" class="panel-card">
-				<div class="panel-title">{{ TEXT.sectionPlane }}</div>
-				<div class="chip-grid">
-					<button
-						v-for="item in SECTION_CUT_PLANE_MODE_OPTIONS"
-						:key="item.value"
-						type="button"
-						class="chip-button"
-						:class="{ active: engine.sectionCutPlaneMode === item.value }"
-						@click="store.actions.setSectionCutPlaneMode(item.value)"
-					>
-						{{ item.label }}
-					</button>
-				</div>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.projectStage }}</div>
-				<div class="chip-grid">
-					<button
-						v-for="(stage, index) in engine.timelineStages"
-						:key="stage"
-						type="button"
-						class="chip-button"
-						:class="{ active: engine.currentTimelineStageIndex === index }"
-						@click="store.actions.setTimelineStage(index)"
-					>
-						{{ stage }}
-					</button>
-				</div>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.coarseRegistration }}</div>
-				<div class="chip-grid">
-					<button type="button" class="chip-button" @click="store.actions.refreshGeoLocation()">
-						{{ TEXT.refreshGps }}
-					</button>
-					<button type="button" class="chip-button active" @click="store.actions.enableCoarseRegistration()">
-						{{ TEXT.enableCoarse }}
-					</button>
-				</div>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.gpsBiasCorrection }}</div>
-				<div class="marker-meta">
-					<div>状态：{{ engine.gpsBiasCorrection.statusText }}</div>
-					<div>来源：{{ engine.gpsBiasCorrection.source || '-' }}</div>
-					<div>delta ENU：{{ engine.gpsBiasCorrection.deltaEnuText }}</div>
-					<div>更新时间：{{ engine.gpsBiasCorrection.updatedAtText }}</div>
-				</div>
-				<div class="helper-text">{{ TEXT.gpsBiasWarning }}</div>
-				<div class="chip-grid">
-					<button type="button" class="chip-button" @click="store.actions.refreshGeoLocation()">
-						{{ TEXT.refreshGps }}
-					</button>
-					<button type="button" class="chip-button active" @click="store.actions.saveGpsBiasCorrectionFromCurrentPose()">
-						{{ TEXT.saveGpsBias }}
-					</button>
-					<button type="button" class="chip-button" @click="store.actions.clearGpsBiasCorrection()">
-						{{ TEXT.clearGpsBias }}
-					</button>
-				</div>
-			</section>
-
-			<section class="panel-card">
-				<div class="panel-title">{{ TEXT.markerCorrection }}</div>
-				<div class="marker-meta">
-					<div>{{ TEXT.markerStatus }}：{{ engine.savedMarkerLocalization.available ? 'debug-only' : TEXT.savedUnavailable }}</div>
-					<div>{{ TEXT.cornersCollected }}：{{ engine.markerCalibration.capturedCornerCount }}/{{ engine.markerCalibration.expectedCornerCount }}</div>
-					<div>{{ TEXT.nextCorner }}：{{ engine.markerCalibration.nextCornerLabel || '-' }}</div>
-				</div>
-				<div class="chip-grid">
-					<button type="button" class="chip-button" @click="store.actions.refreshSavedMarkerLocalization()">
-						{{ TEXT.refreshMarker }}
-					</button>
-					<button type="button" class="chip-button" @click="store.actions.startCurrentSessionMarkerCalibration()">
-						{{ TEXT.startCollect }}
-					</button>
-					<button type="button" class="chip-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
-						{{ TEXT.captureCorner }}
-					</button>
-					<button type="button" class="chip-button active" @click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()">
-						{{ TEXT.solveApply }}
-					</button>
-					<button type="button" class="chip-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
-						{{ TEXT.resetMarker }}
-					</button>
-					<button type="button" class="chip-button" @click="store.actions.clearMarkerLocalizationCorrection()">
-						{{ TEXT.clearMarker }}
-					</button>
-				</div>
-			</section>
 		</div>
 
-		<AppTabBar />
+		<nav v-if="hasArSession" class="action-dock" aria-label="AR 配准操作">
+			<button type="button" class="dock-item" @click.stop="openPanel('placement')">
+				<span class="dock-icon">放</span>
+				<span class="dock-label">{{ TEXT.placement }}</span>
+			</button>
+			<button type="button" class="dock-item" @click.stop="openPanel('display')">
+				<span class="dock-icon">视</span>
+				<span class="dock-label">{{ TEXT.display }}</span>
+			</button>
+			<button type="button" class="dock-item dock-item-primary" @click.stop="openPanel('calibration')">
+				<span class="dock-icon">准</span>
+				<span class="dock-label">{{ TEXT.calibration }}</span>
+			</button>
+			<button type="button" class="dock-item" @click.stop="store.actions.exitAr()">
+				<span class="dock-icon">退</span>
+				<span class="dock-label">{{ TEXT.exit }}</span>
+			</button>
+		</nav>
+
+		<transition name="sheet-fade">
+			<section v-if="hasArSession && ui.drawerOpen" class="bottom-sheet">
+				<div class="sheet-header">
+					<div class="sheet-tabs">
+						<button
+							v-for="item in PANEL_OPTIONS"
+							:key="item.value"
+							type="button"
+							class="sheet-tab"
+							:class="{ active: activePanelView === item.value }"
+							@click="activatePanelView(item.value)"
+						>
+							{{ item.label }}
+						</button>
+					</div>
+					<button type="button" class="sheet-close" @click="store.actions.toggleDrawer()">
+						{{ TEXT.closePanel }}
+					</button>
+				</div>
+
+				<template v-if="activePanelView === 'placement'">
+					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.placementMode }}</div>
+						<div class="chip-grid">
+							<button
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.placementMode === 'localized' }"
+								@click="store.actions.setPlacementMode('localized')"
+							>
+								{{ TEXT.placementLocalized }}
+							</button>
+							<button
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.placementMode === 'hit-test-temporary' }"
+								@click="store.actions.setPlacementMode('hit-test-temporary')"
+							>
+								{{ TEXT.placementTemporary }}
+							</button>
+						</div>
+					</div>
+
+					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.placementSummary }}</div>
+						<div class="info-grid">
+							<div class="info-card">
+								<span>位置</span>
+								<strong>{{ engine.placementSummary.positionText }}</strong>
+							</div>
+							<div class="info-card">
+								<span>旋转</span>
+								<strong>{{ engine.placementSummary.quaternionText }}</strong>
+							</div>
+							<div class="info-card">
+								<span>缩放</span>
+								<strong>{{ engine.placementSummary.scaleText }}</strong>
+							</div>
+							<div class="info-card">
+								<span>定位来源</span>
+								<strong>{{ engine.registrationChainDebug.arSessionLocalization.source || '-' }}</strong>
+							</div>
+						</div>
+						<div class="action-row">
+							<button type="button" class="action-button primary" @click="store.actions.placeModel()">
+								{{ TEXT.placeModel }}
+							</button>
+							<button type="button" class="action-button" @click="store.actions.placeModelAtHitTest()">
+								{{ TEXT.placeHitTest }}
+							</button>
+							<button type="button" class="action-button" @click="store.actions.resetPlacement()">
+								{{ TEXT.resetPlacement }}
+							</button>
+						</div>
+					</div>
+				</template>
+
+				<template v-else-if="activePanelView === 'display'">
+					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.displayMode }}</div>
+						<div class="chip-grid">
+							<button
+								v-for="item in DISPLAY_MODE_OPTIONS"
+								:key="item.value"
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.displayMode === item.value }"
+								@click="store.actions.setDisplayMode(item.value)"
+							>
+								{{ item.label }}
+							</button>
+						</div>
+					</div>
+
+					<div v-if="engine.displayMode === 'section-cut'" class="sheet-section">
+						<div class="section-label">{{ TEXT.sectionPlane }}</div>
+						<div class="chip-grid">
+							<button
+								v-for="item in SECTION_CUT_PLANE_MODE_OPTIONS"
+								:key="item.value"
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.sectionCutPlaneMode === item.value }"
+								@click="store.actions.setSectionCutPlaneMode(item.value)"
+							>
+								{{ item.label }}
+							</button>
+						</div>
+					</div>
+
+					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.projectStage }}</div>
+						<div class="chip-grid">
+							<button
+								v-for="(stage, index) in engine.timelineStages"
+								:key="stage"
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.currentTimelineStageIndex === index }"
+								@click="store.actions.setTimelineStage(index)"
+							>
+								{{ stage }}
+							</button>
+						</div>
+					</div>
+				</template>
+
+				<template v-else>
+					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.markerCalibration }}</div>
+						<div class="info-grid">
+							<div class="info-card">
+								<span>{{ TEXT.cornersCollected }}</span>
+								<strong>{{ engine.markerCalibration.capturedCornerCount }}/{{ engine.markerCalibration.expectedCornerCount }}</strong>
+							</div>
+							<div class="info-card">
+								<span>{{ TEXT.nextCorner }}</span>
+								<strong>{{ engine.markerCalibration.nextCornerLabel || '-' }}</strong>
+							</div>
+						</div>
+						<div class="chip-grid">
+							<button type="button" class="chip-button" @click="store.actions.startCurrentSessionMarkerCalibration()">
+								{{ TEXT.startCollect }}
+							</button>
+							<button type="button" class="chip-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
+								{{ TEXT.captureCorner }}
+							</button>
+							<button type="button" class="chip-button active" @click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()">
+								{{ TEXT.solveApply }}
+							</button>
+							<button type="button" class="chip-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
+								{{ TEXT.resetMarker }}
+							</button>
+							<button type="button" class="chip-button" @click="store.actions.clearMarkerLocalizationCorrection()">
+								{{ TEXT.clearMarker }}
+							</button>
+						</div>
+					</div>
+
+					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.manualAdjustment }}</div>
+						<div class="chip-grid">
+							<button
+								v-for="item in MANUAL_PRESET_OPTIONS"
+								:key="item.value"
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.manualAdjustmentPreset === item.value }"
+								@click="store.actions.setManualAdjustmentPreset(item.value)"
+							>
+								{{ item.label }}
+							</button>
+						</div>
+						<div class="info-grid">
+							<div class="info-card wide">
+								<span>位置偏移</span>
+								<strong>{{ engine.manualReadout.positionText }}</strong>
+							</div>
+							<div class="info-card">
+								<span>旋转</span>
+								<strong>{{ engine.manualReadout.yawText }}</strong>
+							</div>
+							<div class="info-card">
+								<span>缩放</span>
+								<strong>{{ engine.manualReadout.scaleText }}</strong>
+							</div>
+						</div>
+						<div class="adjust-grid">
+							<div class="adjust-row">
+								<span>{{ TEXT.xAxis }}</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('x', -1)">{{ TEXT.negative }}</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('x', 1)">{{ TEXT.positive }}</button>
+							</div>
+							<div class="adjust-row">
+								<span>{{ TEXT.yAxis }}</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('y', -1)">{{ TEXT.negative }}</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('y', 1)">{{ TEXT.positive }}</button>
+							</div>
+							<div class="adjust-row">
+								<span>{{ TEXT.zAxis }}</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('z', -1)">{{ TEXT.negative }}</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('z', 1)">{{ TEXT.positive }}</button>
+							</div>
+							<div class="adjust-row">
+								<span>{{ TEXT.yaw }}</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustYaw(-1)">{{ TEXT.negative }}</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustYaw(1)">{{ TEXT.positive }}</button>
+							</div>
+							<div class="adjust-row">
+								<span>{{ TEXT.scale }}</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustScale(-1)">{{ TEXT.negative }}</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustScale(1)">{{ TEXT.positive }}</button>
+							</div>
+						</div>
+						<div class="action-row">
+							<button type="button" class="action-button primary" @click="store.actions.saveManualRegistration()">
+								{{ TEXT.saveManual }}
+							</button>
+							<button type="button" class="action-button" @click="store.actions.resetManualRegistration()">
+								{{ TEXT.resetManual }}
+							</button>
+							<button type="button" class="action-button" @click="store.actions.clearSavedRegistration()">
+								{{ TEXT.clearSavedManual }}
+							</button>
+						</div>
+					</div>
+
+					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.gpsBias }}</div>
+						<div class="info-grid">
+							<div class="info-card wide">
+								<span>状态</span>
+								<strong>{{ engine.gpsBiasCorrection.statusText }}</strong>
+							</div>
+							<div class="info-card">
+								<span>偏差</span>
+								<strong>{{ engine.gpsBiasCorrection.deltaEnuText }}</strong>
+							</div>
+							<div class="info-card">
+								<span>更新时间</span>
+								<strong>{{ engine.gpsBiasCorrection.updatedAtText }}</strong>
+							</div>
+						</div>
+						<div class="action-row">
+							<button type="button" class="action-button" @click="store.actions.refreshGeoLocation()">
+								{{ TEXT.refreshGps }}
+							</button>
+							<button type="button" class="action-button" @click="store.actions.enableCoarseRegistration()">
+								{{ TEXT.enableCoarse }}
+							</button>
+							<button type="button" class="action-button" @click="store.actions.saveGpsBiasCorrectionFromCurrentPose()">
+								{{ TEXT.saveGpsBias }}
+							</button>
+							<button type="button" class="action-button" @click="store.actions.clearGpsBiasCorrection()">
+								{{ TEXT.clearGpsBias }}
+							</button>
+						</div>
+					</div>
+
+					<div class="sheet-section">
+						<div class="action-row">
+							<button type="button" class="action-button primary" @click="store.actions.saveSiteCalibrationBaseline()">
+								{{ TEXT.saveBaseline }}
+							</button>
+							<button type="button" class="action-button" @click="openMarkerDebug">
+								{{ TEXT.markerDebug }}
+							</button>
+						</div>
+					</div>
+				</template>
+			</section>
+		</transition>
+
+		<AppTabBar v-if="!hasArSession" />
 	</div>
 </template>
 
@@ -422,68 +569,70 @@ onMounted( () => {
 	color: #eff6ff;
 }
 
+.calibration-page.ar-active {
+	background: transparent;
+}
+
 .page-scroll {
-	padding: max(16px, env(safe-area-inset-top)) 16px calc(98px + env(safe-area-inset-bottom));
+	position: relative;
+	padding: max(16px, env(safe-area-inset-top)) 16px calc(102px + env(safe-area-inset-bottom));
 }
 
-.hero-card,
-.panel-card,
-.scene-shell {
-	border-radius: 20px;
-	background: rgba(12, 22, 36, 0.9);
-	border: 1px solid rgba(94, 194, 255, 0.12);
-	box-shadow: 0 16px 30px rgba(0, 0, 0, 0.18);
+.calibration-page.ar-active .page-scroll {
+	padding: max(12px, env(safe-area-inset-top)) 12px calc(110px + env(safe-area-inset-bottom));
 }
 
-.hero-card {
-	padding: 18px;
-	margin-bottom: 14px;
-}
-
-.hero-main {
+.page-header {
+	position: relative;
+	z-index: 22;
 	display: flex;
-	align-items: flex-start;
+	align-items: center;
 	justify-content: space-between;
 	gap: 12px;
 }
 
-.hero-title {
+.page-title {
 	font-size: 24px;
 	font-weight: 700;
 }
 
-.hero-subtitle {
-	margin-top: 6px;
-	font-size: 13px;
-	line-height: 1.6;
-	color: rgba(210, 225, 255, 0.7);
+.page-subtitle {
+	margin-top: 4px;
+	font-size: 12px;
+	color: rgba(210, 225, 255, 0.72);
 }
 
-.hero-badge,
-.hero-chip {
+.status-chip {
 	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-	padding: 6px 12px;
+	padding: 8px 12px;
 	border-radius: 999px;
 	border: 1px solid rgba(69, 208, 255, 0.24);
 	background: rgba(0, 212, 255, 0.08);
 	font-size: 12px;
 	color: #bff3ff;
-}
-
-.hero-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-	margin-top: 14px;
+	backdrop-filter: blur(10px);
 }
 
 .scene-shell {
 	position: relative;
-	height: min(42vh, 380px);
+	height: min(52vh, 500px);
+	margin-top: 18px;
+	border-radius: 24px;
 	overflow: hidden;
-	margin-bottom: 14px;
+	border: 1px solid rgba(69, 208, 255, 0.18);
+	background: rgba(8, 14, 24, 0.86);
+}
+
+.calibration-page.ar-active .scene-shell {
+	position: fixed;
+	inset: 0;
+	height: 100dvh;
+	margin-top: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	z-index: 1;
 }
 
 .scene-layer,
@@ -497,6 +646,7 @@ onMounted( () => {
 	width: 0;
 	height: 0;
 	overflow: hidden;
+	pointer-events: none;
 }
 
 .launch-overlay {
@@ -507,9 +657,9 @@ onMounted( () => {
 	align-items: center;
 	justify-content: center;
 	padding: 24px;
-	text-align: center;
-	background: linear-gradient(180deg, rgba(8, 13, 24, 0.72), rgba(8, 13, 24, 0.44));
+	background: linear-gradient(180deg, rgba(8, 13, 24, 0.78), rgba(8, 13, 24, 0.56));
 	backdrop-filter: blur(10px);
+	text-align: center;
 	z-index: 5;
 }
 
@@ -527,41 +677,174 @@ onMounted( () => {
 
 .launch-title {
 	margin-top: 16px;
-	font-size: 26px;
+	font-size: 28px;
 	font-weight: 700;
 }
 
 .launch-subtitle {
 	margin: 10px 0 0;
-	max-width: 420px;
+	max-width: 360px;
 	font-size: 13px;
 	line-height: 1.6;
 	color: rgba(220, 234, 255, 0.76);
 }
 
+.model-field {
+	display: grid;
+	gap: 8px;
+	width: min(320px, 100%);
+	margin-top: 18px;
+	text-align: left;
+}
+
+.model-field span {
+	font-size: 12px;
+	color: rgba(210, 225, 255, 0.72);
+}
+
+.select-field {
+	width: 100%;
+	padding: 12px 14px;
+	border-radius: 14px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	background: rgba(255, 255, 255, 0.06);
+	color: #eff6ff;
+}
+
+.launch-actions,
+.action-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+}
+
+.launch-actions {
+	margin-top: 18px;
+	justify-content: center;
+}
+
 .launch-button,
+.secondary-button,
+.dock-item,
+.sheet-tab,
+.sheet-close,
+.chip-button,
 .action-button,
-.chip-button {
+.adjust-button {
 	border: 0;
 }
 
-.launch-button {
-	margin-top: 18px;
+.launch-button,
+.secondary-button {
 	padding: 12px 22px;
 	border-radius: 999px;
-	background: #11c9ff;
-	color: #031019;
 	font-size: 14px;
 	font-weight: 700;
 }
 
+.launch-button,
+.action-button.primary,
+.dock-item-primary,
+.chip-button.active,
+.sheet-tab.active {
+	background: rgba(0, 212, 255, 0.16);
+	border-color: rgba(0, 212, 255, 0.34);
+	color: #fff;
+}
+
+.launch-button {
+	background: #11c9ff;
+	color: #031019;
+}
+
+.secondary-button,
+.sheet-tab,
+.sheet-close,
+.chip-button,
+.action-button,
+.adjust-button {
+	padding: 10px 14px;
+	border-radius: 14px;
+	background: rgba(255, 255, 255, 0.04);
+	color: rgba(225, 236, 255, 0.74);
+	font-size: 12px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.summary-card {
+	margin-top: 16px;
+	padding: 16px;
+	border-radius: 22px;
+	background: rgba(12, 22, 36, 0.9);
+	border: 1px solid rgba(94, 194, 255, 0.12);
+	box-shadow: 0 16px 30px rgba(0, 0, 0, 0.18);
+}
+
+.summary-grid,
+.info-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.summary-item,
+.info-card {
+	padding: 12px;
+	border-radius: 16px;
+	background: rgba(255, 255, 255, 0.04);
+	border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.summary-item span,
+.info-card span {
+	display: block;
+	font-size: 11px;
+	color: rgba(210, 225, 255, 0.64);
+}
+
+.summary-item strong,
+.info-card strong {
+	display: block;
+	margin-top: 6px;
+	font-size: 13px;
+	font-weight: 600;
+	word-break: break-word;
+}
+
+.info-card.wide {
+	grid-column: 1 / -1;
+}
+
 .side-slider {
 	position: fixed;
-	right: 6px;
-	top: 52%;
+	right: 8px;
+	top: 50%;
 	transform: translateY(-50%);
-	z-index: 28;
+	z-index: 34;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 8px;
+	border-radius: 18px;
+	background: rgba(7, 12, 21, 0.74);
+	backdrop-filter: blur(16px);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
 	pointer-events: none;
+}
+
+.side-slider-text {
+	min-width: 92px;
+	padding: 6px 10px;
+	border-radius: 999px;
+	background: rgba(0, 212, 255, 0.12);
+	color: #d8f8ff;
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+	text-align: center;
+	white-space: nowrap;
 }
 
 .side-slider-range {
@@ -574,105 +857,159 @@ onMounted( () => {
 	pointer-events: auto;
 }
 
-.action-row {
+.action-dock {
+	position: fixed;
+	left: 12px;
+	right: 12px;
+	bottom: calc(12px + env(safe-area-inset-bottom));
+	z-index: 36;
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	grid-template-columns: repeat(4, minmax(0, 1fr));
 	gap: 10px;
-	margin-bottom: 14px;
-}
-
-.action-button,
-.chip-button {
-	padding: 12px 14px;
-	border-radius: 14px;
-	background: rgba(255, 255, 255, 0.04);
-	color: rgba(225, 236, 255, 0.74);
-	font-size: 12px;
+	padding: 10px;
+	border-radius: 22px;
+	background: rgba(7, 12, 21, 0.88);
+	backdrop-filter: blur(18px);
 	border: 1px solid rgba(255, 255, 255, 0.08);
+	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
 }
 
-.action-button.primary,
-.chip-button.active {
-	background: rgba(0, 212, 255, 0.16);
-	border-color: rgba(0, 212, 255, 0.34);
-	color: #fff;
-}
-
-.panel-card {
-	padding: 16px;
-	margin-bottom: 14px;
-}
-
-.panel-title {
-	font-size: 15px;
-	font-weight: 700;
-	margin-bottom: 12px;
-}
-
-.select-field {
-	width: 100%;
-	padding: 12px 14px;
-	border-radius: 14px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
+.dock-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 54px;
+	border-radius: 16px;
 	background: rgba(255, 255, 255, 0.04);
-	color: #f3f8ff;
-}
-
-.status-grid {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 10px;
-}
-
-.status-card {
-	padding: 12px;
-	border-radius: 14px;
-	background: rgba(255, 255, 255, 0.04);
+	color: rgba(225, 236, 255, 0.78);
 	border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.status-label {
-	font-size: 11px;
-	color: rgba(210, 225, 255, 0.64);
+.dock-icon {
+	font-size: 15px;
+	font-weight: 700;
+	line-height: 1;
 }
 
-.status-value {
-	margin-top: 6px;
-	font-size: 14px;
+.dock-label {
+	font-size: 11px;
+	line-height: 1;
+}
+
+.bottom-sheet {
+	position: fixed;
+	left: 12px;
+	right: 12px;
+	bottom: calc(96px + env(safe-area-inset-bottom));
+	z-index: 38;
+	max-height: 58vh;
+	padding: 14px;
+	overflow-y: auto;
+	border-radius: 24px;
+	background: rgba(10, 16, 28, 0.94);
+	backdrop-filter: blur(22px);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
+}
+
+.sheet-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 10px;
+}
+
+.sheet-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.sheet-section + .sheet-section {
+	margin-top: 14px;
+	padding-top: 14px;
+	border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.section-label {
+	font-size: 12px;
 	font-weight: 600;
+	color: rgba(226, 236, 255, 0.88);
 }
 
 .chip-grid {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
+	margin-top: 10px;
 }
 
-.helper-text,
-.marker-meta {
-	margin-top: 10px;
+.adjust-grid {
+	display: grid;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.adjust-row {
+	display: grid;
+	grid-template-columns: minmax(64px, 1fr) 72px 72px;
+	gap: 8px;
+	align-items: center;
+}
+
+.adjust-row span {
 	font-size: 12px;
-	line-height: 1.6;
-	color: rgba(210, 225, 255, 0.68);
+	color: rgba(220, 234, 255, 0.84);
+}
+
+.sheet-fade-enter-active,
+.sheet-fade-leave-active {
+	transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.sheet-fade-enter-from,
+.sheet-fade-leave-to {
+	opacity: 0;
+	transform: translateY(10px);
 }
 
 @media (max-width: 420px) {
-	.hero-title {
+	.page-title {
 		font-size: 21px;
 	}
 
-	.hero-badge {
-		max-width: 42%;
-		font-size: 11px;
+	.launch-title {
+		font-size: 22px;
 	}
 
-	.action-row,
-	.status-grid {
+	.summary-grid,
+	.info-grid {
 		grid-template-columns: 1fr;
+	}
+
+	.side-slider {
+		right: 4px;
+		padding: 10px 6px;
 	}
 
 	.side-slider-range {
 		width: 152px;
+	}
+
+	.action-dock {
+		gap: 8px;
+		padding: 8px;
+	}
+
+	.bottom-sheet {
+		bottom: calc(92px + env(safe-area-inset-bottom));
+	}
+
+	.adjust-row {
+		grid-template-columns: 1fr 1fr 1fr;
 	}
 }
 </style>
