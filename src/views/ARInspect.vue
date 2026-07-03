@@ -11,7 +11,7 @@ import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 const TEXT = {
 	title: '堤防 AR 巡查',
 	enterArTitle: '进入 AR 巡查',
-	enterArSub: '当前模型选择仅用于调试，后续可由入口默认带入。',
+	enterArSub: '当前模型选择仅用于调试阶段，后续可由业务入口自动带入。',
 	enterAr: '进入 AR',
 	selectModel: '选择模型',
 	status: '状态',
@@ -20,10 +20,10 @@ const TEXT = {
 	ready: '可开始放置',
 	placing: '正在放置模型',
 	placed: '巡查中',
-	viewMode: '查看模式',
+	viewMode: '模型显示',
 	inspectionRecord: '巡查记录',
 	collapsePanel: '收起面板',
-	browseMode: '查看模式',
+	browseMode: '显示控制',
 	inspectionMode: '巡查记录',
 	sectionPlane: '剖切方向',
 	inspectionResult: '结果',
@@ -34,7 +34,7 @@ const TEXT = {
 	exportRecords: '导出记录',
 	takeSnapshot: '截屏',
 	exit: '退出',
-	panelTool: '面板',
+	panelTool: '控制',
 	unknownModel: '未选择模型'
 } as const;
 

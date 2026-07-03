@@ -25,32 +25,34 @@ const TEXT = {
 	ready: '可开始放置',
 	placing: '正在放置模型',
 	placed: '配准中',
-	placement: '放置',
-	display: '视图',
-	calibration: '校准',
-	exit: '退出',
-	closePanel: '收起面板',
-	placementMode: '放置方式',
-	placementLocalized: '按定位固定',
-	placementTemporary: '临时放到平面',
-	placeModel: '手动场景定位',
-	placeHitTest: '放到识别平面',
-	resetPlacement: '重置放置',
-	placementSummary: '当前放置',
-	displayMode: '查看模式',
+	placement: '模型放置',
+	display: '显示控制',
+	calibration: '空间校准',
+	exit: '退出 AR',
+	panelTool: '控制面板',
+	closePanel: '收起',
+	placementMode: '放置策略',
+	placementLocalized: '按配准定位放置',
+	placementTemporary: '按识别平面临放',
+	placeModel: '应用配准放置',
+	placeHitTest: '应用平面临放',
+	resetPlacement: '清除当前放置',
+	placementSummary: '模型放置结果',
+	placementHint: '应用配准放置：基于当前粗配准或精确配准结果，将模型固定到现场坐标。',
+	displayMode: '模型显示',
 	sectionPlane: '剖切方向',
-	projectStage: '工程阶段',
-	panelStatus: '当前状态',
-	markerCalibration: '控制标志校准',
-	precisionCalibration: '精确配准',
-	startCollect: '开始校准',
-	captureCorner: '采集角点',
-	solveApply: '完成校准',
+	projectStage: '阶段筛选',
+	panelStatus: '会话状态',
+	markerCalibration: '角点采集说明',
+	precisionCalibration: '控制标志精配',
+	startCollect: '开始角点采集',
+	captureCorner: '记录当前角点',
+	solveApply: '解算并应用精配',
 	resetMarker: '重置角点',
-	clearMarker: '清除校准',
-	cornersCollected: '已采集角点',
-	nextCorner: '下一角点',
-	manualAdjustment: '手动微调',
+	clearMarker: '清除精配结果',
+	cornersCollected: '已记录角点',
+	nextCorner: '待记录角点',
+	manualAdjustment: '放置微调',
 	finePreset: '细调',
 	mediumPreset: '中调',
 	coarsePreset: '粗调',
@@ -61,16 +63,16 @@ const TEXT = {
 	scale: '缩放',
 	negative: '减',
 	positive: '加',
-	saveManual: '保存微调',
-	resetManual: '重置微调',
+	saveManual: '保存本次微调结果',
+	resetManual: '重置本次微调',
 	clearSavedManual: '清除已存微调',
-	gpsBias: 'GPS 偏差',
-	refreshGps: '刷新 GPS',
+	gpsBias: '粗配准与 GPS 补偿',
+	refreshGps: '刷新定位',
 	enableCoarse: '启用粗配准',
-	saveGpsBias: '记录当前位置',
-	clearGpsBias: '清除记录',
+	saveGpsBias: '记录 GPS 补偿',
+	clearGpsBias: '清除 GPS 补偿',
 	saveBaseline: '保存现场基准',
-	markerDebug: '调试页',
+	markerDebug: '打开诊断页',
 	unknownModel: '未选择站点'
 } as const;
 
@@ -95,6 +97,7 @@ const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<CalibrationPanelView>( 'placement' );
 
 const engine = computed( () => store.engine );
+const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
 const currentModelName = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
@@ -102,9 +105,9 @@ const currentModelName = computed(
 const runtimeStatusText = computed( () => engine.value.runtimeStatus );
 const panelStatusCards = computed( () => [
 	{ label: '运行状态', value: engine.value.runtimeStatus },
-	{ label: '配准状态', value: engine.value.registrationStatusDetail },
-	{ label: '粗配准', value: engine.value.coarseLocationDebugText },
-	{ label: '定位来源', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' }
+	{ label: '放置状态', value: engine.value.registrationStatusDetail },
+	{ label: '粗配准诊断', value: engine.value.coarseLocationDebugText },
+	{ label: '空间定位来源', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' }
 ] );
 const sliderVisible = computed(
 	() => hasArSession.value
@@ -184,6 +187,15 @@ function handleModelChange(event: Event): void {
 
 function activatePanelView(view: CalibrationPanelView): void {
 	activePanelView.value = view;
+}
+
+function toggleWorkspacePanel(): void {
+	if ( ui.value.drawerOpen ) {
+		store.actions.toggleDrawer();
+		return;
+	}
+
+	store.actions.activatePanel( 'registration' );
 }
 
 async function handleEnableCoarseRegistration(): Promise<void> {
@@ -294,7 +306,12 @@ onMounted( () => {
 		</div>
 
 		<transition name="sheet-fade">
-			<section v-if="hasArSession" class="bottom-sheet" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
+			<section
+				v-if="hasArSession && ui.drawerOpen"
+				class="bottom-sheet"
+				@pointerdown.stop="store.actions.handleArUiInteraction()"
+				@click.stop
+			>
 				<div class="sheet-header">
 					<div class="sheet-tabs">
 						<button
@@ -308,6 +325,9 @@ onMounted( () => {
 							{{ item.label }}
 						</button>
 					</div>
+					<button type="button" class="sheet-close" @click="store.actions.toggleDrawer()">
+						{{ TEXT.closePanel }}
+					</button>
 				</div>
 
 				<div class="sheet-section sheet-section-first">
@@ -348,22 +368,23 @@ onMounted( () => {
 						<div class="section-label">{{ TEXT.placementSummary }}</div>
 						<div class="info-grid">
 							<div class="info-card">
-								<span>位置</span>
+								<span>放置位置</span>
 								<strong>{{ engine.placementSummary.positionText }}</strong>
 							</div>
 							<div class="info-card">
-								<span>旋转</span>
+								<span>放置姿态</span>
 								<strong>{{ engine.placementSummary.quaternionText }}</strong>
 							</div>
 							<div class="info-card">
-								<span>缩放</span>
+								<span>模型缩放</span>
 								<strong>{{ engine.placementSummary.scaleText }}</strong>
 							</div>
 							<div class="info-card">
-								<span>定位来源</span>
+								<span>空间定位来源</span>
 								<strong>{{ engine.registrationChainDebug.arSessionLocalization.source || '-' }}</strong>
 							</div>
 						</div>
+						<div class="runtime-banner">{{ TEXT.placementHint }}</div>
 						<div class="action-row">
 							<button type="button" class="action-button primary" @click="store.actions.placeModel()">
 								{{ TEXT.placeModel }}
@@ -476,15 +497,15 @@ onMounted( () => {
 						</div>
 						<div class="info-grid">
 							<div class="info-card wide">
-								<span>位置偏移</span>
+								<span>平移偏移</span>
 								<strong>{{ engine.manualReadout.positionText }}</strong>
 							</div>
 							<div class="info-card">
-								<span>旋转</span>
+								<span>航向修正</span>
 								<strong>{{ engine.manualReadout.yawText }}</strong>
 							</div>
 							<div class="info-card">
-								<span>缩放</span>
+								<span>比例修正</span>
 								<strong>{{ engine.manualReadout.scaleText }}</strong>
 							</div>
 						</div>
@@ -532,8 +553,8 @@ onMounted( () => {
 						<div class="section-label">{{ TEXT.markerCalibration }}</div>
 						<div class="info-grid">
 							<div class="info-card wide">
-								<span>提示</span>
-								<strong>先点开始校准，再依次采集 4 个角点，最后点完成校准。</strong>
+								<span>操作顺序</span>
+								<strong>先开始采集，再按左上、右上、右下、左下顺序记录 4 个角点，最后执行解算并应用。</strong>
 							</div>
 						</div>
 					</div>
@@ -542,15 +563,15 @@ onMounted( () => {
 						<div class="section-label">{{ TEXT.gpsBias }}</div>
 						<div class="info-grid">
 							<div class="info-card wide">
-								<span>状态</span>
+								<span>补偿状态</span>
 								<strong>{{ engine.gpsBiasCorrection.statusText }}</strong>
 							</div>
 							<div class="info-card">
-								<span>偏差</span>
+								<span>ENU 偏差</span>
 								<strong>{{ engine.gpsBiasCorrection.deltaEnuText }}</strong>
 							</div>
 							<div class="info-card">
-								<span>更新时间</span>
+								<span>最近更新</span>
 								<strong>{{ engine.gpsBiasCorrection.updatedAtText }}</strong>
 							</div>
 						</div>
@@ -583,6 +604,23 @@ onMounted( () => {
 				</template>
 			</section>
 		</transition>
+
+		<nav
+			v-if="hasArSession"
+			class="action-dock action-dock-compact"
+			aria-label="AR 配准操作"
+			@pointerdown.stop="store.actions.handleArUiInteraction()"
+			@click.stop
+		>
+			<button type="button" class="dock-item dock-item-primary" @click.stop="toggleWorkspacePanel">
+				<span class="dock-icon">板</span>
+				<span class="dock-label">{{ TEXT.panelTool }}</span>
+			</button>
+			<button type="button" class="dock-item" @click.stop="store.actions.exitAr()">
+				<span class="dock-icon">退</span>
+				<span class="dock-label">{{ TEXT.exit }}</span>
+			</button>
+		</nav>
 
 		<AppTabBar v-if="!hasArSession" />
 	</div>
@@ -751,7 +789,9 @@ onMounted( () => {
 
 .launch-button,
 .secondary-button,
+.dock-item,
 .sheet-tab,
+.sheet-close,
 .chip-button,
 .action-button,
 .adjust-button {
@@ -782,6 +822,7 @@ onMounted( () => {
 }
 
 .secondary-button,
+.sheet-close,
 .sheet-tab,
 .chip-button,
 .action-button,
@@ -880,11 +921,62 @@ onMounted( () => {
 	pointer-events: auto;
 }
 
-.bottom-sheet {
+.action-dock {
 	position: fixed;
 	left: 12px;
 	right: 12px;
 	bottom: calc(12px + env(safe-area-inset-bottom));
+	z-index: 36;
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+	padding: 10px;
+	border-radius: 22px;
+	background: rgba(7, 12, 21, 0.88);
+	backdrop-filter: blur(18px);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
+.action-dock-compact {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dock-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 54px;
+	border-radius: 16px;
+	background: rgba(255, 255, 255, 0.04);
+	color: rgba(225, 236, 255, 0.78);
+	border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dock-item-primary {
+	background: rgba(0, 212, 255, 0.16);
+	border-color: rgba(0, 212, 255, 0.32);
+	color: #fff;
+}
+
+.dock-icon {
+	font-size: 15px;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.dock-label {
+	font-size: 11px;
+	line-height: 1;
+}
+
+.bottom-sheet {
+	position: fixed;
+	left: 12px;
+	right: 12px;
+	bottom: calc(92px + env(safe-area-inset-bottom));
 	z-index: 38;
 	height: min(58vh, 520px);
 	padding: 14px;
@@ -997,7 +1089,13 @@ onMounted( () => {
 		width: 152px;
 	}
 
+	.action-dock {
+		gap: 8px;
+		padding: 8px;
+	}
+
 	.bottom-sheet {
+		bottom: calc(88px + env(safe-area-inset-bottom));
 		height: min(62vh, 540px);
 	}
 
