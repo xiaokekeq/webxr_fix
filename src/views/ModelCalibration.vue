@@ -26,7 +26,7 @@ const TEXT = {
 	scanning: '正在识别平面',
 	ready: '可开始放置',
 	placing: '正在放置模型',
-	placed: '配准中',
+	placed: '模型已放置',
 	placement: '模型放置',
 	display: '显示控制',
 	calibration: '空间校准',
@@ -365,7 +365,7 @@ onMounted( () => {
 						<div class="section-label">{{ TEXT.placementActions }}</div>
 						<div class="runtime-banner">应用配准放置会基于当前配准结果固定模型；应用平面临放仅按当前识别平面临时放置。</div>
 						<div class="action-row">
-							<button type="button" class="action-button primary" @click="handleApplyLocalizedPlacement()">
+							<button type="button" class="action-button" @click="handleApplyLocalizedPlacement()">
 								{{ TEXT.placeModel }}
 							</button>
 							<button type="button" class="action-button" @click="handleApplyHitTestPlacement()">
