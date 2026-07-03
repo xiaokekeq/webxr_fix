@@ -8,11 +8,20 @@ import type {
 	ArWorkflowMode,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
+import { getControlTargetImageUrl, isPattFileUrl } from '@/localization/baseline/site-calibration-baseline.js';
 
 const AUTO_MARKER_STABLE_FRAME_COUNT = 3;
 const AUTO_MARKER_MAX_POSITION_JITTER_METERS = 0.15;
 const AUTO_MARKER_MAX_ROTATION_JITTER_DEGREES = 5;
 const AUTO_MARKER_FALLBACK_TIMEOUT_MS = 8000;
+
+const STATUS_SCAN_PLANE_AND_ALIGN_MARKER = '请先扫描平面，然后对准现场控制标志。';
+const STATUS_AUTO_TRACKING_MARKER = '正在自动识别控制标志...';
+const STATUS_STABILIZING_MARKER = '已识别控制标志，正在稳定定位...';
+const STATUS_MANUAL_NO_TRACKED_IMAGE = '当前站点未配置可追踪控制标志图片，请使用手动四角点校正。';
+const STATUS_MANUAL_UNSUPPORTED = '当前设备不支持自动识别，请使用手动四角点校正。';
+const STATUS_MANUAL_IMAGE_LOAD_FAILED = '控制标志图片加载失败，请检查 marker 配置。';
+const STATUS_SCAN_PLANE_AND_MANUAL = '请先扫描平面，然后开始手动四角点校正。';
 
 interface InspectionMarkerWorkflowOptions {
 	getWorkflowMode(): ArWorkflowMode;
@@ -56,9 +65,32 @@ export class InspectionMarkerWorkflow {
 			return [];
 		}
 
-		return this.options.getControlTargets()
+		const siteId = this.options.getSiteId();
+		const trackedImages = this.options.getControlTargets()
 			.flatMap( ( target ) => {
-				if ( typeof target.imageUrl !== 'string' || target.imageUrl.length === 0 ) {
+				const imageUrl = getControlTargetImageUrl( target );
+				if ( imageUrl === null ) {
+					if ( typeof target.patternUrl === 'string' && isPattFileUrl( target.patternUrl ) ) {
+						console.warn( '[MarkerImageUrlInvalidPattFile]', {
+							mode: this.options.getWorkflowMode(),
+							siteId: siteId ?? null,
+							sessionId: this.options.getCurrentSessionId(),
+							targetId: target.id,
+							imageUrl: target.imageUrl ?? null,
+							patternUrl: target.patternUrl,
+							createdAt: Date.now()
+						} );
+					} else {
+						console.warn( '[MarkerImageUrlMissing]', {
+							mode: this.options.getWorkflowMode(),
+							siteId: siteId ?? null,
+							sessionId: this.options.getCurrentSessionId(),
+							targetId: target.id,
+							imageUrl: target.imageUrl ?? null,
+							patternUrl: target.patternUrl ?? null,
+							createdAt: Date.now()
+						} );
+					}
 					return [];
 				}
 
@@ -69,10 +101,44 @@ export class InspectionMarkerWorkflow {
 
 				return [ {
 					targetId: target.id,
-					imageUrl: target.imageUrl,
-					widthInMeters
+					siteId: siteId ?? undefined,
+					markerId: target.id,
+					imageUrl,
+					patternUrl: target.patternUrl ?? imageUrl,
+					widthInMeters,
+					trackingWidthMeters: target.trackingWidthMeters,
+					sizeMeters: target.sizeMeters
 				} ];
 			} );
+		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
+			if ( trackedImages.length === 0 ) {
+				console.info( '[ArInspectionTrackedImagesEmpty]', {
+					mode: this.options.getWorkflowMode(),
+					siteId: siteId ?? null,
+					sessionId: this.options.getCurrentSessionId(),
+					targetId: null,
+					source: 'marker-auto-image',
+					trackedImagesCount: 0,
+					createdAt: Date.now()
+				} );
+			} else {
+				for ( const trackedImage of trackedImages ) {
+					console.info( '[ArInspectionTrackedImagePrepared]', {
+						mode: this.options.getWorkflowMode(),
+						siteId: siteId ?? null,
+						sessionId: this.options.getCurrentSessionId(),
+						targetId: trackedImage.targetId,
+						source: 'marker-auto-image',
+						imageUrl: trackedImage.imageUrl,
+						patternUrl: trackedImage.patternUrl ?? null,
+						trackedImagesCount: trackedImages.length,
+						createdAt: Date.now()
+					} );
+				}
+			}
+		}
+
+		return trackedImages;
 
 	}
 
@@ -106,7 +172,11 @@ export class InspectionMarkerWorkflow {
 			hasHitTest: this.options.hasGroundHit(),
 			createdAt: Date.now()
 		} ) );
-		this.options.setStatus( '请先扫描平面，然后对准现场控制标志。' );
+		this.options.setStatus(
+			trackedImages.length > 0
+				? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
+				: STATUS_MANUAL_NO_TRACKED_IMAGE
+		);
 
 	}
 
@@ -186,15 +256,24 @@ export class InspectionMarkerWorkflow {
 		if ( state.requested && state.supported && state.active ) {
 			this.options.setStatus(
 				this.options.hasGroundHit()
-					? '正在自动识别控制标志...'
-					: '请先扫描平面，然后对准现场控制标志。'
+					? STATUS_AUTO_TRACKING_MARKER
+					: STATUS_SCAN_PLANE_AND_ALIGN_MARKER
 			);
+			return;
+		}
+
+		if ( state.reason === 'image-load-failed' && this.fallbackTriggered === false ) {
+			this.fallbackToManual( STATUS_MANUAL_IMAGE_LOAD_FAILED );
 			return;
 		}
 
 		if (
 			state.requested
-			&& ( state.supported === false || state.reason === 'frame-api-missing' )
+			&& (
+				state.supported === false
+				|| state.reason === 'frame-api-missing'
+				|| state.reason === 'create-image-bitmap-unavailable'
+			)
 			&& this.fallbackTriggered === false
 		) {
 			console.info( '[AutoMarkerImageTrackingUnsupported]', this.buildLogPayload( {
@@ -205,7 +284,7 @@ export class InspectionMarkerWorkflow {
 				hasHitTest: this.options.hasGroundHit(),
 				createdAt: Date.now()
 			} ) );
-			this.fallbackToManual( '当前设备不支持自动识别，已切换为手动四角点校正。' );
+			this.fallbackToManual( STATUS_MANUAL_UNSUPPORTED );
 		}
 
 	}
@@ -255,8 +334,8 @@ export class InspectionMarkerWorkflow {
 		} ) );
 		this.options.setStatus(
 			this.stableFrameCount >= AUTO_MARKER_STABLE_FRAME_COUNT
-				? '已识别控制标志，正在稳定定位...'
-				: '正在自动识别控制标志...'
+				? STATUS_STABILIZING_MARKER
+				: STATUS_AUTO_TRACKING_MARKER
 		);
 
 		if ( this.samples.length < AUTO_MARKER_STABLE_FRAME_COUNT ) {
@@ -306,8 +385,8 @@ export class InspectionMarkerWorkflow {
 			if ( this.options.hasPlacedModel() === false ) {
 				this.options.setStatus(
 					this.imageTrackingState.requested
-						? '请先扫描平面，然后对准现场控制标志。'
-						: '请先扫描平面，然后开始手动四角点校正。'
+						? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
+						: STATUS_SCAN_PLANE_AND_MANUAL
 				);
 			}
 		} else if ( hasGroundHit === false ) {
@@ -321,7 +400,7 @@ export class InspectionMarkerWorkflow {
 			&& Date.now() - this.startedAt >= AUTO_MARKER_FALLBACK_TIMEOUT_MS
 			&& this.lastObservationAt === 0
 		) {
-			this.fallbackToManual( '当前设备未能识别控制标志，已切换为手动四角点校正。' );
+			this.fallbackToManual( STATUS_MANUAL_UNSUPPORTED );
 		}
 
 	}

@@ -23,7 +23,7 @@
     "CP_01": {
       "modelLocal": {
         "x": -2.182275,
-webview-panel:webview-panel/webview-markdown.preview-28052127-ff0a-49b5-96d4-4b9f6fbf3231        "y": 0.067804,
+        "y": 0.067804,
         "z": 0.802388
       },
       "world": {
@@ -74,7 +74,9 @@ webview-panel:webview-panel/webview-markdown.preview-28052127-ff0a-49b5-96d4-4b9
       "id": "dike-marker-001",
       "bindControlPointId": "CP_01",
       "sizeMeters": 0.2,
-      "yawDeg": 0
+      "trackingWidthMeters": 0.2,
+      "yawDeg": 0,
+      "patternUrl": "/pipe-viewer/markers/dz1207-control-marker.png"
     }
   ],
   "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json"

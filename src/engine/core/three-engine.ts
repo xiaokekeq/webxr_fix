@@ -105,16 +105,17 @@ import {
 } from '@/engine/inspection/marker-calibration-runtime.js';
 import { ManualRegistrationWorkflow } from '@/engine/placement/manual-registration-workflow.js';
 import { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
-import {
-	loadSiteCalibrationBaseline,
-	saveSiteCalibrationBaseline
-} from '@/features/ar/storage/site-calibration-baseline.js';
+import { getControlTargetImageUrl, isPattFileUrl } from '@/localization/baseline/site-calibration-baseline.js';
 import type {
 	ArWorkflowMode,
 	SiteCalibrationBaseline,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
+import type { ArSessionContext } from '@/features/ar/types/ar-session-context.js';
 import { formatGeodetic } from '@/features/ar/utils/formatters.js';
+import { repositories } from '@/services/repository-factory.js';
+import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
+import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
 
 const MAX_LOG_ITEMS = 24;
 
@@ -269,10 +270,13 @@ export class ThreeEngine {
 	private activeSiteCalibrationBaseline: SiteCalibrationBaseline | null = null;
 	private activeMarkerLocalizationResult: SavedMarkerLocalizationResult | null = null;
 	private markerCorrectionFallbackArFromEnuSolution: ArFromEnuSolution | null = null;
+	private currentArSessionContext: ArSessionContext | null = null;
 	private currentArSessionId: string | null = null;
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
 	private currentModelDebugTargetGeodetic: GeodeticCoordinate | null = null;
 	private lastAnnotationLabelsSignature = '';
+	private lastArSessionContextLogSignature = '';
+	private siteBaselineLoadRequestId = 0;
 	private pipesByName = new Map<string, PipeRecord>();
 	private coarseRegistration = createCoarseRegistrationController( {
 		setStatus: ( message ) => {
@@ -421,8 +425,8 @@ export class ThreeEngine {
 			getWorkflowMode: () => this.workflowMode,
 			getCurrentSessionId: () => this.currentArSessionId,
 			getSiteId: () => this.demoModelConfig?.modelId ?? null,
-			getControlTargets: () => this.activeSiteCalibrationBaseline?.controlTargets ?? [],
-			getPrimaryTargetId: () => this.activeSiteCalibrationBaseline?.controlTargets[ 0 ]?.id ?? null,
+			getControlTargets: () => this.getCurrentControlTargets(),
+			getPrimaryTargetId: () => this.getCurrentControlTargets()[ 0 ]?.id ?? null,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
 			hasPlacedModel: () => this.placementSession.getPlacedModel() !== null,
 			setStatus: ( message ) => {
@@ -448,7 +452,7 @@ export class ThreeEngine {
 			getHitPosition: ( target ) => this.xrRuntime.getHitTestController().getHitPosition( target ),
 			getDemoModelConfig: () => this.demoModelConfig,
 			getPrimaryConfiguredMarkerPose: () => this.getPrimaryConfiguredMarkerPose(),
-			getControlTargets: () => this.activeSiteCalibrationBaseline?.controlTargets ?? [],
+			getControlTargets: () => this.getCurrentControlTargets(),
 			hasAppliedMarkerSolutionForCurrentSession: () => (
 				(
 					this.activeMarkerArFromEnuSolution?.source === 'marker'
@@ -587,7 +591,7 @@ export class ThreeEngine {
 			},
 			getWorkflowMode: () => this.workflowMode,
 			getSiteId: () => this.demoModelConfig?.modelId ?? null,
-			getPrimaryBaselineTargetId: () => this.activeSiteCalibrationBaseline?.controlTargets[ 0 ]?.id ?? null,
+			getPrimaryBaselineTargetId: () => this.getCurrentControlTargets()[ 0 ]?.id ?? null,
 			getActiveMarkerArFromEnuSolution: () => this.activeMarkerArFromEnuSolution,
 			getActiveMarkerLocalizationResult: () => this.activeMarkerLocalizationResult,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
@@ -699,6 +703,9 @@ export class ThreeEngine {
 				this.resolvedMarkerPosesInEnu = [];
 				this.activeSiteCalibrationBaseline = null;
 				this.activeGpsBiasCorrection = null;
+				this.currentArSessionContext = null;
+				this.lastArSessionContextLogSignature = '';
+				this.siteBaselineLoadRequestId += 1;
 				this.gpsBiasWorkflow.resetRuntimeState();
 				this.resetMarkerLocalizationCorrection();
 				this.markerCalibrationRuntime.resetRuntimeState();
@@ -731,6 +738,7 @@ export class ThreeEngine {
 				this.currentModelDebugTargetGeodetic = getFirstGeodeticPointFromDemoModelConfig( bundle.demoModelConfig );
 				this.rebuildModelLayers();
 				this.updateCoarseLocationDebugText();
+				this.syncArSessionContext();
 				this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
 				this.refreshSavedMarkerLocalizationResult( { silentStatus: true } );
 				this.refreshGpsBiasCorrectionState( { silentStatus: true } );
@@ -1077,6 +1085,7 @@ export class ThreeEngine {
 			workflowMode: mode,
 			workspaceMode: mode === 'site-baseline-config' ? 'registration' : 'browse'
 		} );
+		this.syncArSessionContext();
 		this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
 		this.refreshGpsBiasCorrectionState( { silentStatus: true } );
 		this.syncRegistrationChainDebug();
@@ -1126,11 +1135,77 @@ export class ThreeEngine {
 			return;
 		}
 
-		const existing = loadSiteCalibrationBaseline( this.demoModelConfig.modelId );
-		const baseline = this.buildSiteCalibrationBaseline( existing?.createdAt );
-		const result = saveSiteCalibrationBaseline( baseline );
-		if ( result.ok === false ) {
-			if ( result.reason === 'forbidden-keys' ) {
+		const baseline = this.buildSiteCalibrationBaseline( this.activeSiteCalibrationBaseline?.createdAt );
+		for ( const target of baseline.controlTargets ) {
+			const imageUrl = getControlTargetImageUrl( target );
+			if ( imageUrl === null ) {
+				console.warn( '[MarkerImageUrlMissing]', {
+					mode: this.workflowMode,
+					siteId: baseline.siteId,
+					dataSource: repositories.dataSource,
+					repository: 'siteBaseline',
+					sessionId: this.currentArSessionId,
+					targetId: target.id,
+					imageUrl: target.imageUrl ?? null,
+					patternUrl: target.patternUrl ?? null,
+					createdAt: Date.now()
+				} );
+			} else if ( isPattFileUrl( imageUrl ) ) {
+				console.warn( '[MarkerImageUrlInvalidPattFile]', {
+					mode: this.workflowMode,
+					siteId: baseline.siteId,
+					dataSource: repositories.dataSource,
+					repository: 'siteBaseline',
+					sessionId: this.currentArSessionId,
+					targetId: target.id,
+					imageUrl,
+					patternUrl: target.patternUrl ?? null,
+					createdAt: Date.now()
+				} );
+			} else {
+				console.info( '[SiteBaselineConfigControlTargetLoaded]', {
+					mode: this.workflowMode,
+					siteId: baseline.siteId,
+					dataSource: repositories.dataSource,
+					repository: 'siteBaseline',
+					sessionId: this.currentArSessionId,
+					targetId: target.id,
+					imageUrl,
+					patternUrl: target.patternUrl ?? null,
+					createdAt: Date.now(),
+					source: baseline.source
+				} );
+			}
+		}
+
+		console.info( '[SiteBaselineSaveStarted]', {
+			mode: this.workflowMode,
+			siteId: baseline.siteId,
+			dataSource: repositories.dataSource,
+			repository: 'siteBaseline',
+			sessionId: this.currentArSessionId,
+			targetId: null,
+			imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
+			source: baseline.source,
+			createdAt: Date.now(),
+			controlTargetCount: baseline.controlTargets.length
+		} );
+
+		const validation = validateSiteCalibrationBaselineForStorage( baseline );
+		if ( validation.ok === false ) {
+			if ( validation.reason === 'forbidden-keys' ) {
+				console.warn( '[SiteBaselineSaveRejectedArLocalMatrix]', {
+					mode: this.workflowMode,
+					siteId: baseline.siteId,
+					dataSource: repositories.dataSource,
+					repository: 'siteBaseline',
+					sessionId: this.currentArSessionId,
+					source: baseline.source,
+					targetId: null,
+					imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
+					createdAt: Date.now(),
+					trackingState: validation.forbiddenPath ?? 'forbidden-keys'
+				} );
 				console.warn( '[SiteBaselineRejectedArLocalMatrix]', {
 					mode: this.workflowMode,
 					siteId: baseline.siteId,
@@ -1138,32 +1213,72 @@ export class ThreeEngine {
 					source: baseline.source,
 					targetId: null,
 					createdAt: Date.now(),
-					trackingState: result.forbiddenPath ?? 'forbidden-keys',
+					trackingState: validation.forbiddenPath ?? 'forbidden-keys',
 					stableFrameCount: 0
 				} );
 				this.setStatus( '现场基准配置包含会话矩阵字段，已拒绝保存。' );
 				return;
 			}
 
+			console.error( '[SiteBaselineSaveFailed]', {
+				mode: this.workflowMode,
+				siteId: baseline.siteId,
+				dataSource: repositories.dataSource,
+				repository: 'siteBaseline',
+				sessionId: this.currentArSessionId,
+				targetId: null,
+				imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
+				createdAt: Date.now(),
+				error: validation.reason
+			} );
 			this.setStatus( '现场基准配置保存失败，请稍后重试。' );
 			return;
 		}
 
-		this.activeSiteCalibrationBaseline = baseline;
-		this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
-		console.info( '[SiteBaselineSaved]', {
-			mode: this.workflowMode,
-			siteId: baseline.siteId,
-			sessionId: this.currentArSessionId,
-			source: baseline.source,
-			targetId: null,
-			createdAt: baseline.updatedAt ?? baseline.createdAt,
-			trackingState: 'saved',
-			stableFrameCount: 0,
-			controlTargetCount: baseline.controlTargets.length
+		void repositories.siteBaseline.save( baseline ).then( () => {
+			console.info( '[SiteBaselineSaveSucceeded]', {
+				mode: this.workflowMode,
+				siteId: baseline.siteId,
+				dataSource: repositories.dataSource,
+				repository: 'siteBaseline',
+				sessionId: this.currentArSessionId,
+				targetId: null,
+				imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
+				source: baseline.source,
+				createdAt: baseline.updatedAt ?? baseline.createdAt,
+				controlTargetCount: baseline.controlTargets.length
+			} );
+			this.activeSiteCalibrationBaseline = baseline;
+			this.syncArSessionContext();
+			this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
+			console.info( '[SiteBaselineSaved]', {
+				mode: this.workflowMode,
+				siteId: baseline.siteId,
+				sessionId: this.currentArSessionId,
+				source: baseline.source,
+				targetId: null,
+				createdAt: baseline.updatedAt ?? baseline.createdAt,
+				trackingState: 'saved',
+				stableFrameCount: 0,
+				controlTargetCount: baseline.controlTargets.length
+			} );
+			this.setStatus( '现场基准配置已保存。AR 巡查将读取该配置，并在每次进入 AR 时重新完成空间校正。' );
+			this.emit();
+		} ).catch( ( error ) => {
+			console.error( 'Site baseline save failed:', error );
+			console.error( '[SiteBaselineSaveFailed]', {
+				mode: this.workflowMode,
+				siteId: baseline.siteId,
+				dataSource: repositories.dataSource,
+				repository: 'siteBaseline',
+				sessionId: this.currentArSessionId,
+				targetId: null,
+				imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
+				createdAt: Date.now(),
+				error: error instanceof Error ? error.message : String( error )
+			} );
+			this.setStatus( '现场基准配置保存失败，请稍后重试。' );
 		} );
-		this.setStatus( '现场基准配置已保存。后续 AR 巡查将基于该基准，在各自 AR 会话中重新完成空间校正。' );
-		this.emit();
 
 	}
 
@@ -1491,8 +1606,10 @@ export class ThreeEngine {
 			return;
 		}
 
-		this.pointerSelection.suppressSelectionFor( 1200 );
-		this.xrRuntime.requestSession();
+		void this.ensureArSessionContextReady().then( () => {
+			this.pointerSelection.suppressSelectionFor( 1200 );
+			this.xrRuntime.requestSession();
+		} );
 
 	}
 
@@ -1524,15 +1641,70 @@ export class ThreeEngine {
 
 	}
 
-	saveInspectionRecord(summary: string): void {
+	saveInspectionRecord(input: Omit<CreateInspectionRecordInput, 'siteId'>): void {
 
-		this.setStatus( `已记录巡查结果：${summary}` );
+		const siteId = this.demoModelConfig?.modelId ?? null;
+		if ( siteId === null ) {
+			this.setStatus( '当前站点尚未准备完成，无法保存巡查记录。' );
+			return;
+		}
+
+		const nextRecord: CreateInspectionRecordInput = {
+			siteId,
+			createdAt: Date.now(),
+			...input
+		};
+		console.info( '[InspectionRecordSaveStarted]', {
+			mode: this.workflowMode,
+			siteId,
+			dataSource: repositories.dataSource,
+			repository: 'inspection',
+			targetId: null,
+			imageUrl: nextRecord.snapshotUrl ?? null,
+			createdAt: nextRecord.createdAt
+		} );
+		void repositories.inspection.create( nextRecord ).then( ( record ) => {
+			console.info( '[InspectionRecordSaveSucceeded]', {
+				mode: this.workflowMode,
+				siteId,
+				dataSource: repositories.dataSource,
+				repository: 'inspection',
+				targetId: record.inspectionId,
+				imageUrl: record.snapshotUrl ?? null,
+				createdAt: record.createdAt
+			} );
+			this.setStatus( `已保存巡查记录：${record.result}` );
+			this.emit();
+		} ).catch( ( error ) => {
+			console.error( '[InspectionRecordSaveFailed]', {
+				mode: this.workflowMode,
+				siteId,
+				dataSource: repositories.dataSource,
+				repository: 'inspection',
+				targetId: null,
+				imageUrl: nextRecord.snapshotUrl ?? null,
+				createdAt: nextRecord.createdAt,
+				error: error instanceof Error ? error.message : String( error )
+			} );
+			this.setStatus( '巡查记录保存失败，请稍后重试。' );
+		} );
 
 	}
 
 	exportInspectionRecords(): void {
 
-		this.setStatus( '巡查记录导出功能尚未接入。' );
+		const siteId = this.demoModelConfig?.modelId ?? null;
+		if ( siteId === null ) {
+			this.setStatus( '当前站点尚未准备完成，无法导出巡查记录。' );
+			return;
+		}
+
+		void repositories.inspection.listBySite( siteId ).then( ( records ) => {
+			this.setStatus( `当前站点共有 ${records.length} 条巡查记录。` );
+			this.emit();
+		} ).catch( () => {
+			this.setStatus( '巡查记录导出失败，请稍后重试。' );
+		} );
 
 	}
 
@@ -1609,13 +1781,205 @@ export class ThreeEngine {
 		silentStatus?: boolean;
 	}): void {
 
-		this.activeSiteCalibrationBaseline = this.registrationStateRuntime.refreshSiteCalibrationBaselineState( options );
+		void this.loadSiteCalibrationBaseline( options );
 
 	}
 
 	private buildSiteCalibrationBaseline(existingCreatedAt?: number): SiteCalibrationBaseline {
 
 		return this.registrationStateRuntime.buildSiteCalibrationBaseline( existingCreatedAt );
+
+	}
+
+	private getCurrentControlTargets(): VisualControlTarget[] {
+
+		return this.currentArSessionContext?.controlTargets ?? this.resolveBaselineControlTargets();
+
+	}
+
+	private async ensureArSessionContextReady(): Promise<void> {
+
+		this.syncArSessionContext();
+		if ( this.workflowMode !== 'ar-inspection' || this.demoModelConfig === null ) {
+			return;
+		}
+
+		await this.loadSiteCalibrationBaseline( { silentStatus: true } );
+
+	}
+
+	private async loadSiteCalibrationBaseline(options?: {
+		silentStatus?: boolean;
+	}): Promise<SiteCalibrationBaseline | null> {
+
+		const siteId = this.demoModelConfig?.modelId ?? null;
+		if ( siteId === null ) {
+			this.activeSiteCalibrationBaseline = null;
+			this.syncArSessionContext();
+			this.registrationStateRuntime.applySiteCalibrationBaselineState( null, options );
+			return null;
+		}
+
+		const requestId = ++this.siteBaselineLoadRequestId;
+		console.info( '[SiteBaselineLoadStarted]', {
+			mode: this.workflowMode,
+			siteId,
+			dataSource: repositories.dataSource,
+			repository: 'siteBaseline',
+			sessionId: this.currentArSessionId,
+			targetId: null,
+			imageUrl: null,
+			createdAt: Date.now()
+		} );
+
+		try {
+			const baseline = await repositories.siteBaseline.load( siteId );
+			if ( requestId !== this.siteBaselineLoadRequestId || this.demoModelConfig?.modelId !== siteId ) {
+				return this.activeSiteCalibrationBaseline;
+			}
+
+			if ( baseline === null ) {
+				console.info( '[SiteBaselineLoadMissing]', {
+					mode: this.workflowMode,
+					siteId,
+					dataSource: repositories.dataSource,
+					repository: 'siteBaseline',
+					sessionId: this.currentArSessionId,
+					targetId: null,
+					imageUrl: null,
+					createdAt: Date.now()
+				} );
+			} else {
+				console.info( '[SiteBaselineLoadSucceeded]', {
+					mode: this.workflowMode,
+					siteId: baseline.siteId,
+					dataSource: repositories.dataSource,
+					repository: 'siteBaseline',
+					sessionId: this.currentArSessionId,
+					targetId: baseline.controlTargets[ 0 ]?.id ?? null,
+					imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
+					createdAt: baseline.updatedAt ?? baseline.createdAt,
+					controlTargetCount: baseline.controlTargets.length
+				} );
+			}
+
+			this.activeSiteCalibrationBaseline = baseline;
+			this.syncArSessionContext();
+			this.registrationStateRuntime.applySiteCalibrationBaselineState( baseline, options );
+			this.refreshGpsBiasCorrectionState( { silentStatus: true } );
+			this.syncRegistrationChainDebug();
+			this.markerCalibrationRuntime.syncState();
+			this.emit();
+			return baseline;
+		} catch ( error ) {
+			if ( requestId !== this.siteBaselineLoadRequestId || this.demoModelConfig?.modelId !== siteId ) {
+				return this.activeSiteCalibrationBaseline;
+			}
+
+			console.error( '[SiteBaselineLoadFailed]', {
+				mode: this.workflowMode,
+				siteId,
+				dataSource: repositories.dataSource,
+				repository: 'siteBaseline',
+				sessionId: this.currentArSessionId,
+				targetId: null,
+				imageUrl: null,
+				createdAt: Date.now(),
+				error: error instanceof Error ? error.message : String( error )
+			} );
+			this.activeSiteCalibrationBaseline = null;
+			this.syncArSessionContext();
+			this.registrationStateRuntime.applySiteCalibrationBaselineState( null, { silentStatus: true } );
+			this.refreshGpsBiasCorrectionState( { silentStatus: true } );
+			this.syncRegistrationChainDebug();
+			this.markerCalibrationRuntime.syncState();
+			if ( options?.silentStatus !== true ) {
+				this.setStatus( '现场基准加载失败，请稍后重试。' );
+			}
+			this.emit();
+			return null;
+		}
+
+	}
+
+	private syncArSessionContext(): void {
+
+		if ( this.demoModelConfig === null ) {
+			this.currentArSessionContext = null;
+			this.lastArSessionContextLogSignature = '';
+			return;
+		}
+
+		const resolved = this.resolveSessionContextControlTargets();
+		const nextContext: ArSessionContext = {
+			mode: this.workflowMode,
+			siteId: this.demoModelConfig.modelId,
+			siteConfig: this.demoModelConfig,
+			baseline: this.activeSiteCalibrationBaseline,
+			controlTargets: resolved.controlTargets
+		};
+		this.currentArSessionContext = nextContext;
+
+		const signature = [
+			nextContext.mode,
+			nextContext.siteId,
+			resolved.source,
+			nextContext.baseline?.updatedAt ?? nextContext.baseline?.createdAt ?? 'none',
+			resolved.controlTargets.length
+		].join( '::' );
+		if ( signature === this.lastArSessionContextLogSignature ) {
+			return;
+		}
+
+		this.lastArSessionContextLogSignature = signature;
+		console.info( '[ArSessionContextCreated]', {
+			mode: nextContext.mode,
+			siteId: nextContext.siteId,
+			dataSource: repositories.dataSource,
+			repository: 'arSessionContext',
+			targetId: resolved.controlTargets[ 0 ]?.id ?? null,
+			imageUrl: resolved.controlTargets[ 0 ]?.imageUrl ?? resolved.controlTargets[ 0 ]?.patternUrl ?? null,
+			createdAt: Date.now(),
+			controlTargetCount: resolved.controlTargets.length,
+			baselineAvailable: nextContext.baseline !== null
+		} );
+		console.info(
+			resolved.source === 'baseline'
+				? '[ArSessionUsingBaselineControlTargets]'
+				: '[ArSessionUsingSiteConfigControlTargets]',
+			{
+				mode: nextContext.mode,
+				siteId: nextContext.siteId,
+				dataSource: repositories.dataSource,
+				repository: 'arSessionContext',
+				targetId: resolved.controlTargets[ 0 ]?.id ?? null,
+				imageUrl: resolved.controlTargets[ 0 ]?.imageUrl ?? resolved.controlTargets[ 0 ]?.patternUrl ?? null,
+				createdAt: Date.now(),
+				controlTargetCount: resolved.controlTargets.length
+			}
+		);
+
+	}
+
+	private resolveSessionContextControlTargets(): {
+		controlTargets: VisualControlTarget[];
+		source: 'baseline' | 'site-config';
+	} {
+
+		if (
+			this.workflowMode === 'ar-inspection'
+			&& this.activeSiteCalibrationBaseline?.controlTargets.length
+		) {
+			return {
+				controlTargets: this.activeSiteCalibrationBaseline.controlTargets,
+				source: 'baseline'
+			};
+		}
+
+		return {
+			controlTargets: this.resolveBaselineControlTargets(),
+			source: 'site-config'
+		};
 
 	}
 
@@ -1636,7 +2000,9 @@ export class ThreeEngine {
 			return {
 				id: marker.id,
 				name: marker.bindControlPointId ?? marker.id,
+				markerId: marker.id,
 				imageUrl,
+				patternUrl: imageUrl,
 				centerEnu: [
 					tempMarkerEnuPosition.x,
 					tempMarkerEnuPosition.y,
@@ -1644,7 +2010,9 @@ export class ThreeEngine {
 				],
 				yawDeg: marker.yawDeg ?? 0,
 				sizeMeters: marker.sizeMeters,
-				trackingWidthMeters: imageUrl === undefined ? undefined : marker.sizeMeters,
+				trackingWidthMeters: imageUrl === undefined
+					? undefined
+					: marker.trackingWidthMeters ?? marker.sizeMeters,
 				plane: 'vertical',
 				cornerOrder: MARKER_CORNER_SEQUENCE.map( ( item ) => item.id )
 			};

@@ -47,6 +47,7 @@ export interface MarkerEngineeringConfig {
 	id: string;
 	bindControlPointId?: string;
 	sizeMeters: number;
+	trackingWidthMeters?: number;
 	enu?: {
 		east: number;
 		north: number;
@@ -139,7 +140,7 @@ type RawAttachmentCollection = RawDemoModelAttachmentShape[] | {
 
 export async function loadDemoModelConfig(
 	url: string,
-	setStatus: SetStatus
+	setStatus: SetStatus = () => {}
 ): Promise<DemoModelConfig> {
 
 	setStatus( 'Loading model registration config...' );
@@ -427,6 +428,11 @@ export function loadMarkerEngineeringConfigs(
 		) {
 			throw new Error( `markers[${index}] is missing a valid sizeMeters.` );
 		}
+		const trackingWidthMeters = typeof marker.trackingWidthMeters === 'number'
+			&& Number.isFinite( marker.trackingWidthMeters )
+			&& marker.trackingWidthMeters > 0
+			? marker.trackingWidthMeters
+			: undefined;
 
 		const bindControlPointId = typeof marker.bindControlPointId === 'string'
 			&& marker.bindControlPointId.trim().length > 0
@@ -451,6 +457,7 @@ export function loadMarkerEngineeringConfigs(
 			id: marker.id.trim(),
 			bindControlPointId,
 			sizeMeters: marker.sizeMeters,
+			trackingWidthMeters,
 			enu,
 			yawDeg,
 			patternUrl

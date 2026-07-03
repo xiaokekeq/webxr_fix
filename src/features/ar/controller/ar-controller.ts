@@ -8,6 +8,7 @@ import type { ManualAdjustmentPreset } from '@/localization/manual/manual-regist
 import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
+import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 
 export interface InspectionDraft {
 	result: string;
@@ -66,7 +67,7 @@ export interface LoadModelArController {
 		setRegistrationView(_view: RegistrationView): void;
 		setInspectionFormExpanded(_expanded: boolean): void;
 		updateInspectionDraft(_patch: Partial<InspectionDraft>): void;
-		saveInspectionRecord(summary: string): void;
+		saveInspectionRecord(input: Omit<CreateInspectionRecordInput, 'siteId'>): void;
 		exportInspectionRecords(): void;
 		takeSnapshot(): void;
 		toggleAnnotationHelper(label: string): void;
@@ -368,9 +369,9 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			saveInspectionRecord(summary) {
+			saveInspectionRecord(input) {
 
-				engine.saveInspectionRecord( summary );
+				engine.saveInspectionRecord( input );
 
 			},
 

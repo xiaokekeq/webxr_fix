@@ -49,6 +49,10 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		onImageTrackingStateChange,
 		onImageTrackingObservation
 	} = options;
+	let lastApiMissingLoggedAt = 0;
+	let lastNoResultsLoggedAt = 0;
+	let lastObservedSignature = '';
+	let lastObservedLoggedAt = 0;
 
 	const xrHitTest = createXRHitTestController( {
 		renderer: sceneBundle.renderer,
@@ -123,6 +127,16 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 			}>;
 		};
 		if ( typeof trackedFrame.getImageTrackingResults !== 'function' ) {
+			if ( shouldLogImageTrackingEvent( lastApiMissingLoggedAt, 1000 ) ) {
+				lastApiMissingLoggedAt = Date.now();
+				console.info( '[AutoMarkerImageTrackingApiMissing]', {
+					hasImageTrackingApi: false,
+					resultsLength: 0,
+					trackingState: imageTrackingState.reason,
+					targetId: null,
+					imageIndex: null
+				} );
+			}
 			if ( imageTrackingState.supported || imageTrackingState.active ) {
 				onImageTrackingStateChange( {
 					requested: imageTrackingState.requested,
@@ -139,10 +153,46 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 			return;
 		}
 
-		for ( const result of trackedFrame.getImageTrackingResults() ) {
+		const results = trackedFrame.getImageTrackingResults();
+		if ( results.length === 0 ) {
+			if ( shouldLogImageTrackingEvent( lastNoResultsLoggedAt, 1000 ) ) {
+				lastNoResultsLoggedAt = Date.now();
+				console.info( '[AutoMarkerImageTrackingNoResults]', {
+					hasImageTrackingApi: true,
+					resultsLength: 0,
+					trackingState: imageTrackingState.reason,
+					targetId: null,
+					imageIndex: null
+				} );
+			}
+			return;
+		}
+
+		for ( const result of results ) {
 			const targetId = xrHitTest.getTrackedImageTargetId( result.index );
 			if ( targetId === null ) {
 				continue;
+			}
+			const trackingState = result.trackingState ?? 'tracked';
+			const observedSignature = [
+				result.index,
+				targetId,
+				trackingState,
+				results.length
+			].join( '::' );
+			if (
+				observedSignature !== lastObservedSignature
+				|| shouldLogImageTrackingEvent( lastObservedLoggedAt, 1000 )
+			) {
+				lastObservedSignature = observedSignature;
+				lastObservedLoggedAt = Date.now();
+				console.info( '[AutoMarkerImageTrackingResultObserved]', {
+					hasImageTrackingApi: true,
+					resultsLength: results.length,
+					trackingState,
+					targetId,
+					imageIndex: result.index
+				} );
 			}
 
 			const pose = frame.getPose( result.imageSpace, referenceSpace );
@@ -152,7 +202,7 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 
 			onImageTrackingObservation( {
 				targetId,
-				trackingState: result.trackingState ?? 'tracked',
+				trackingState,
 				position: [
 					pose.transform.position.x,
 					pose.transform.position.y,
@@ -169,6 +219,12 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		}
 
 	}
+
+}
+
+function shouldLogImageTrackingEvent(lastLoggedAt: number, intervalMs: number): boolean {
+
+	return Date.now() - lastLoggedAt >= intervalMs;
 
 }
 

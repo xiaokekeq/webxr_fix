@@ -15,6 +15,7 @@ import type {
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
 import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
+import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 
 interface ControllerUiState {
 	drawerOpen: boolean;
@@ -112,10 +113,15 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 	}
 
-	function buildInspectionSummary(): string {
+	function buildInspectionRecordInput(): Omit<CreateInspectionRecordInput, 'siteId'> {
 
 		const draft = uiStateRef.value.inspectionDraft;
-		return [ draft.result, draft.type, draft.severity, draft.note ].filter( Boolean ).join( ' / ' );
+		return {
+			result: draft.result,
+			riskLevel: draft.severity,
+			note: [ draft.type, draft.note ].filter( Boolean ).join( ' / ' ),
+			createdBy: 'local-user'
+		};
 
 	}
 
@@ -489,7 +495,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		saveInspectionRecord(): void {
 
-			ensureController().actions.saveInspectionRecord( buildInspectionSummary() );
+			ensureController().actions.saveInspectionRecord( buildInspectionRecordInput() );
 
 		},
 

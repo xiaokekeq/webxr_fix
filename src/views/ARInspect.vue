@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
+import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS,
@@ -105,6 +107,10 @@ const sessionStatusText = computed( () => {
 const calibrationProgressText = computed(
 	() => `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}`
 );
+const calibrationStatusCards = computed( () => [
+	{ label: TEXT.cornerProgress, value: calibrationProgressText.value },
+	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' }
+] );
 const calibrationActionHint = computed( () => {
 	if ( hasArSession.value === false ) {
 		return '进入 AR 后先扫描平面，再开始控制标志校正。';
@@ -323,7 +329,26 @@ onMounted( () => {
 				</template>
 
 				<template v-else>
-					<div class="sheet-section">
+					<ArPanelSection :title="TEXT.calibrationPanel">
+						<ArInfoGrid :items="calibrationStatusCards" class="compact-info-grid" />
+						<div class="runtime-banner">{{ calibrationActionHint }}</div>
+						<div class="action-row">
+							<button type="button" class="action-button" @click="startMarkerCalibration()">
+								{{ TEXT.startCalibration }}
+							</button>
+							<button type="button" class="action-button" @click="captureMarkerCorner()">
+								{{ TEXT.captureCorner }}
+							</button>
+							<button type="button" class="action-button primary" @click="applyMarkerCalibration()">
+								{{ TEXT.applyCalibration }}
+							</button>
+							<button type="button" class="action-button" @click="resetMarkerCalibration()">
+								{{ TEXT.resetCalibration }}
+							</button>
+						</div>
+					</ArPanelSection>
+
+					<div v-if="false" class="sheet-section">
 						<div class="section-label">{{ TEXT.calibrationPanel }}</div>
 						<div class="info-grid compact-info-grid">
 							<div class="info-card">

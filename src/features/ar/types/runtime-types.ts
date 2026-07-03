@@ -18,8 +18,13 @@ export interface XRAnchorHandle {
 
 export interface XrTrackedImageDefinition {
 	targetId: string;
+	siteId?: string;
+	markerId?: string;
 	imageUrl: string;
+	patternUrl?: string;
 	widthInMeters: number;
+	trackingWidthMeters?: number;
+	sizeMeters?: number;
 }
 
 export interface XrImageTrackingObservation {

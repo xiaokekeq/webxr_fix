@@ -25,13 +25,13 @@ import {
 } from '@/localization/marker/marker-localization-storage.js';
 import type { MarkerPoseInEnu } from '@/localization/marker/marker-localization.js';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
-import { loadSiteCalibrationBaseline } from '@/features/ar/storage/site-calibration-baseline.js';
 import type {
 	ArWorkflowMode,
 	GpsBiasCorrection as SiteBaselineGpsBiasCorrection,
 	SiteCalibrationBaseline,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
+import { getControlTargetImageUrl, isPattFileUrl } from '@/localization/baseline/site-calibration-baseline.js';
 import { formatGeodetic } from '@/features/ar/utils/formatters.js';
 
 interface RegistrationStateRuntimeOptions {
@@ -278,13 +278,14 @@ export class RegistrationStateRuntime {
 
 	}
 
-	refreshSiteCalibrationBaselineState(options?: {
+	applySiteCalibrationBaselineState(
+		baseline: SiteCalibrationBaseline | null,
+		options?: {
 		silentStatus?: boolean;
-	}): SiteCalibrationBaseline | null {
+		}
+	): SiteCalibrationBaseline | null {
 
 		const siteId = this.options.getDemoModelConfig()?.modelId ?? null;
-		const baseline = siteId === null ? null : loadSiteCalibrationBaseline( siteId );
-
 		if ( baseline === null ) {
 			this.options.store.patch( {
 				siteCalibrationBaseline: {
@@ -318,17 +319,34 @@ export class RegistrationStateRuntime {
 			}
 		} );
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
-			console.info( '[ArInspectionBaselineLoaded]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: baseline.siteId,
-				sessionId: this.options.getCurrentSessionId(),
-				source: baseline.source,
-				targetId: baseline.controlTargets[ 0 ]?.id ?? null,
-				createdAt: baseline.updatedAt ?? baseline.createdAt,
-				trackingState: 'baseline-loaded',
-				stableFrameCount: 0,
-				controlTargetCount: baseline.controlTargets.length
-			} );
+			for ( const target of baseline.controlTargets ) {
+				const imageUrl = getControlTargetImageUrl( target );
+				if ( imageUrl === null ) {
+					console.warn( '[MarkerImageUrlMissing]', {
+						mode: this.options.getWorkflowMode(),
+						siteId: baseline.siteId,
+						sessionId: this.options.getCurrentSessionId(),
+						targetId: target.id,
+						imageUrl: target.imageUrl ?? null,
+						patternUrl: target.patternUrl ?? null,
+						createdAt: Date.now()
+					} );
+					continue;
+				}
+
+				console.info( '[ArSessionUsingBaselineControlTargets]', {
+					mode: this.options.getWorkflowMode(),
+					siteId: baseline.siteId,
+					sessionId: this.options.getCurrentSessionId(),
+					targetId: target.id,
+					imageUrl,
+					patternUrl: target.patternUrl ?? null,
+					trackedImagesCount: baseline.controlTargets.length,
+					createdAt: Date.now(),
+					source: baseline.source,
+					invalidPatt: isPattFileUrl( imageUrl )
+				} );
+			}
 		}
 
 		if ( options?.silentStatus !== true && this.options.getWorkflowMode() === 'ar-inspection' ) {
@@ -517,7 +535,7 @@ function toSiteBaselineGpsBiasCorrection(
 			? 'manual-site-pose'
 			: correction.source === 'debug'
 				? 'debug'
-				: 'admin-marker'
+				: 'marker'
 	};
 
 }

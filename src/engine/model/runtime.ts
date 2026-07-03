@@ -2,7 +2,6 @@
 import type { PipeRecord } from '@/models/types/pipe-record.js';
 import type { DemoModelAttachment, DemoModelConfig } from '@/models/config/demo-model-config.js';
 import {
-	loadPipeRecords,
 	type ModelCatalogItem
 } from '@/models/catalog/model-api.js';
 import {
@@ -10,7 +9,6 @@ import {
 	readModelSourceMetadata,
 	type ModelSourceMetadata
 } from '@/models/config/model-source-metadata.js';
-import { loadDemoModelConfig } from '@/models/config/demo-model-config.js';
 import {
 	solveEngineeringRegistration,
 	transformSiteEnuToModelLocal,
@@ -24,6 +22,7 @@ import {
 	readPlaceableTemplateReport,
 	readPlaceableTemplateTransform
 } from '@/engine/core/model.js';
+import { repositories } from '@/services/repository-factory.js';
 
 export interface LoadedModelRuntimeBundle {
 	pipesByName: Map<string, PipeRecord>;
@@ -41,8 +40,8 @@ export async function loadModelRuntimeBundle(
 ): Promise<LoadedModelRuntimeBundle> {
 
 	const [ pipesByName, demoModelConfig, loadedAssetTemplates ] = await Promise.all( [
-		loadPipeRecords( modelDefinition.pipesUrl ),
-		loadDemoModelConfig( modelDefinition.configUrl, setStatus ),
+		repositories.model.loadPipeRecords( modelDefinition.id ),
+		repositories.siteConfig.getSiteConfig( modelDefinition.id ),
 		loadCatalogAssetTemplates( modelDefinition, setStatus )
 	] );
 	const primaryTemplate = loadedAssetTemplates.get( modelDefinition.primaryAssetId );

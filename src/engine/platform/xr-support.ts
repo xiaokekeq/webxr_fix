@@ -411,6 +411,12 @@ export function createXRHitTestController(
 			try {
 				const trackedImageResources = await resolveTrackedImageResources( options?.trackedImages ?? [] );
 				const shouldAttemptImageTracking = trackedImageResources.trackedImages.length > 0;
+				console.info( '[AutoMarkerImageTrackingRequested]', {
+					requestedTargetsCount: options?.trackedImages?.length ?? 0,
+					trackedImagesCount: trackedImageResources.trackedImages.length,
+					targetIds: trackedImageResources.targetIds,
+					reason: trackedImageResources.reason
+				} );
 				trackedImageTargetIds = trackedImageResources.targetIds;
 				imageTrackingState = {
 					requested: ( options?.trackedImages?.length ?? 0 ) > 0,
@@ -423,11 +429,18 @@ export function createXRHitTestController(
 							: 'idle'
 				};
 				let session: XRSession;
+				const imageTrackingSessionInit = createSessionInit( trackedImageResources.trackedImages );
+				console.info( '[AutoMarkerImageTrackingSessionInit]', {
+					optionalFeatures: imageTrackingSessionInit.optionalFeatures ?? [],
+					hasImageTrackingFeature: ( imageTrackingSessionInit.optionalFeatures ?? [] ).includes( 'image-tracking' ),
+					trackedImagesCount: trackedImageResources.trackedImages.length,
+					targetIds: trackedImageResources.targetIds
+				} );
 
 				try {
 					session = await navigator.xr.requestSession(
 						'immersive-ar',
-						createSessionInit( trackedImageResources.trackedImages )
+						imageTrackingSessionInit
 					);
 					imageTrackingState = {
 						...imageTrackingState,
@@ -440,7 +453,12 @@ export function createXRHitTestController(
 						throw error;
 					}
 
-					console.warn( 'XR session request with image-tracking failed, retrying without it:', error );
+					console.warn( '[AutoMarkerImageTrackingUnsupported]', {
+						trackedImagesCount: trackedImageResources.trackedImages.length,
+						targetIds: trackedImageResources.targetIds,
+						reason: 'request-session-failed',
+						error
+					} );
 					trackedImageTargetIds = [];
 					imageTrackingState = {
 						requested: true,
@@ -448,9 +466,16 @@ export function createXRHitTestController(
 						active: false,
 						reason: 'unsupported'
 					};
+					const fallbackSessionInit = createSessionInit();
+					console.info( '[AutoMarkerImageTrackingSessionInit]', {
+						optionalFeatures: fallbackSessionInit.optionalFeatures ?? [],
+						hasImageTrackingFeature: ( fallbackSessionInit.optionalFeatures ?? [] ).includes( 'image-tracking' ),
+						trackedImagesCount: 0,
+						targetIds: []
+					} );
 					session = await navigator.xr.requestSession(
 						'immersive-ar',
-						createSessionInit()
+						fallbackSessionInit
 					);
 				}
 				renderer.xr.setReferenceSpaceType( 'local' );
@@ -518,6 +543,16 @@ async function resolveTrackedImageResources(
 }> {
 
 	if ( definitions.length === 0 ) {
+		console.info( '[AutoMarkerTrackedImagesEmpty]', {
+			siteId: null,
+			markerId: null,
+			patternUrl: null,
+			trackingWidthMeters: null,
+			sizeMeters: null,
+			imageLoaded: false,
+			trackedImagesCount: 0,
+			reason: 'no-targets'
+		} );
 		return {
 			trackedImages: [],
 			targetIds: [],
@@ -526,6 +561,17 @@ async function resolveTrackedImageResources(
 	}
 
 	if ( typeof createImageBitmap !== 'function' ) {
+		const firstDefinition = definitions[ 0 ];
+		console.info( '[AutoMarkerTrackedImagesEmpty]', {
+			siteId: firstDefinition?.siteId ?? null,
+			markerId: firstDefinition?.markerId ?? firstDefinition?.targetId ?? null,
+			patternUrl: firstDefinition?.patternUrl ?? firstDefinition?.imageUrl ?? null,
+			trackingWidthMeters: firstDefinition?.trackingWidthMeters ?? firstDefinition?.widthInMeters ?? null,
+			sizeMeters: firstDefinition?.sizeMeters ?? null,
+			imageLoaded: false,
+			trackedImagesCount: 0,
+			reason: 'create-image-bitmap-unavailable'
+		} );
 		return {
 			trackedImages: [],
 			targetIds: [],
@@ -537,6 +583,15 @@ async function resolveTrackedImageResources(
 	const targetIds: string[] = [];
 
 	for ( const definition of definitions ) {
+		console.info( '[AutoMarkerTrackedImagesPreparing]', {
+			siteId: definition.siteId ?? null,
+			markerId: definition.markerId ?? definition.targetId,
+			patternUrl: definition.patternUrl ?? definition.imageUrl,
+			trackingWidthMeters: definition.trackingWidthMeters ?? definition.widthInMeters,
+			sizeMeters: definition.sizeMeters ?? null,
+			imageLoaded: false,
+			trackedImagesCount: trackedImages.length
+		} );
 		try {
 			const response = await fetch( definition.imageUrl );
 			if ( response.ok === false ) {
@@ -550,17 +605,52 @@ async function resolveTrackedImageResources(
 				widthInMeters: definition.widthInMeters
 			} );
 			targetIds.push( definition.targetId );
-			console.info( '[AutoMarkerImageLoaded]', {
-				targetId: definition.targetId,
-				widthInMeters: definition.widthInMeters
+			console.info( '[AutoMarkerTrackedImageLoaded]', {
+				siteId: definition.siteId ?? null,
+				markerId: definition.markerId ?? definition.targetId,
+				patternUrl: definition.patternUrl ?? definition.imageUrl,
+				trackingWidthMeters: definition.trackingWidthMeters ?? definition.widthInMeters,
+				sizeMeters: definition.sizeMeters ?? null,
+				imageLoaded: true,
+				trackedImagesCount: trackedImages.length
 			} );
 		} catch ( error ) {
 			console.warn( '[AutoMarkerImageLoadFailed]', {
-				targetId: definition.targetId,
-				imageUrl: definition.imageUrl,
+				siteId: definition.siteId ?? null,
+				markerId: definition.markerId ?? definition.targetId,
+				patternUrl: definition.patternUrl ?? definition.imageUrl,
+				trackingWidthMeters: definition.trackingWidthMeters ?? definition.widthInMeters,
+				sizeMeters: definition.sizeMeters ?? null,
+				imageLoaded: false,
+				trackedImagesCount: trackedImages.length,
 				error
 			} );
 		}
+	}
+
+	if ( trackedImages.length === 0 ) {
+		const firstDefinition = definitions[ 0 ];
+		console.info( '[AutoMarkerTrackedImagesEmpty]', {
+			siteId: firstDefinition?.siteId ?? null,
+			markerId: firstDefinition?.markerId ?? firstDefinition?.targetId ?? null,
+			patternUrl: firstDefinition?.patternUrl ?? firstDefinition?.imageUrl ?? null,
+			trackingWidthMeters: firstDefinition?.trackingWidthMeters ?? firstDefinition?.widthInMeters ?? null,
+			sizeMeters: firstDefinition?.sizeMeters ?? null,
+			imageLoaded: false,
+			trackedImagesCount: 0,
+			reason: 'image-load-failed'
+		} );
+	} else {
+		console.info( '[AutoMarkerTrackedImagesReady]', {
+			siteId: definitions[ 0 ]?.siteId ?? null,
+			markerId: null,
+			patternUrl: null,
+			trackingWidthMeters: null,
+			sizeMeters: null,
+			imageLoaded: true,
+			trackedImagesCount: trackedImages.length,
+			targetIds
+		} );
 	}
 
 	return {

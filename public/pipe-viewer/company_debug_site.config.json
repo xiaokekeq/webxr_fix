@@ -1,7 +1,7 @@
 {
   "siteId": "company_debug_site",
   "origin": {
-    "lng": 118.73650,
+    "lng": 118.7365,
     "lat": 31.94031,
     "height": 50,
     "coordType": "GCJ-02"
@@ -36,7 +36,9 @@
       "id": "local-debug-marker-001",
       "bindControlPointId": "LOCAL_CP_01",
       "sizeMeters": 0.2,
-      "yawDeg": 0
+      "trackingWidthMeters": 0.2,
+      "yawDeg": 0,
+      "patternUrl": "/pipe-viewer/markers/company-debug-control-marker.png"
     }
   ]
 }

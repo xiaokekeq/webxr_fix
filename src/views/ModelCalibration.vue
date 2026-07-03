@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppTabBar from '../components/AppTabBar.vue';
+import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
+import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS,
@@ -99,6 +101,12 @@ const currentModelName = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
 );
 const runtimeStatusText = computed( () => engine.value.runtimeStatus );
+const baselineSummaryCards = computed( () => [
+	{ label: '鐜板満鍩哄噯', value: engine.value.siteCalibrationBaseline.statusText },
+	{ label: '鎺у埗鐐?', value: engine.value.siteCalibrationBaseline.controlTargetCount },
+	{ label: 'GPS 鍋忓樊', value: engine.value.siteCalibrationBaseline.gpsBiasAvailable ? '宸蹭繚瀛?' : '鏈繚瀛?' },
+	{ label: '鏄剧ず妯″紡', value: getDisplayModeLabel( engine.value.displayMode ) }
+] );
 const sessionOverviewCards = computed( () => [
 	{ label: '运行状态', value: engine.value.runtimeStatus },
 	{ label: '放置状态', value: engine.value.registrationStatusDetail },
@@ -110,6 +118,36 @@ const sessionOverviewCards = computed( () => [
 	{ label: '角点进度', value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
 	{ label: '待记录角点', value: engine.value.markerCalibration.nextCornerLabel || '-' },
 	{ label: 'GPS 补偿状态', value: engine.value.gpsBiasCorrection.statusText, wide: true }
+] );
+const sessionSnapshotCards = computed( () => [
+	{ label: '杩愯鐘舵€?', value: engine.value.runtimeStatus },
+	{ label: '鏀剧疆鐘舵€?', value: engine.value.registrationStatusDetail },
+	{ label: '绮楅厤鍑嗚瘖鏂?', value: engine.value.coarseLocationDebugText },
+	{ label: '绌洪棿瀹氫綅鏉ユ簮', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' },
+	{ label: '妯″瀷浣嶇疆', value: engine.value.placementSummary.positionText, wide: true },
+	{ label: '妯″瀷濮挎€?', value: engine.value.placementSummary.quaternionText, wide: true },
+	{ label: '妯″瀷缂╂斁', value: engine.value.placementSummary.scaleText }
+] );
+const markerCalibrationCards = computed( () => [
+	{ label: TEXT.cornersCollected, value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
+	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' }
+] );
+const manualAdjustmentCards = computed( () => [
+	{ label: '骞崇Щ鍋忕Щ', value: engine.value.manualReadout.positionText, wide: true },
+	{ label: '鑸悜淇', value: engine.value.manualReadout.yawText },
+	{ label: '姣斾緥淇', value: engine.value.manualReadout.scaleText }
+] );
+const calibrationGuideCards = computed( () => [
+	{
+		label: '鎿嶄綔椤哄簭',
+		value: '鍏堝紑濮嬮噰闆嗭紝鍐嶆寜宸︿笂銆佸彸涓娿€佸彸涓嬨€佸乏涓嬮『搴忚褰?4 涓鐐癸紝鏈€鍚庢墽琛岃В绠楀苟搴旂敤銆?',
+		wide: true
+	}
+] );
+const gpsBiasCards = computed( () => [
+	{ label: '琛ュ伩鐘舵€?', value: engine.value.gpsBiasCorrection.statusText, wide: true },
+	{ label: 'ENU 鍋忓樊', value: engine.value.gpsBiasCorrection.deltaEnuText },
+	{ label: '鏈€杩戞洿鏂?', value: engine.value.gpsBiasCorrection.updatedAtText }
 ] );
 const sliderVisible = computed(
 	() => hasArSession.value
@@ -281,7 +319,7 @@ onMounted( () => {
 				</div>
 			</section>
 
-			<section v-if="!hasArSession" class="summary-card">
+			<section v-if="false && !hasArSession" class="summary-card">
 				<div class="summary-grid">
 					<div class="summary-item">
 						<span>现场基准</span>
@@ -300,6 +338,10 @@ onMounted( () => {
 						<strong>{{ getDisplayModeLabel(engine.displayMode) }}</strong>
 					</div>
 				</div>
+			</section>
+
+			<section v-if="!hasArSession" class="summary-card">
+				<ArInfoGrid :items="baselineSummaryCards" />
 			</section>
 
 			<div v-if="sliderVisible" class="side-slider">
@@ -342,7 +384,12 @@ onMounted( () => {
 					</button>
 				</div>
 
-				<div class="sheet-section sheet-section-first">
+				<ArPanelSection :title="TEXT.sessionOverview" first>
+					<ArInfoGrid :items="sessionSnapshotCards" />
+					<div class="runtime-banner">{{ runtimeStatusText }}</div>
+				</ArPanelSection>
+
+				<div v-if="false" class="sheet-section sheet-section-first">
 					<div class="section-label">{{ TEXT.sessionOverview }}</div>
 					<div class="info-grid">
 						<div v-for="item in sessionOverviewCards" :key="item.label" class="info-card" :class="{ wide: item.wide === true }">
@@ -424,7 +471,8 @@ onMounted( () => {
 				<template v-else>
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.precisionCalibration }}</div>
-						<div class="info-grid">
+						<ArInfoGrid :items="markerCalibrationCards" />
+						<div v-if="false" class="info-grid">
 							<div class="info-card">
 								<span>{{ TEXT.cornersCollected }}</span>
 								<strong>{{ engine.markerCalibration.capturedCornerCount }}/{{ engine.markerCalibration.expectedCornerCount }}</strong>
@@ -467,7 +515,8 @@ onMounted( () => {
 								{{ item.label }}
 							</button>
 						</div>
-						<div class="info-grid">
+						<ArInfoGrid :items="manualAdjustmentCards" />
+						<div v-if="false" class="info-grid">
 							<div class="info-card wide">
 								<span>平移偏移</span>
 								<strong>{{ engine.manualReadout.positionText }}</strong>
@@ -523,7 +572,8 @@ onMounted( () => {
 
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.markerCalibration }}</div>
-						<div class="info-grid">
+						<ArInfoGrid :items="calibrationGuideCards" />
+						<div v-if="false" class="info-grid">
 							<div class="info-card wide">
 								<span>操作顺序</span>
 								<strong>先开始采集，再按左上、右上、右下、左下顺序记录 4 个角点，最后执行解算并应用。</strong>
@@ -533,7 +583,8 @@ onMounted( () => {
 
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.gpsBias }}</div>
-						<div class="info-grid">
+						<ArInfoGrid :items="gpsBiasCards" />
+						<div v-if="false" class="info-grid">
 							<div class="info-card wide">
 								<span>补偿状态</span>
 								<strong>{{ engine.gpsBiasCorrection.statusText }}</strong>
