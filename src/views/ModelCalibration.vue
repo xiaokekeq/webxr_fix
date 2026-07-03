@@ -31,18 +31,14 @@ const TEXT = {
 	exit: '退出 AR',
 	panelTool: '控制面板',
 	closePanel: '收起',
-	placementMode: '放置策略',
-	placementLocalized: '按配准定位放置',
-	placementTemporary: '按识别平面临放',
 	placeModel: '应用配准放置',
 	placeHitTest: '应用平面临放',
 	resetPlacement: '清除当前放置',
-	placementSummary: '模型放置结果',
-	placementHint: '应用配准放置：基于当前粗配准或精确配准结果，将模型固定到现场坐标。',
+	placementActions: '放置操作',
+	sessionOverview: '会话总览',
 	displayMode: '模型显示',
 	sectionPlane: '剖切方向',
 	projectStage: '阶段筛选',
-	panelStatus: '会话状态',
 	markerCalibration: '角点采集说明',
 	precisionCalibration: '控制标志精配',
 	startCollect: '开始角点采集',
@@ -103,11 +99,17 @@ const currentModelName = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
 );
 const runtimeStatusText = computed( () => engine.value.runtimeStatus );
-const panelStatusCards = computed( () => [
+const sessionOverviewCards = computed( () => [
 	{ label: '运行状态', value: engine.value.runtimeStatus },
 	{ label: '放置状态', value: engine.value.registrationStatusDetail },
 	{ label: '粗配准诊断', value: engine.value.coarseLocationDebugText },
-	{ label: '空间定位来源', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' }
+	{ label: '空间定位来源', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' },
+	{ label: '模型位置', value: engine.value.placementSummary.positionText, wide: true },
+	{ label: '模型姿态', value: engine.value.placementSummary.quaternionText, wide: true },
+	{ label: '模型缩放', value: engine.value.placementSummary.scaleText },
+	{ label: '角点进度', value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
+	{ label: '待记录角点', value: engine.value.markerCalibration.nextCornerLabel || '-' },
+	{ label: 'GPS 补偿状态', value: engine.value.gpsBiasCorrection.statusText, wide: true }
 ] );
 const sliderVisible = computed(
 	() => hasArSession.value
@@ -204,6 +206,16 @@ async function handleEnableCoarseRegistration(): Promise<void> {
 
 async function handleRefreshGps(): Promise<void> {
 	await store.actions.refreshGeoLocation();
+}
+
+async function handleApplyLocalizedPlacement(): Promise<void> {
+	store.actions.setPlacementMode( 'localized' );
+	await store.actions.placeModel();
+}
+
+function handleApplyHitTestPlacement(): void {
+	store.actions.setPlacementMode( 'hit-test-temporary' );
+	store.actions.placeModelAtHitTest();
 }
 
 function handleStartPrecisionCalibration(): void {
@@ -331,9 +343,9 @@ onMounted( () => {
 				</div>
 
 				<div class="sheet-section sheet-section-first">
-					<div class="section-label">{{ TEXT.panelStatus }}</div>
+					<div class="section-label">{{ TEXT.sessionOverview }}</div>
 					<div class="info-grid">
-						<div v-for="item in panelStatusCards" :key="item.label" class="info-card" :class="{ wide: item.label === '粗配准' }">
+						<div v-for="item in sessionOverviewCards" :key="item.label" class="info-card" :class="{ wide: item.wide === true }">
 							<span>{{ item.label }}</span>
 							<strong>{{ item.value }}</strong>
 						</div>
@@ -343,53 +355,13 @@ onMounted( () => {
 
 				<template v-if="activePanelView === 'placement'">
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.placementMode }}</div>
-						<div class="chip-grid">
-							<button
-								type="button"
-								class="chip-button"
-								:class="{ active: engine.placementMode === 'localized' }"
-								@click="store.actions.setPlacementMode('localized')"
-							>
-								{{ TEXT.placementLocalized }}
-							</button>
-							<button
-								type="button"
-								class="chip-button"
-								:class="{ active: engine.placementMode === 'hit-test-temporary' }"
-								@click="store.actions.setPlacementMode('hit-test-temporary')"
-							>
-								{{ TEXT.placementTemporary }}
-							</button>
-						</div>
-					</div>
-
-					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.placementSummary }}</div>
-						<div class="info-grid">
-							<div class="info-card">
-								<span>放置位置</span>
-								<strong>{{ engine.placementSummary.positionText }}</strong>
-							</div>
-							<div class="info-card">
-								<span>放置姿态</span>
-								<strong>{{ engine.placementSummary.quaternionText }}</strong>
-							</div>
-							<div class="info-card">
-								<span>模型缩放</span>
-								<strong>{{ engine.placementSummary.scaleText }}</strong>
-							</div>
-							<div class="info-card">
-								<span>空间定位来源</span>
-								<strong>{{ engine.registrationChainDebug.arSessionLocalization.source || '-' }}</strong>
-							</div>
-						</div>
-						<div class="runtime-banner">{{ TEXT.placementHint }}</div>
+						<div class="section-label">{{ TEXT.placementActions }}</div>
+						<div class="runtime-banner">应用配准放置会基于当前配准结果固定模型；应用平面临放仅按当前识别平面临时放置。</div>
 						<div class="action-row">
-							<button type="button" class="action-button primary" @click="store.actions.placeModel()">
+							<button type="button" class="action-button primary" @click="handleApplyLocalizedPlacement()">
 								{{ TEXT.placeModel }}
 							</button>
-							<button type="button" class="action-button" @click="store.actions.placeModelAtHitTest()">
+							<button type="button" class="action-button" @click="handleApplyHitTestPlacement()">
 								{{ TEXT.placeHitTest }}
 							</button>
 							<button type="button" class="action-button" @click="store.actions.resetPlacement()">
