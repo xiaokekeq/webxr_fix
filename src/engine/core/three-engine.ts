@@ -833,6 +833,8 @@ export class ThreeEngine {
 			await this.coarseRegistration.enable();
 			this.updateCoarseLocationDebugText();
 			this.store.patch( { registrationStatusDetail: '状态：粗配准已启用' } );
+			this.setStatus( this.coarseRegistration.getReadyMessage() );
+			this.syncRegistrationChainDebug();
 			this.syncArSessionPhase();
 		} catch ( error ) {
 			console.error( 'Coarse registration enable failed:', error );

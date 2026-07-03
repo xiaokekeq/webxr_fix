@@ -40,7 +40,9 @@ const TEXT = {
 	displayMode: '查看模式',
 	sectionPlane: '剖切方向',
 	projectStage: '工程阶段',
+	panelStatus: '当前状态',
 	markerCalibration: '控制标志校准',
+	precisionCalibration: '精确配准',
 	startCollect: '开始校准',
 	captureCorner: '采集角点',
 	solveApply: '完成校准',
@@ -64,7 +66,7 @@ const TEXT = {
 	clearSavedManual: '清除已存微调',
 	gpsBias: 'GPS 偏差',
 	refreshGps: '刷新 GPS',
-	enableCoarse: '启用粗定位',
+	enableCoarse: '启用粗配准',
 	saveGpsBias: '记录当前位置',
 	clearGpsBias: '清除记录',
 	saveBaseline: '保存现场基准',
@@ -93,11 +95,17 @@ const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<CalibrationPanelView>( 'placement' );
 
 const engine = computed( () => store.engine );
-const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
 const currentModelName = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
 );
+const runtimeStatusText = computed( () => engine.value.runtimeStatus );
+const panelStatusCards = computed( () => [
+	{ label: '运行状态', value: engine.value.runtimeStatus },
+	{ label: '配准状态', value: engine.value.registrationStatusDetail },
+	{ label: '粗配准', value: engine.value.coarseLocationDebugText },
+	{ label: '定位来源', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' }
+] );
 const sliderVisible = computed(
 	() => hasArSession.value
 		&& (
@@ -174,21 +182,26 @@ function handleModelChange(event: Event): void {
 	store.actions.selectModel( target.value );
 }
 
-function openPanel(view: CalibrationPanelView): void {
-	if ( ui.value.drawerOpen && activePanelView.value === view ) {
-		store.actions.toggleDrawer();
-		return;
-	}
-
-	activePanelView.value = view;
-	store.actions.activatePanel( 'registration' );
-}
-
 function activatePanelView(view: CalibrationPanelView): void {
 	activePanelView.value = view;
-	if ( ui.value.drawerOpen === false ) {
-		store.actions.activatePanel( 'registration' );
-	}
+}
+
+async function handleEnableCoarseRegistration(): Promise<void> {
+	await store.actions.enableCoarseRegistration();
+}
+
+async function handleRefreshGps(): Promise<void> {
+	await store.actions.refreshGeoLocation();
+}
+
+function handleStartPrecisionCalibration(): void {
+	activePanelView.value = 'calibration';
+	store.actions.startCurrentSessionMarkerCalibration();
+}
+
+function handleSolvePrecisionCalibration(): void {
+	activePanelView.value = 'calibration';
+	store.actions.solveAndApplyCurrentSessionMarkerCalibration();
 }
 
 function openMarkerDebug(): void {
@@ -280,38 +293,8 @@ onMounted( () => {
 			</div>
 		</div>
 
-		<nav
-			v-if="hasArSession"
-			class="action-dock"
-			aria-label="AR 配准操作"
-			@pointerdown.stop="store.actions.handleArUiInteraction()"
-			@click.stop
-		>
-			<button type="button" class="dock-item" @click.stop="openPanel('placement')">
-				<span class="dock-icon">放</span>
-				<span class="dock-label">{{ TEXT.placement }}</span>
-			</button>
-			<button type="button" class="dock-item" @click.stop="openPanel('display')">
-				<span class="dock-icon">视</span>
-				<span class="dock-label">{{ TEXT.display }}</span>
-			</button>
-			<button type="button" class="dock-item dock-item-primary" @click.stop="openPanel('calibration')">
-				<span class="dock-icon">准</span>
-				<span class="dock-label">{{ TEXT.calibration }}</span>
-			</button>
-			<button type="button" class="dock-item" @click.stop="store.actions.exitAr()">
-				<span class="dock-icon">退</span>
-				<span class="dock-label">{{ TEXT.exit }}</span>
-			</button>
-		</nav>
-
 		<transition name="sheet-fade">
-			<section
-				v-if="hasArSession && ui.drawerOpen"
-				class="bottom-sheet"
-				@pointerdown.stop="store.actions.handleArUiInteraction()"
-				@click.stop
-			>
+			<section v-if="hasArSession" class="bottom-sheet" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
 				<div class="sheet-header">
 					<div class="sheet-tabs">
 						<button
@@ -325,9 +308,17 @@ onMounted( () => {
 							{{ item.label }}
 						</button>
 					</div>
-					<button type="button" class="sheet-close" @click="store.actions.toggleDrawer()">
-						{{ TEXT.closePanel }}
-					</button>
+				</div>
+
+				<div class="sheet-section sheet-section-first">
+					<div class="section-label">{{ TEXT.panelStatus }}</div>
+					<div class="info-grid">
+						<div v-for="item in panelStatusCards" :key="item.label" class="info-card" :class="{ wide: item.label === '粗配准' }">
+							<span>{{ item.label }}</span>
+							<strong>{{ item.value }}</strong>
+						</div>
+					</div>
+					<div class="runtime-banner">{{ runtimeStatusText }}</div>
 				</div>
 
 				<template v-if="activePanelView === 'placement'">
@@ -439,7 +430,7 @@ onMounted( () => {
 
 				<template v-else>
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.markerCalibration }}</div>
+						<div class="section-label">{{ TEXT.precisionCalibration }}</div>
 						<div class="info-grid">
 							<div class="info-card">
 								<span>{{ TEXT.cornersCollected }}</span>
@@ -451,13 +442,13 @@ onMounted( () => {
 							</div>
 						</div>
 						<div class="chip-grid">
-							<button type="button" class="chip-button" @click="store.actions.startCurrentSessionMarkerCalibration()">
+							<button type="button" class="chip-button" @click="handleStartPrecisionCalibration()">
 								{{ TEXT.startCollect }}
 							</button>
 							<button type="button" class="chip-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
 								{{ TEXT.captureCorner }}
 							</button>
-							<button type="button" class="chip-button active" @click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()">
+							<button type="button" class="chip-button active" @click="handleSolvePrecisionCalibration()">
 								{{ TEXT.solveApply }}
 							</button>
 							<button type="button" class="chip-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
@@ -538,6 +529,16 @@ onMounted( () => {
 					</div>
 
 					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.markerCalibration }}</div>
+						<div class="info-grid">
+							<div class="info-card wide">
+								<span>提示</span>
+								<strong>先点开始校准，再依次采集 4 个角点，最后点完成校准。</strong>
+							</div>
+						</div>
+					</div>
+
+					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.gpsBias }}</div>
 						<div class="info-grid">
 							<div class="info-card wide">
@@ -554,10 +555,10 @@ onMounted( () => {
 							</div>
 						</div>
 						<div class="action-row">
-							<button type="button" class="action-button" @click="store.actions.refreshGeoLocation()">
+							<button type="button" class="action-button" @click="handleRefreshGps()">
 								{{ TEXT.refreshGps }}
 							</button>
-							<button type="button" class="action-button" @click="store.actions.enableCoarseRegistration()">
+							<button type="button" class="action-button" @click="handleEnableCoarseRegistration()">
 								{{ TEXT.enableCoarse }}
 							</button>
 							<button type="button" class="action-button" @click="store.actions.saveGpsBiasCorrectionFromCurrentPose()">
@@ -750,9 +751,7 @@ onMounted( () => {
 
 .launch-button,
 .secondary-button,
-.dock-item,
 .sheet-tab,
-.sheet-close,
 .chip-button,
 .action-button,
 .adjust-button {
@@ -784,7 +783,6 @@ onMounted( () => {
 
 .secondary-button,
 .sheet-tab,
-.sheet-close,
 .chip-button,
 .action-button,
 .adjust-button {
@@ -882,54 +880,13 @@ onMounted( () => {
 	pointer-events: auto;
 }
 
-.action-dock {
-	position: fixed;
-	left: 12px;
-	right: 12px;
-	bottom: calc(12px + env(safe-area-inset-bottom));
-	z-index: 36;
-	display: grid;
-	grid-template-columns: repeat(4, minmax(0, 1fr));
-	gap: 10px;
-	padding: 10px;
-	border-radius: 22px;
-	background: rgba(7, 12, 21, 0.88);
-	backdrop-filter: blur(18px);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
-}
-
-.dock-item {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	min-height: 54px;
-	border-radius: 16px;
-	background: rgba(255, 255, 255, 0.04);
-	color: rgba(225, 236, 255, 0.78);
-	border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.dock-icon {
-	font-size: 15px;
-	font-weight: 700;
-	line-height: 1;
-}
-
-.dock-label {
-	font-size: 11px;
-	line-height: 1;
-}
-
 .bottom-sheet {
 	position: fixed;
 	left: 12px;
 	right: 12px;
-	bottom: calc(96px + env(safe-area-inset-bottom));
+	bottom: calc(12px + env(safe-area-inset-bottom));
 	z-index: 38;
-	max-height: 58vh;
+	height: min(58vh, 520px);
 	padding: 14px;
 	overflow-y: auto;
 	border-radius: 24px;
@@ -953,6 +910,12 @@ onMounted( () => {
 	gap: 8px;
 }
 
+.sheet-section-first {
+	margin-top: 0;
+	padding-top: 0;
+	border-top: 0;
+}
+
 .sheet-section + .sheet-section {
 	margin-top: 14px;
 	padding-top: 14px;
@@ -970,6 +933,16 @@ onMounted( () => {
 	flex-wrap: wrap;
 	gap: 8px;
 	margin-top: 10px;
+}
+
+.runtime-banner {
+	margin-top: 10px;
+	padding: 10px 12px;
+	border-radius: 14px;
+	background: rgba(0, 212, 255, 0.08);
+	border: 1px solid rgba(0, 212, 255, 0.18);
+	font-size: 12px;
+	color: #d5f7ff;
 }
 
 .adjust-grid {
@@ -1024,13 +997,8 @@ onMounted( () => {
 		width: 152px;
 	}
 
-	.action-dock {
-		gap: 8px;
-		padding: 8px;
-	}
-
 	.bottom-sheet {
-		bottom: calc(92px + env(safe-area-inset-bottom));
+		height: min(62vh, 540px);
 	}
 
 	.adjust-row {
