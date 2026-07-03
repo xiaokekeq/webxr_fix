@@ -30,11 +30,11 @@ const TEXT = {
 	inspectionType: '类型',
 	inspectionSeverity: '等级',
 	inspectionNote: '备注',
-	saveInspection: '保存记录',
-	exportRecords: '导出记录',
-	takeSnapshot: '截屏',
-	exit: '退出',
-	panelTool: '控制',
+	saveInspection: '保存巡查记录',
+	exportRecords: '导出巡查记录',
+	takeSnapshot: '截取画面',
+	exit: '退出 AR',
+	panelTool: '控制面板',
 	unknownModel: '未选择模型'
 } as const;
 
