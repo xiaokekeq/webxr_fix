@@ -8,6 +8,7 @@ import type {
 	ArWorkflowMode,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
+import type { InspectionPlacementSource } from '@/localization/core/registration-store.js';
 import { getControlTargetImageUrl, isPattFileUrl } from '@/localization/baseline/site-calibration-baseline.js';
 
 const AUTO_MARKER_STABLE_FRAME_COUNT = 3;
@@ -25,6 +26,7 @@ const STATUS_SCAN_PLANE_AND_MANUAL = '请先扫描平面，然后开始手动四
 
 interface InspectionMarkerWorkflowOptions {
 	getWorkflowMode(): ArWorkflowMode;
+	getInspectionPlacementSource(): InspectionPlacementSource;
 	getCurrentSessionId(): string | null;
 	getSiteId(): string | null;
 	getControlTargets(): VisualControlTarget[];
@@ -32,6 +34,7 @@ interface InspectionMarkerWorkflowOptions {
 	hasGroundHit(): boolean;
 	hasPlacedModel(): boolean;
 	setStatus(message: string): void;
+	requestPreferredPlacement(): void;
 	startManualCalibration(message: string): void;
 	onStableObservation(
 		targetId: string,
@@ -56,12 +59,16 @@ export class InspectionMarkerWorkflow {
 	private stableFrameCount = 0;
 	private samples: XrImageTrackingObservation[] = [];
 	private planeReadyLogged = false;
+	private preferredPlacementRequested = false;
 
 	constructor(private readonly options: InspectionMarkerWorkflowOptions) {}
 
 	getTrackedImages(): XrTrackedImageDefinition[] {
 
-		if ( this.options.getWorkflowMode() !== 'ar-inspection' ) {
+		if (
+			this.options.getWorkflowMode() !== 'ar-inspection'
+			|| this.options.getInspectionPlacementSource() !== 'marker-auto'
+		) {
 			return [];
 		}
 
@@ -144,6 +151,7 @@ export class InspectionMarkerWorkflow {
 
 	startSession(): void {
 
+		const preferredSource = this.options.getInspectionPlacementSource();
 		const trackedImages = this.getTrackedImages();
 		this.fallbackTriggered = false;
 		this.autoApplied = false;
@@ -153,6 +161,7 @@ export class InspectionMarkerWorkflow {
 		this.stableFrameCount = 0;
 		this.samples = [];
 		this.planeReadyLogged = false;
+		this.preferredPlacementRequested = false;
 		this.imageTrackingState = {
 			requested: trackedImages.length > 0,
 			supported: false,
@@ -164,19 +173,29 @@ export class InspectionMarkerWorkflow {
 			return;
 		}
 
-		console.info( '[AutoMarkerImageTrackingRequested]', this.buildLogPayload( {
-			targetId: this.options.getPrimaryTargetId(),
-			source: 'marker-auto-image',
-			trackingState: 'requested',
-			stableFrameCount: 0,
-			hasHitTest: this.options.hasGroundHit(),
-			createdAt: Date.now()
-		} ) );
-		this.options.setStatus(
-			trackedImages.length > 0
-				? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
-				: STATUS_MANUAL_NO_TRACKED_IMAGE
-		);
+		if ( preferredSource === 'marker-auto' ) {
+			console.info( '[AutoMarkerImageTrackingRequested]', this.buildLogPayload( {
+				targetId: this.options.getPrimaryTargetId(),
+				source: 'marker-auto-image',
+				trackingState: 'requested',
+				stableFrameCount: 0,
+				hasHitTest: this.options.hasGroundHit(),
+				createdAt: Date.now()
+			} ) );
+			this.options.setStatus(
+				trackedImages.length > 0
+					? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
+					: STATUS_MANUAL_NO_TRACKED_IMAGE
+			);
+			return;
+		}
+
+		if ( preferredSource === 'gps-bias' ) {
+			this.options.setStatus( '请先扫描平面，随后将按 GPS / 粗配准自动放置模型。' );
+			return;
+		}
+
+		this.options.setStatus( '请先扫描平面，识别成功后会按当前平面临时放置模型。' );
 
 	}
 
@@ -196,6 +215,7 @@ export class InspectionMarkerWorkflow {
 		this.stableFrameCount = 0;
 		this.samples = [];
 		this.planeReadyLogged = false;
+		this.preferredPlacementRequested = false;
 
 	}
 
@@ -242,7 +262,10 @@ export class InspectionMarkerWorkflow {
 
 	handleImageTrackingStateChange(state: XrImageTrackingState): void {
 
-		if ( this.options.getWorkflowMode() !== 'ar-inspection' ) {
+		if (
+			this.options.getWorkflowMode() !== 'ar-inspection'
+			|| this.options.getInspectionPlacementSource() !== 'marker-auto'
+		) {
 			this.imageTrackingState = state;
 			return;
 		}
@@ -294,6 +317,7 @@ export class InspectionMarkerWorkflow {
 		if (
 			this.options.getWorkflowMode() !== 'ar-inspection'
 			|| this.options.getCurrentSessionId() === null
+			|| this.options.getInspectionPlacementSource() !== 'marker-auto'
 			|| this.fallbackTriggered
 			|| this.autoApplied
 		) {
@@ -383,14 +407,31 @@ export class InspectionMarkerWorkflow {
 				createdAt: Date.now()
 			} ) );
 			if ( this.options.hasPlacedModel() === false ) {
-				this.options.setStatus(
-					this.imageTrackingState.requested
-						? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
-						: STATUS_SCAN_PLANE_AND_MANUAL
-				);
+				const preferredSource = this.options.getInspectionPlacementSource();
+				if ( preferredSource === 'marker-auto' ) {
+					this.options.setStatus(
+						this.imageTrackingState.requested
+							? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
+							: STATUS_SCAN_PLANE_AND_MANUAL
+					);
+				} else if ( preferredSource === 'gps-bias' ) {
+					this.options.setStatus( '已识别平面，正在按 GPS / 粗配准准备自动放置模型。' );
+				} else {
+					this.options.setStatus( '已识别平面，正在按当前平面临时放置模型。' );
+				}
+			}
+
+			if (
+				this.options.hasPlacedModel() === false
+				&& this.preferredPlacementRequested === false
+				&& this.options.getInspectionPlacementSource() !== 'marker-auto'
+			) {
+				this.preferredPlacementRequested = true;
+				this.options.requestPreferredPlacement();
 			}
 		} else if ( hasGroundHit === false ) {
 			this.planeReadyLogged = false;
+			this.preferredPlacementRequested = false;
 		}
 
 		if (

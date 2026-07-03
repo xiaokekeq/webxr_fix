@@ -40,6 +40,7 @@ import {
 	type AnnotationDetailState,
 	type ArDisplayMode,
 	type ArPlacementMode,
+	type InspectionPlacementSource,
 	type RegistrationStore,
 	type RegistrationStoreState,
 	type SectionCutPlaneMode,
@@ -172,6 +173,7 @@ function createInitialState(): RegistrationStoreState {
 		},
 		manualAdjustmentPreset: 'fine',
 		placementMode: 'localized',
+		inspectionPlacementSource: 'marker-auto',
 		registrationMetrics: {
 			gpsText: '-',
 			enuText: '-',
@@ -376,6 +378,7 @@ export class ThreeEngine {
 		this.gpsBiasWorkflow = new GpsBiasWorkflow( {
 			placementSession: this.placementSession,
 			getWorkflowMode: () => this.workflowMode,
+			getInspectionPlacementSource: () => this.store.getState().inspectionPlacementSource,
 			getSiteId: () => this.demoModelConfig?.modelId ?? null,
 			getCurrentSessionId: () => this.currentArSessionId,
 			getActiveCorrection: () => this.activeGpsBiasCorrection,
@@ -423,6 +426,7 @@ export class ThreeEngine {
 
 		this.inspectionMarkerWorkflow = new InspectionMarkerWorkflow( {
 			getWorkflowMode: () => this.workflowMode,
+			getInspectionPlacementSource: () => this.store.getState().inspectionPlacementSource,
 			getCurrentSessionId: () => this.currentArSessionId,
 			getSiteId: () => this.demoModelConfig?.modelId ?? null,
 			getControlTargets: () => this.getCurrentControlTargets(),
@@ -432,6 +436,16 @@ export class ThreeEngine {
 			setStatus: ( message ) => {
 				statusRuntime.setStatus( message );
 				this.emit();
+			},
+			requestPreferredPlacement: () => {
+				if ( this.store.getState().inspectionPlacementSource === 'plane-hit-test' ) {
+					this.placeModelAtHitTest();
+					return;
+				}
+
+				this.store.patch( { placementMode: 'localized' } );
+				this.pointerSelection.suppressSelectionFor( 1200 );
+				this.placementWorkflow.requestAutoPlacement();
 			},
 			startManualCalibration: ( message ) => {
 				this.markerCalibrationRuntime.startCurrentSessionCalibration();
@@ -1595,6 +1609,48 @@ export class ThreeEngine {
 				? '已切换为临时放到平面。'
 				: '已切换为按定位固定。'
 		);
+		this.emit();
+
+	}
+
+	setInspectionPlacementSource(source: InspectionPlacementSource): void {
+
+		const placementMode = source === 'plane-hit-test' ? 'hit-test-temporary' : 'localized';
+		this.store.patch( {
+			inspectionPlacementSource: source,
+			placementMode
+		} );
+
+		if ( source !== 'marker-auto' ) {
+			this.markerCalibrationRuntime.resetCurrentSessionCalibration();
+			if ( this.activeMarkerArFromEnuSolution !== null ) {
+				this.resetMarkerLocalizationCorrection();
+				this.syncRegistrationChainDebug();
+			}
+		}
+
+		this.setStatus(
+			source === 'marker-auto'
+				? '已切换为隐藏式 Marker 自动识别，扫描成功后会自动放置模型。'
+				: source === 'gps-bias'
+					? '已切换为 GPS / 粗配准固定放置。'
+					: '已切换为当前平面临时放置。'
+		);
+
+		if (
+			this.workflowMode === 'ar-inspection'
+			&& this.sceneBundle.renderer.xr.isPresenting
+			&& this.placementSession.getPlacedModel() === null
+			&& this.xrRuntime.getHitTestController().hasGroundHit()
+		) {
+			if ( source === 'plane-hit-test' ) {
+				this.placeModelAtHitTest();
+			} else if ( source === 'gps-bias' ) {
+				this.pointerSelection.suppressSelectionFor( 1200 );
+				this.placementWorkflow.requestAutoPlacement();
+			}
+		}
+
 		this.emit();
 
 	}

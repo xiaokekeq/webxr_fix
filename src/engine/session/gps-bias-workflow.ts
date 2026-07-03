@@ -15,6 +15,7 @@ import type { ManualPlacementBase } from '@/localization/manual/manual-registrat
 import type { GpsBiasCorrection as StoredGpsBiasCorrection } from '@/localization/gps-bias/gps-bias-storage.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { PlacementSession } from '@/engine/placement/session.js';
+import type { InspectionPlacementSource } from '@/localization/core/registration-store.js';
 
 const tempGpsBiasSmoothedPosition = new THREE.Vector3();
 const tempGpsBiasSmoothedOrientation = new THREE.Quaternion();
@@ -22,6 +23,7 @@ const tempGpsBiasSmoothedOrientation = new THREE.Quaternion();
 interface GpsBiasWorkflowOptions {
 	placementSession: PlacementSession;
 	getWorkflowMode(): ArWorkflowMode;
+	getInspectionPlacementSource(): InspectionPlacementSource;
 	getSiteId(): string | null;
 	getCurrentSessionId(): string | null;
 	getActiveCorrection(): StoredGpsBiasCorrection | null;
@@ -110,6 +112,19 @@ export class GpsBiasWorkflow {
 	}
 
 	getPreferredLocalizationOverride(): ArFromEnuSolution | null {
+
+		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
+			const preferredSource = this.options.getInspectionPlacementSource();
+			if ( preferredSource === 'marker-auto' ) {
+				return this.options.getActiveMarkerArFromEnuSolution();
+			}
+
+			if ( preferredSource === 'gps-bias' ) {
+				return this.getSessionSolution();
+			}
+
+			return null;
+		}
 
 		const markerSolution = this.options.getActiveMarkerArFromEnuSolution();
 		if ( markerSolution !== null ) {

@@ -1,6 +1,7 @@
 ﻿import type {
 	ArDisplayMode,
 	ArPlacementMode,
+	InspectionPlacementSource,
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
@@ -53,6 +54,7 @@ export interface LoadModelArController {
 		clearSavedMarkerLocalization(): void;
 		resetPlacement(): void;
 		setManualAdjustmentPreset(preset: ManualAdjustmentPreset): void;
+		setInspectionPlacementSource(source: InspectionPlacementSource): void;
 		setPlacementMode(mode: ArPlacementMode): void;
 		adjustTranslation(axis: 'x' | 'y' | 'z', direction: 1 | -1): void;
 		adjustYaw(direction: 1 | -1): void;
@@ -282,6 +284,12 @@ export function createLoadModelArController(): LoadModelArController {
 			setManualAdjustmentPreset(preset) {
 
 				engine.setManualAdjustmentPreset( preset );
+
+			},
+
+			setInspectionPlacementSource(source) {
+
+				engine.setInspectionPlacementSource( source );
 
 			},
 

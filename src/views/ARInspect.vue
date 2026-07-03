@@ -3,12 +3,15 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
+import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS,
 	getDisplayModeSliderValueText
 } from '@/features/ar/types/display-modes.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
+
+const PLACEMENT_STATUS_TITLE = '放置方式';
 
 const TEXT = {
 	title: '堤防 AR 巡查',
@@ -47,6 +50,12 @@ const TEXT = {
 	panelTool: '控制面板',
 	unknownModel: '未选择模型'
 } as const;
+
+const INSPECTION_PLACEMENT_SOURCE_OPTIONS = [
+	{ value: 'marker-auto', label: 'Marker 自动识别' },
+	{ value: 'gps-bias', label: 'GPS / 粗配准' },
+	{ value: 'plane-hit-test', label: '当前平面临放' }
+] as const;
 
 const route = useRoute();
 const router = useRouter();
@@ -126,6 +135,24 @@ const calibrationActionHint = computed( () => {
 
 	return engine.value.runtimeStatus;
 } );
+const isMarkerPlacementSelected = computed( () => engine.value.inspectionPlacementSource === 'marker-auto' );
+const showManualMarkerControls = computed(
+	() => isMarkerPlacementSelected.value && engine.value.markerCalibration.active
+);
+const inspectionPlacementHint = computed( () => {
+	switch ( engine.value.inspectionPlacementSource ) {
+		case 'marker-auto':
+			return showManualMarkerControls.value
+				? '当前已切到手动四角点校正，请按顺序记录四个角点后应用。'
+				: '当前使用隐藏式 Marker 自动识别。请先扫描平面，再让控制标志进入视野，识别稳定后会自动放置模型。';
+		case 'gps-bias':
+			return '当前使用 GPS / 粗配准固定放置。扫描到平面后会自动尝试放置模型。';
+		case 'plane-hit-test':
+			return '当前使用平面临时放置。扫描到平面后会按当前识别平面自动临放模型。';
+		default:
+			return engine.value.runtimeStatus;
+	}
+} );
 
 async function mountEngineHosts(): Promise<void> {
 	await store.initialize();
@@ -183,6 +210,12 @@ function applyMarkerCalibration(): void {
 
 function resetMarkerCalibration(): void {
 	store.actions.resetCurrentSessionMarkerCalibration();
+}
+
+function handleInspectionPlacementSourceChange(
+	source: 'marker-auto' | 'gps-bias' | 'plane-hit-test'
+): void {
+	store.actions.setInspectionPlacementSource( source );
 }
 
 function exitPage(): void {
@@ -294,6 +327,8 @@ onMounted( () => {
 					</button>
 				</div>
 
+				<ArPlacementStatusSection :state="engine" :title="PLACEMENT_STATUS_TITLE" first />
+
 				<template v-if="engine.workspaceMode === 'browse'">
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.viewMode }}</div>
@@ -329,10 +364,27 @@ onMounted( () => {
 				</template>
 
 				<template v-else>
+					<div class="sheet-section">
+						<div class="section-label">放置来源</div>
+						<div class="chip-grid">
+							<button
+								v-for="item in INSPECTION_PLACEMENT_SOURCE_OPTIONS"
+								:key="item.value"
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.inspectionPlacementSource === item.value }"
+								@click="handleInspectionPlacementSourceChange(item.value)"
+							>
+								{{ item.label }}
+							</button>
+						</div>
+						<div class="runtime-banner">{{ inspectionPlacementHint }}</div>
+					</div>
+
 					<ArPanelSection :title="TEXT.calibrationPanel">
 						<ArInfoGrid :items="calibrationStatusCards" class="compact-info-grid" />
 						<div class="runtime-banner">{{ calibrationActionHint }}</div>
-						<div class="action-row">
+						<div v-if="showManualMarkerControls" class="action-row">
 							<button type="button" class="action-button" @click="startMarkerCalibration()">
 								{{ TEXT.startCalibration }}
 							</button>
@@ -344,6 +396,19 @@ onMounted( () => {
 							</button>
 							<button type="button" class="action-button" @click="resetMarkerCalibration()">
 								{{ TEXT.resetCalibration }}
+							</button>
+						</div>
+						<div v-else-if="isMarkerPlacementSelected" class="action-row">
+							<button type="button" class="action-button" @click="startMarkerCalibration()">
+								切换为手动四角点
+							</button>
+							<button
+								v-if="engine.markerCalibration.capturedCornerCount > 0 || engine.markerCalibration.active"
+								type="button"
+								class="action-button"
+								@click="resetMarkerCalibration()"
+							>
+								重置手动角点
 							</button>
 						</div>
 					</ArPanelSection>

@@ -8,6 +8,7 @@ export type AppMode = 'pre-ar' | 'ar-session';
 export type ArSupportState = 'checking' | 'supported' | 'unsupported';
 export type ArSessionPhase = 'scanning' | 'ready-to-place' | 'placing' | 'placed';
 export type ArPlacementMode = 'localized' | 'hit-test-temporary';
+export type InspectionPlacementSource = 'marker-auto' | 'gps-bias' | 'plane-hit-test';
 export type ArDisplayMode =
 	| 'solid-overlay'
 	| 'transparent-xray'
@@ -209,6 +210,7 @@ export interface RegistrationStoreState {
 	manualReadout: ManualReadoutState;
 	manualAdjustmentPreset: ManualAdjustmentPreset;
 	placementMode: ArPlacementMode;
+	inspectionPlacementSource: InspectionPlacementSource;
 	registrationMetrics: RegistrationMetricsState;
 	modelScaleSummary: ModelScaleSummaryState;
 	registrationChainDebug: RegistrationChainDebugState;

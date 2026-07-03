@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import AppTabBar from '../components/AppTabBar.vue';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
+import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS,
@@ -14,6 +15,8 @@ import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 import type { ManualAdjustmentPreset } from '@/localization/manual/manual-registration.js';
 
 type CalibrationPanelView = 'overview' | 'placement' | 'display' | 'calibration';
+
+const PLACEMENT_STATUS_TITLE = '放置方式';
 
 const TEXT = {
 	title: '现场基准配置',
@@ -117,6 +120,12 @@ const sessionSnapshotCards = computed( () => [
 	{ label: '模型位置', value: engine.value.placementSummary.positionText, wide: true },
 	{ label: '模型姿态', value: engine.value.placementSummary.quaternionText, wide: true },
 	{ label: '模型缩放', value: engine.value.placementSummary.scaleText }
+] );
+const overviewCards = computed( () => [
+	{ label: '当前显示', value: getDisplayModeLabel( engine.value.displayMode ) },
+	{ label: '当前阶段', value: engine.value.timelineStages[ engine.value.currentTimelineStageIndex ] ?? '-' },
+	{ label: '角点进度', value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
+	{ label: 'GPS 补偿', value: engine.value.gpsBiasCorrection.statusText, wide: true }
 ] );
 const markerCalibrationCards = computed( () => [
 	{ label: TEXT.cornersCollected, value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
@@ -353,9 +362,11 @@ onMounted( () => {
 					</button>
 				</div>
 
+				<ArPlacementStatusSection :state="engine" :title="PLACEMENT_STATUS_TITLE" first />
+
 				<template v-if="activePanelView === 'overview'">
-					<ArPanelSection :title="TEXT.sessionOverview" first>
-						<ArInfoGrid :items="sessionSnapshotCards" />
+					<ArPanelSection :title="TEXT.sessionOverview">
+						<ArInfoGrid :items="overviewCards" />
 						<div class="runtime-banner">{{ runtimeStatusText }}</div>
 					</ArPanelSection>
 				</template>

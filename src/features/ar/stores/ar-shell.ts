@@ -11,6 +11,7 @@ import type { ManualAdjustmentPreset } from '@/localization/manual/manual-regist
 import type {
 	ArDisplayMode,
 	ArPlacementMode,
+	InspectionPlacementSource,
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
@@ -390,6 +391,12 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		setManualAdjustmentPreset(preset: ManualAdjustmentPreset): void {
 
 			ensureController().actions.setManualAdjustmentPreset( preset );
+
+		},
+
+		setInspectionPlacementSource(source: InspectionPlacementSource): void {
+
+			ensureController().actions.setInspectionPlacementSource( source );
 
 		},
 
