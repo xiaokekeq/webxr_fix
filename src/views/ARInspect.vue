@@ -147,7 +147,6 @@ function exitPage(): void {
 onMounted( () => {
 	void mountEngineHosts();
 	store.actions.setWorkflowMode( 'ar-inspection' );
-	store.actions.activatePanel( 'browse' );
 } );
 </script>
 
