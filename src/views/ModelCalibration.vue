@@ -13,7 +13,7 @@ import {
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 import type { ManualAdjustmentPreset } from '@/localization/manual/manual-registration.js';
 
-type CalibrationPanelView = 'placement' | 'display' | 'calibration';
+type CalibrationPanelView = 'overview' | 'placement' | 'display' | 'calibration';
 
 const TEXT = {
 	title: '现场基准配置',
@@ -38,6 +38,7 @@ const TEXT = {
 	resetPlacement: '清除当前放置',
 	placementActions: '放置操作',
 	sessionOverview: '会话总览',
+	overview: '总览',
 	displayMode: '模型显示',
 	sectionPlane: '剖切方向',
 	projectStage: '阶段筛选',
@@ -75,6 +76,7 @@ const TEXT = {
 } as const;
 
 const PANEL_OPTIONS: Array<{ value: CalibrationPanelView; label: string }> = [
+	{ value: 'overview', label: TEXT.overview },
 	{ value: 'placement', label: TEXT.placement },
 	{ value: 'display', label: TEXT.display },
 	{ value: 'calibration', label: TEXT.calibration }
@@ -92,7 +94,7 @@ const store = useArShellStore();
 
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
-const activePanelView = ref<CalibrationPanelView>( 'placement' );
+const activePanelView = ref<CalibrationPanelView>( 'overview' );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
@@ -351,12 +353,14 @@ onMounted( () => {
 					</button>
 				</div>
 
-				<ArPanelSection :title="TEXT.sessionOverview" first>
-					<ArInfoGrid :items="sessionSnapshotCards" />
-					<div class="runtime-banner">{{ runtimeStatusText }}</div>
-				</ArPanelSection>
+				<template v-if="activePanelView === 'overview'">
+					<ArPanelSection :title="TEXT.sessionOverview" first>
+						<ArInfoGrid :items="sessionSnapshotCards" />
+						<div class="runtime-banner">{{ runtimeStatusText }}</div>
+					</ArPanelSection>
+				</template>
 
-				<template v-if="activePanelView === 'placement'">
+				<template v-else-if="activePanelView === 'placement'">
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.placementActions }}</div>
 						<div class="runtime-banner">应用配准放置会基于当前配准结果固定模型；应用平面临放仅按当前识别平面临时放置。</div>
