@@ -10,6 +10,7 @@ import type {
 } from '@/models/config/demo-model-config.js';
 import { createEnuFrame, geodeticToEnu } from '@/localization/core/geodesy.js';
 import type { MarkerPoseInAr } from '@/localization/marker/marker-pose-in-ar.js';
+import type { VisualControlTarget } from '@/features/ar/types/workflow.js';
 
 export interface MarkerLocalizationCorrespondence {
 	id: string;
@@ -25,7 +26,7 @@ export interface MarkerLocalizationSolution {
 	headingDeg: number;
 	rmsErrorMeters: number;
 	correspondenceCount: number;
-	source: 'marker';
+	source: 'marker' | 'marker-auto-image';
 }
 
 export interface MarkerPoseInEnu {
@@ -47,6 +48,7 @@ export function solveMarkerLocalization(args: {
 	accuracyMeters?: number;
 	yawAccuracyDegrees?: number;
 	sessionId?: string | null;
+	source?: 'marker' | 'marker-auto-image';
 	timestamp?: number;
 } | {
 	markerId: string;
@@ -54,6 +56,8 @@ export function solveMarkerLocalization(args: {
 	markerPoseInAr: MarkerPoseInAr;
 	accuracyMeters?: number;
 	yawAccuracyDegrees?: number;
+	source?: 'marker' | 'marker-auto-image';
+	sessionId?: string | null;
 	timestamp?: number;
 }): MarkerLocalizationSolution {
 
@@ -99,7 +103,7 @@ export function solveMarkerLocalization(args: {
 		position: siteOriginArPosition,
 		orientation,
 		headingDeg,
-		source: 'marker',
+		source: args.source ?? 'marker',
 		sessionId: args.sessionId ?? null,
 		accuracyMeters: args.accuracyMeters,
 		yawAccuracyDegrees: args.yawAccuracyDegrees,
@@ -123,7 +127,7 @@ export function solveMarkerLocalization(args: {
 		headingDeg: arFromEnuSolution.headingDeg,
 		rmsErrorMeters,
 		correspondenceCount: correspondences.length,
-		source: 'marker'
+		source: arFromEnuSolution.source === 'marker-auto-image' ? 'marker-auto-image' : 'marker'
 	};
 
 }
@@ -216,6 +220,31 @@ export function resolveMarkerCornersInEnu(
 
 }
 
+export function createMarkerPoseInEnuFromControlTarget(
+	target: VisualControlTarget
+): MarkerPoseInEnu {
+
+	const matrix = new THREE.Matrix4().compose(
+		new THREE.Vector3(
+			target.centerEnu[ 0 ],
+			target.centerEnu[ 1 ],
+			target.centerEnu[ 2 ]
+		),
+		new THREE.Quaternion().setFromAxisAngle(
+			new THREE.Vector3( 0, 0, 1 ),
+			THREE.MathUtils.degToRad( target.yawDeg )
+		),
+		new THREE.Vector3( 1, 1, 1 )
+	);
+
+	return {
+		markerId: target.id,
+		matrix,
+		sizeMeters: target.sizeMeters
+	};
+
+}
+
 const tempSitePointInAr = new THREE.Vector3();
 const tempAverageTranslation = new THREE.Vector3();
 const tempNorthInAr = new THREE.Vector3();
@@ -253,6 +282,8 @@ function solveMarkerLocalizationFromSingleMarkerPose(args: {
 	markerPoseInAr: MarkerPoseInAr;
 	accuracyMeters?: number;
 	yawAccuracyDegrees?: number;
+	source?: 'marker' | 'marker-auto-image';
+	sessionId?: string | null;
 	timestamp?: number;
 }): MarkerLocalizationSolution {
 
@@ -285,6 +316,8 @@ function solveMarkerLocalizationFromSingleMarkerPose(args: {
 		orientation,
 		accuracyMeters: args.accuracyMeters,
 		yawAccuracyDegrees: args.yawAccuracyDegrees,
+		source: args.source ?? 'marker',
+		sessionId: args.sessionId ?? null,
 		timestamp: args.timestamp ?? args.markerPoseInAr.timestamp
 	} );
 
@@ -355,6 +388,8 @@ function isSingleMarkerPoseLocalizationArgs(args: {
 	markerPoseInAr: MarkerPoseInAr;
 	accuracyMeters?: number;
 	yawAccuracyDegrees?: number;
+	source?: 'marker' | 'marker-auto-image';
+	sessionId?: string | null;
 	timestamp?: number;
 } {
 

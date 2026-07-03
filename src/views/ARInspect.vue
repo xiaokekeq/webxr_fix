@@ -11,21 +11,29 @@ import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 const TEXT = {
 	title: '堤防 AR 巡查',
 	enterArTitle: '进入 AR 巡查',
-	enterArSub: '当前模型选择仅用于调试阶段，后续可由业务入口自动带入。',
+	enterArSub: '进入后先扫描平面，再对准现场控制标志完成空间校正。',
 	enterAr: '进入 AR',
 	selectModel: '选择模型',
 	status: '状态',
 	waiting: '待进入 AR',
 	scanning: '正在识别平面',
-	ready: '可开始放置',
-	placing: '正在放置模型',
+	ready: '平面已就绪',
+	placing: '正在应用空间校正',
 	placed: '巡查中',
 	viewMode: '模型显示',
+	calibrationPanel: '空间校正',
 	inspectionRecord: '巡查记录',
 	collapsePanel: '收起面板',
 	browseMode: '显示控制',
 	inspectionMode: '巡查记录',
 	sectionPlane: '剖切方向',
+	calibrationHint: '请先扫描平面，然后对准现场控制标志；若自动识别不可用，可切换到手动四角点校正。',
+	startCalibration: '开始控制标志校正',
+	captureCorner: '记录当前角点',
+	applyCalibration: '应用空间校正',
+	resetCalibration: '重置角点',
+	cornerProgress: '角点进度',
+	nextCorner: '待记录角点',
 	inspectionResult: '结果',
 	inspectionType: '类型',
 	inspectionSeverity: '等级',
@@ -94,6 +102,24 @@ const sessionStatusText = computed( () => {
 			return engine.value.runtimeStatus;
 	}
 } );
+const calibrationProgressText = computed(
+	() => `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}`
+);
+const calibrationActionHint = computed( () => {
+	if ( hasArSession.value === false ) {
+		return '进入 AR 后先扫描平面，再开始控制标志校正。';
+	}
+
+	if ( engine.value.markerCalibration.active ) {
+		return engine.value.runtimeStatus;
+	}
+
+	if ( engine.value.arSessionPhase === 'scanning' ) {
+		return '请先缓慢移动手机扫描地面或控制标志所在平面。';
+	}
+
+	return engine.value.runtimeStatus;
+} );
 
 async function mountEngineHosts(): Promise<void> {
 	await store.initialize();
@@ -135,6 +161,22 @@ function openWorkspacePanel(): void {
 	}
 
 	store.actions.activatePanel( engine.value.workspaceMode === 'inspection' ? 'inspection' : 'browse' );
+}
+
+function startMarkerCalibration(): void {
+	store.actions.startCurrentSessionMarkerCalibration();
+}
+
+function captureMarkerCorner(): void {
+	store.actions.captureCurrentSessionMarkerCorner();
+}
+
+function applyMarkerCalibration(): void {
+	store.actions.solveAndApplyCurrentSessionMarkerCalibration();
+}
+
+function resetMarkerCalibration(): void {
+	store.actions.resetCurrentSessionMarkerCalibration();
 }
 
 function exitPage(): void {
@@ -281,6 +323,35 @@ onMounted( () => {
 				</template>
 
 				<template v-else>
+					<div class="sheet-section">
+						<div class="section-label">{{ TEXT.calibrationPanel }}</div>
+						<div class="info-grid compact-info-grid">
+							<div class="info-card">
+								<span>{{ TEXT.cornerProgress }}</span>
+								<strong>{{ calibrationProgressText }}</strong>
+							</div>
+							<div class="info-card">
+								<span>{{ TEXT.nextCorner }}</span>
+								<strong>{{ engine.markerCalibration.nextCornerLabel || '-' }}</strong>
+							</div>
+						</div>
+						<div class="runtime-banner">{{ calibrationActionHint }}</div>
+						<div class="action-row">
+							<button type="button" class="action-button" @click="startMarkerCalibration()">
+								{{ TEXT.startCalibration }}
+							</button>
+							<button type="button" class="action-button" @click="captureMarkerCorner()">
+								{{ TEXT.captureCorner }}
+							</button>
+							<button type="button" class="action-button primary" @click="applyMarkerCalibration()">
+								{{ TEXT.applyCalibration }}
+							</button>
+							<button type="button" class="action-button" @click="resetMarkerCalibration()">
+								{{ TEXT.resetCalibration }}
+							</button>
+						</div>
+					</div>
+
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.inspectionRecord }}</div>
 						<div class="form-grid">
@@ -655,10 +726,41 @@ onMounted( () => {
 	margin-top: 10px;
 }
 
+.info-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.info-card {
+	padding: 12px;
+	border-radius: 16px;
+	background: rgba(255, 255, 255, 0.04);
+	border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.info-card span {
+	display: block;
+	font-size: 11px;
+	color: rgba(210, 225, 255, 0.64);
+}
+
+.info-card strong {
+	display: block;
+	margin-top: 6px;
+	font-size: 13px;
+	font-weight: 600;
+	word-break: break-word;
+}
+
 .form-grid {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 10px;
+	margin-top: 10px;
+}
+
+.compact-info-grid {
 	margin-top: 10px;
 }
 
@@ -692,6 +794,16 @@ onMounted( () => {
 	flex-wrap: wrap;
 	gap: 10px;
 	margin-top: 14px;
+}
+
+.runtime-banner {
+	margin-top: 10px;
+	padding: 10px 12px;
+	border-radius: 14px;
+	background: rgba(0, 212, 255, 0.08);
+	border: 1px solid rgba(0, 212, 255, 0.18);
+	font-size: 12px;
+	color: #d5f7ff;
 }
 
 .sheet-fade-enter-active,

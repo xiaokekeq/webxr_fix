@@ -2136,7 +2136,7 @@ function serializeStabilityReport(report: MarkerLocalizationStabilityReport): {
 		headingDeg: number;
 		rmsErrorMeters: number;
 		correspondenceCount: number;
-		source: 'marker';
+		source: 'marker' | 'marker-auto-image';
 		timestamp: number;
 	};
 } {

@@ -68,6 +68,7 @@ import {
 	type GpsBiasCorrection as StoredGpsBiasCorrection
 } from '@/localization/gps-bias/gps-bias-storage.js';
 import {
+	createMarkerPoseInEnuFromControlTarget,
 	resolveMarkerCornersInEnu,
 	resolveMarkerPoseInEnu,
 	solveMarkerLocalization,
@@ -109,6 +110,11 @@ import {
 import { computeTargetGuidanceState } from '@/engine/placement/target-guidance.js';
 import { createARScene, resizeARScene } from './scene.js';
 import { createXRSessionRuntime } from '@/engine/platform/xr.js';
+import type {
+	XrImageTrackingObservation,
+	XrImageTrackingState,
+	XrTrackedImageDefinition
+} from '@/features/ar/types/runtime-types.js';
 import {
 	getDisplayModeLabel,
 	getSectionCutPlaneModeLabel
@@ -140,6 +146,9 @@ const tempMarkerEnuScale = new THREE.Vector3();
 const tempViewerArPosition = new THREE.Vector3();
 const tempGpsBiasSmoothedPosition = new THREE.Vector3();
 const tempGpsBiasSmoothedOrientation = new THREE.Quaternion();
+const tempAutoMarkerArPosition = new THREE.Vector3();
+const tempAutoMarkerArQuaternion = new THREE.Quaternion();
+const tempAutoMarkerArScale = new THREE.Vector3();
 
 const MARKER_CORNER_SEQUENCE = [
 	{ id: 'top-left', label: '左上角' },
@@ -147,6 +156,10 @@ const MARKER_CORNER_SEQUENCE = [
 	{ id: 'bottom-right', label: '右下角' },
 	{ id: 'bottom-left', label: '左下角' }
 ] as const;
+const AUTO_MARKER_STABLE_FRAME_COUNT = 3;
+const AUTO_MARKER_MAX_POSITION_JITTER_METERS = 0.15;
+const AUTO_MARKER_MAX_ROTATION_JITTER_DEGREES = 5;
+const AUTO_MARKER_FALLBACK_TIMEOUT_MS = 8000;
 
 type MarkerCornerSequenceId = ( typeof MARKER_CORNER_SEQUENCE )[ number ][ 'id' ];
 
@@ -311,6 +324,20 @@ export class ThreeEngine {
 	private latestAcceptedGpsBiasSample: GpsBiasGeolocationSample | null = null;
 	private attachedGpsBiasReferenceSpace: XRReferenceSpace | null = null;
 	private gpsBiasLowAccuracyWarned = false;
+	private autoImageTrackingState: XrImageTrackingState = {
+		requested: false,
+		supported: false,
+		active: false,
+		reason: 'idle'
+	};
+	private autoImageTrackingFallbackTriggered = false;
+	private autoImageTrackingApplied = false;
+	private autoImageTrackingStartedAt = 0;
+	private autoImageTrackingLastObservationAt = 0;
+	private autoImageTrackingStableTargetId: string | null = null;
+	private autoImageTrackingStableFrameCount = 0;
+	private autoImageTrackingSamples: XrImageTrackingObservation[] = [];
+	private inspectionPlaneReadyLogged = false;
 	private coarseRegistration = createCoarseRegistrationController( {
 		setStatus: ( message ) => {
 			this.setStatus( message );
@@ -530,10 +557,20 @@ export class ThreeEngine {
 			onAttemptCoarsePlacement: () => {
 				this.onAttemptCoarsePlacement();
 			},
+			getTrackedImages: () => {
+				return this.getInspectionTrackedImages();
+			},
+			onImageTrackingStateChange: ( state ) => {
+				this.handleImageTrackingStateChange( state );
+			},
+			onImageTrackingObservation: ( observation ) => {
+				this.handleImageTrackingObservation( observation );
+			},
 			onFrameUpdate: ( frame ) => {
 				this.displayModeController.updateDepthState( frame );
 				this.syncGpsBiasReferenceSpace();
 				this.syncGpsBiasFromFrame();
+				this.syncInspectionMarkerWorkflowHints();
 				this.placementSession.updateArPlacementAnchor( frame );
 				this.annotationLabelsController.update( this.sceneBundle.renderer.xr.getCamera() );
 				this.updateTargetGuidance();
@@ -1176,6 +1213,7 @@ export class ThreeEngine {
 			return;
 		}
 
+		this.autoImageTrackingFallbackTriggered = true;
 		this.currentSessionMarkerCornerCaptures = [];
 		this.currentSessionMarkerSolution = null;
 		this.syncMarkerCalibrationState( {
@@ -1200,8 +1238,8 @@ export class ThreeEngine {
 			lastUpdatedAt: Date.now()
 		} );
 		if ( this.workflowMode === 'ar-inspection' ) {
-			this.setStatus( '自动识别不可用，请按顺序对准控制标志四个角点：左上 -> 右上 -> 右下 -> 左下。完成后系统将自动校正。' );
-			console.info( '[ArInspectionFallbackToManualCorners]', {
+			this.setStatus( '请按顺序对准控制标志四个角点：左上 -> 右上 -> 右下 -> 左下。' );
+			console.info( '[ArInspectionMarkerManualStarted]', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
 				sessionId: this.currentArSessionId,
@@ -1257,7 +1295,7 @@ export class ThreeEngine {
 
 		const xrHitTest = this.xrRuntime.getHitTestController();
 		if ( xrHitTest.hasGroundHit() === false ) {
-			this.setStatus( '请让 reticle 对准 marker 所在平面，再采集角点。' );
+			this.setStatus( '请先缓慢移动手机扫描地面或控制标志所在平面。' );
 			return;
 		}
 
@@ -1282,6 +1320,19 @@ export class ThreeEngine {
 			cornerLabel: cornerMeta.label,
 			arPosition: vector3ToObject( arPosition )
 		} );
+		if ( this.workflowMode === 'ar-inspection' ) {
+			console.info( '[ArInspectionMarkerCornerCaptured]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				targetId: markerState.markerId,
+				source: 'marker',
+				trackingState: cornerMeta.id,
+				stableFrameCount: this.currentSessionMarkerCornerCaptures.length,
+				hasHitTest: true,
+				createdAt: Date.now()
+			} );
+		}
 		this.setStatus(
 			this.currentSessionMarkerCornerCaptures.length < MARKER_CORNER_SEQUENCE.length
 				? `已采集 ${cornerMeta.label}，下一点：${MARKER_CORNER_SEQUENCE[ this.currentSessionMarkerCornerCaptures.length ].label}。`
@@ -1354,6 +1405,19 @@ export class ThreeEngine {
 				timestamp: Date.now()
 			} );
 			this.currentSessionMarkerSolution = solution;
+			if ( this.workflowMode === 'ar-inspection' ) {
+				console.info( '[ArInspectionMarkerSolved]', {
+					mode: this.workflowMode,
+					siteId: this.demoModelConfig?.modelId ?? null,
+					sessionId: this.currentArSessionId,
+					targetId: markerId,
+					source: 'marker',
+					trackingState: 'solved',
+					stableFrameCount: MARKER_CORNER_SEQUENCE.length,
+					hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+					createdAt: Date.now()
+				} );
+			}
 			this.syncMarkerCalibrationState( {
 				solved: true,
 				applied: false,
@@ -2218,6 +2282,7 @@ export class ThreeEngine {
 		metadata: {
 			markerId: string;
 			markerConfigId: string;
+			source?: 'marker' | 'marker-auto-image';
 		}
 	): boolean {
 
@@ -2909,9 +2974,413 @@ export class ThreeEngine {
 
 	}
 
+	private getInspectionTrackedImages(): XrTrackedImageDefinition[] {
+
+		if ( this.workflowMode !== 'ar-inspection' ) {
+			return [];
+		}
+
+		return ( this.activeSiteCalibrationBaseline?.controlTargets ?? [] )
+			.flatMap( ( target ) => {
+				if ( typeof target.imageUrl !== 'string' || target.imageUrl.length === 0 ) {
+					return [];
+				}
+
+				const widthInMeters = target.trackingWidthMeters ?? target.sizeMeters;
+				if ( Number.isFinite( widthInMeters ) === false || widthInMeters <= 0 ) {
+					return [];
+				}
+
+				return [ {
+					targetId: target.id,
+					imageUrl: target.imageUrl,
+					widthInMeters
+				} ];
+			} );
+
+	}
+
+	private startAutoControlTargetCalibration(): void {
+
+		this.autoImageTrackingFallbackTriggered = false;
+		this.autoImageTrackingApplied = false;
+		this.autoImageTrackingStartedAt = Date.now();
+		this.autoImageTrackingLastObservationAt = 0;
+		this.autoImageTrackingStableTargetId = null;
+		this.autoImageTrackingStableFrameCount = 0;
+		this.autoImageTrackingSamples = [];
+		this.autoImageTrackingState = {
+			requested: this.getInspectionTrackedImages().length > 0,
+			supported: false,
+			active: false,
+			reason: this.getInspectionTrackedImages().length > 0 ? 'awaiting-session' : 'no-targets'
+		};
+		this.inspectionPlaneReadyLogged = false;
+
+		if ( this.workflowMode !== 'ar-inspection' ) {
+			return;
+		}
+
+		console.info( '[AutoMarkerImageTrackingRequested]', {
+			mode: this.workflowMode,
+			siteId: this.demoModelConfig?.modelId ?? null,
+			sessionId: this.currentArSessionId,
+			targetId: this.activeSiteCalibrationBaseline?.controlTargets[ 0 ]?.id ?? null,
+			source: 'marker-auto-image',
+			trackingState: 'requested',
+			stableFrameCount: 0,
+			hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+			createdAt: Date.now()
+		} );
+		this.setStatus( '请先扫描平面，然后对准现场控制标志。' );
+
+	}
+
+	private stopAutoControlTargetCalibration(): void {
+
+		this.autoImageTrackingState = {
+			requested: false,
+			supported: false,
+			active: false,
+			reason: 'stopped'
+		};
+		this.autoImageTrackingFallbackTriggered = false;
+		this.autoImageTrackingApplied = false;
+		this.autoImageTrackingStartedAt = 0;
+		this.autoImageTrackingLastObservationAt = 0;
+		this.autoImageTrackingStableTargetId = null;
+		this.autoImageTrackingStableFrameCount = 0;
+		this.autoImageTrackingSamples = [];
+		this.inspectionPlaneReadyLogged = false;
+
+	}
+
+	private handleImageTrackingStateChange(state: XrImageTrackingState): void {
+
+		if ( this.workflowMode !== 'ar-inspection' ) {
+			this.autoImageTrackingState = state;
+			return;
+		}
+
+		const previous = this.autoImageTrackingState;
+		this.autoImageTrackingState = state;
+		if ( state.reason === previous.reason && state.active === previous.active && state.supported === previous.supported ) {
+			return;
+		}
+
+		if ( state.requested && state.supported && state.active ) {
+			this.setStatus(
+				this.xrRuntime.getHitTestController().hasGroundHit()
+					? '正在自动识别控制标志...'
+					: '请先扫描平面，然后对准现场控制标志。'
+			);
+			return;
+		}
+
+		if (
+			state.requested
+			&& ( state.supported === false || state.reason === 'frame-api-missing' )
+			&& this.autoImageTrackingFallbackTriggered === false
+		) {
+			console.info( '[AutoMarkerImageTrackingUnsupported]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				targetId: this.activeSiteCalibrationBaseline?.controlTargets[ 0 ]?.id ?? null,
+				source: 'marker-auto-image',
+				trackingState: state.reason,
+				stableFrameCount: this.autoImageTrackingStableFrameCount,
+				hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+				createdAt: Date.now()
+			} );
+			this.fallbackToManualMarkerCalibration( '当前设备不支持自动识别，已切换为手动四角点校正。' );
+		}
+
+	}
+
+	private handleImageTrackingObservation(observation: XrImageTrackingObservation): void {
+
+		if (
+			this.workflowMode !== 'ar-inspection'
+			|| this.currentArSessionId === null
+			|| this.autoImageTrackingFallbackTriggered
+			|| this.autoImageTrackingApplied
+		) {
+			return;
+		}
+
+		console.info( '[AutoMarkerObservationReceived]', {
+			mode: this.workflowMode,
+			siteId: this.demoModelConfig?.modelId ?? null,
+			sessionId: this.currentArSessionId,
+			targetId: observation.targetId,
+			source: 'marker-auto-image',
+			trackingState: observation.trackingState,
+			stableFrameCount: this.autoImageTrackingStableFrameCount,
+			hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+			createdAt: observation.timestamp
+		} );
+
+		if ( observation.trackingState !== 'tracked' ) {
+			return;
+		}
+
+		this.autoImageTrackingLastObservationAt = observation.timestamp;
+		if ( this.autoImageTrackingStableTargetId !== observation.targetId ) {
+			this.autoImageTrackingStableTargetId = observation.targetId;
+			this.autoImageTrackingStableFrameCount = 0;
+			this.autoImageTrackingSamples = [];
+		}
+
+		this.autoImageTrackingSamples.push( observation );
+		this.autoImageTrackingSamples = this.autoImageTrackingSamples.slice( - AUTO_MARKER_STABLE_FRAME_COUNT );
+		this.autoImageTrackingStableFrameCount = this.autoImageTrackingSamples.length;
+
+		console.info( '[AutoMarkerPoseStabilizing]', {
+			mode: this.workflowMode,
+			siteId: this.demoModelConfig?.modelId ?? null,
+			sessionId: this.currentArSessionId,
+			targetId: observation.targetId,
+			source: 'marker-auto-image',
+			trackingState: 'stabilizing',
+			stableFrameCount: this.autoImageTrackingStableFrameCount,
+			hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+			createdAt: observation.timestamp
+		} );
+		this.setStatus(
+			this.autoImageTrackingStableFrameCount >= AUTO_MARKER_STABLE_FRAME_COUNT
+				? '已识别控制标志，正在稳定定位...'
+				: '正在自动识别控制标志...'
+		);
+
+		if ( this.autoImageTrackingSamples.length < AUTO_MARKER_STABLE_FRAME_COUNT ) {
+			return;
+		}
+
+		if ( this.isAutoImageTrackingStable() === false ) {
+			return;
+		}
+
+		this.solveAndApplyAutoImageMarkerCalibration( observation.targetId, observation );
+
+	}
+
+	private isAutoImageTrackingStable(): boolean {
+
+		if ( this.autoImageTrackingSamples.length < AUTO_MARKER_STABLE_FRAME_COUNT ) {
+			return false;
+		}
+
+		const samples = this.autoImageTrackingSamples;
+		const basePosition = samples[ 0 ].position;
+		const baseRotation = samples[ 0 ].rotation;
+
+		for ( let index = 1; index < samples.length; index += 1 ) {
+			const current = samples[ index ];
+			const positionDistance = Math.sqrt(
+				( current.position[ 0 ] - basePosition[ 0 ] ) ** 2
+				+ ( current.position[ 1 ] - basePosition[ 1 ] ) ** 2
+				+ ( current.position[ 2 ] - basePosition[ 2 ] ) ** 2
+			);
+			if ( positionDistance > AUTO_MARKER_MAX_POSITION_JITTER_METERS ) {
+				return false;
+			}
+
+			const rotationDeltaDeg = THREE.MathUtils.radToDeg(
+				new THREE.Quaternion(
+					baseRotation[ 0 ],
+					baseRotation[ 1 ],
+					baseRotation[ 2 ],
+					baseRotation[ 3 ]
+				).angleTo(
+					new THREE.Quaternion(
+						current.rotation[ 0 ],
+						current.rotation[ 1 ],
+						current.rotation[ 2 ],
+						current.rotation[ 3 ]
+					)
+				)
+			);
+			if ( rotationDeltaDeg > AUTO_MARKER_MAX_ROTATION_JITTER_DEGREES ) {
+				return false;
+			}
+		}
+
+		return true;
+
+	}
+
+	private solveAndApplyAutoImageMarkerCalibration(targetId: string, observation: XrImageTrackingObservation): void {
+
+		if ( this.currentArSessionId === null ) {
+			return;
+		}
+
+		const controlTarget = ( this.activeSiteCalibrationBaseline?.controlTargets ?? [] )
+			.find( ( item ) => item.id === targetId );
+		if ( controlTarget === undefined ) {
+			this.fallbackToManualMarkerCalibration( '未找到控制标志配置，已切换为手动四角点校正。' );
+			return;
+		}
+
+		const markerPoseInEnu = this.demoModelConfig !== null
+			&& this.demoModelConfig.markers.some( ( marker ) => marker.id === targetId )
+			? resolveMarkerPoseInEnu( this.demoModelConfig, targetId )
+			: createMarkerPoseInEnuFromControlTarget( controlTarget );
+
+		const markerPoseInAr = {
+			markerId: targetId,
+			matrix: new THREE.Matrix4().compose(
+				tempAutoMarkerArPosition.set(
+					observation.position[ 0 ],
+					observation.position[ 1 ],
+					observation.position[ 2 ]
+				),
+				tempAutoMarkerArQuaternion.set(
+					observation.rotation[ 0 ],
+					observation.rotation[ 1 ],
+					observation.rotation[ 2 ],
+					observation.rotation[ 3 ]
+				),
+				tempAutoMarkerArScale.set( 1, 1, 1 )
+			),
+			timestamp: observation.timestamp
+		};
+		const solution = solveMarkerLocalization( {
+			markerId: targetId,
+			markerPoseInEnu,
+			markerPoseInAr,
+			source: 'marker-auto-image',
+			sessionId: this.currentArSessionId,
+			timestamp: observation.timestamp
+		} );
+		this.currentSessionMarkerSolution = solution;
+		console.info( '[AutoMarkerSolved]', {
+			mode: this.workflowMode,
+			siteId: this.demoModelConfig?.modelId ?? null,
+			sessionId: this.currentArSessionId,
+			targetId,
+			source: 'marker-auto-image',
+			trackingState: 'solved',
+			stableFrameCount: this.autoImageTrackingStableFrameCount,
+			hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+			createdAt: observation.timestamp
+		} );
+
+		if ( this.applyCurrentSessionMarkerSolution( solution, {
+			markerId: targetId,
+			markerConfigId: targetId,
+			source: 'marker-auto-image'
+		} ) ) {
+			this.autoImageTrackingApplied = true;
+			this.autoImageTrackingState = {
+				...this.autoImageTrackingState,
+				active: false,
+				supported: true,
+				reason: 'applied'
+			};
+			console.info( '[AutoMarkerApplied]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				targetId,
+				source: 'marker-auto-image',
+				trackingState: 'applied',
+				stableFrameCount: this.autoImageTrackingStableFrameCount,
+				hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+				createdAt: observation.timestamp
+			} );
+		}
+
+	}
+
+	private fallbackToManualMarkerCalibration(message: string): void {
+
+		if ( this.autoImageTrackingFallbackTriggered || this.workflowMode !== 'ar-inspection' ) {
+			return;
+		}
+
+		this.autoImageTrackingFallbackTriggered = true;
+		this.autoImageTrackingState = {
+			...this.autoImageTrackingState,
+			active: false,
+			reason: 'fallback-manual'
+		};
+		console.info( '[AutoMarkerFallbackToManualCorners]', {
+			mode: this.workflowMode,
+			siteId: this.demoModelConfig?.modelId ?? null,
+			sessionId: this.currentArSessionId,
+			targetId: this.autoImageTrackingStableTargetId ?? this.activeSiteCalibrationBaseline?.controlTargets[ 0 ]?.id ?? null,
+			source: 'marker-auto-image',
+			trackingState: 'fallback-manual',
+			stableFrameCount: this.autoImageTrackingStableFrameCount,
+			hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+			createdAt: Date.now()
+		} );
+		this.startCurrentSessionMarkerCalibration();
+		this.setStatus( message );
+
+	}
+
+	private syncInspectionMarkerWorkflowHints(): void {
+
+		if ( this.workflowMode !== 'ar-inspection' || this.sceneBundle.renderer.xr.isPresenting === false ) {
+			return;
+		}
+
+		const hasGroundHit = this.xrRuntime.getHitTestController().hasGroundHit();
+		if ( hasGroundHit && this.inspectionPlaneReadyLogged === false ) {
+			this.inspectionPlaneReadyLogged = true;
+			console.info( '[ArInspectionPlaneReady]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				targetId: this.activeSiteCalibrationBaseline?.controlTargets[ 0 ]?.id ?? null,
+				source: this.autoImageTrackingState.requested ? 'marker-auto-image' : 'marker',
+				trackingState: 'plane-ready',
+				stableFrameCount: this.autoImageTrackingStableFrameCount,
+				hasHitTest: hasGroundHit,
+				createdAt: Date.now()
+			} );
+			if ( this.placementSession.getPlacedModel() === null ) {
+				this.setStatus(
+					this.autoImageTrackingState.requested
+						? '请先扫描平面，然后对准现场控制标志。'
+						: '请先扫描平面，然后开始手动四角点校正。'
+				);
+			}
+		} else if ( hasGroundHit === false ) {
+			this.inspectionPlaneReadyLogged = false;
+		}
+
+		if (
+			this.autoImageTrackingState.requested
+			&& this.autoImageTrackingApplied === false
+			&& this.autoImageTrackingFallbackTriggered === false
+			&& Date.now() - this.autoImageTrackingStartedAt >= AUTO_MARKER_FALLBACK_TIMEOUT_MS
+			&& this.autoImageTrackingLastObservationAt === 0
+		) {
+			this.fallbackToManualMarkerCalibration( '当前设备未能识别控制标志，已切换为手动四角点校正。' );
+		}
+
+	}
+
 	private requestAutoPlacement(): void {
 
 		this.placementSession.requestAutoPlacement( this.modelTemplate );
+		if ( this.workflowMode === 'ar-inspection' ) {
+			console.info( '[ArInspectionAutoPlacementRequested]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				targetId: this.activeMarkerLocalizationResult?.markerId ?? this.autoImageTrackingStableTargetId,
+				source: this.getPreferredAutoPlacementLocalizationOverride()?.source ?? 'fallback',
+				trackingState: 'placement-requested',
+				stableFrameCount: this.autoImageTrackingStableFrameCount,
+				hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+				createdAt: Date.now()
+			} );
+		}
 		this.onAttemptCoarsePlacement();
 
 	}
@@ -2977,6 +3446,7 @@ export class ThreeEngine {
 		this.lastGpsBiasPollAt = 0;
 		this.gpsBiasLowAccuracyWarned = false;
 		this.detachGpsBiasReferenceSpace();
+		this.startAutoControlTargetCalibration();
 		this.resetMarkerLocalizationCorrection();
 		this.resetCurrentSessionMarkerCalibrationState();
 		this.arSessionStateRuntime.handleSessionStart();
@@ -3003,25 +3473,6 @@ export class ThreeEngine {
 				stableFrameCount: 0
 			}
 		);
-		if ( this.workflowMode === 'ar-inspection' ) {
-			const hasTrackedTargets = ( this.activeSiteCalibrationBaseline?.controlTargets ?? [] )
-				.some( ( target ) => typeof target.imageUrl === 'string' && typeof target.trackingWidthMeters === 'number' );
-			if ( hasTrackedTargets ) {
-				console.info( '[ArInspectionAutoTargetTrackingStarted]', {
-					mode: this.workflowMode,
-					siteId: this.demoModelConfig?.modelId ?? null,
-					sessionId: this.currentArSessionId,
-					source: 'marker-auto-image',
-					targetId: this.activeSiteCalibrationBaseline?.controlTargets[ 0 ]?.id ?? null,
-					createdAt: Date.now(),
-					trackingState: 'awaiting-image-tracking',
-					stableFrameCount: 0
-				} );
-				this.setStatus( '请将手机对准现场控制标志，系统将自动完成空间校正。' );
-			} else {
-				this.setStatus( '自动识别不可用，请使用手动四角点校正。' );
-			}
-		}
 		void this.warmupCoarseRegistration().catch( ( error ) => {
 			console.error( 'Coarse registration warmup after session start failed:', error );
 			this.appendLog( 'AR 会话后的粗配准预热失败。' );
@@ -3034,6 +3485,7 @@ export class ThreeEngine {
 	private handleXRSessionEnd(): void {
 
 		const endedSessionId = this.currentArSessionId;
+		this.stopAutoControlTargetCalibration();
 		this.resetMarkerLocalizationCorrection();
 		this.currentGpsBiasArFromEnuSolution = null;
 		this.latestGpsBiasSample = null;
@@ -3072,6 +3524,26 @@ export class ThreeEngine {
 		}
 		this.pointerSelection.suppressSelectionFor( 1200 );
 		this.syncSceneHost();
+		if (
+			this.workflowMode === 'ar-inspection'
+			&& this.activeMarkerArFromEnuSolution !== null
+			&& this.activeMarkerArFromEnuSolution.sessionId === this.currentArSessionId
+		) {
+			console.info( '[ArInspectionAutoPlacementCompleted]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				targetId: this.activeMarkerLocalizationResult?.markerId ?? this.autoImageTrackingStableTargetId,
+				source: this.activeMarkerArFromEnuSolution.source,
+				trackingState: 'placement-completed',
+				stableFrameCount: this.autoImageTrackingStableFrameCount,
+				hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+				createdAt: Date.now()
+			} );
+			this.setStatus( '空间校正完成，模型已自动放置。' );
+			return;
+		}
+
 		this.setStatus( '模型已放置，可切换浏览模式。' );
 
 	}

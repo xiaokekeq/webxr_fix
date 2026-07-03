@@ -1,5 +1,12 @@
 ﻿import * as THREE from 'three';
-import type { SetStatus, XRAnchorHandle, XRHitTestController, XRHitTestQuality } from '@/features/ar/types/runtime-types.js';
+import type {
+	SetStatus,
+	XRAnchorHandle,
+	XRHitTestController,
+	XRHitTestQuality,
+	XrImageTrackingState,
+	XrSessionRequestOptions
+} from '@/features/ar/types/runtime-types.js';
 
 interface CreateXRHitTestControllerOptions {
 	renderer: THREE.WebGLRenderer;
@@ -25,6 +32,12 @@ interface DepthAwareSessionInit extends XRDepthSensingSessionInit {
 	domOverlay?: {
 		root: HTMLElement;
 	};
+	trackedImages?: XRTrackedImageInit[];
+}
+
+interface XRTrackedImageInit {
+	image: ImageBitmap;
+	widthInMeters: number;
 }
 
 const reticlePosition = new THREE.Vector3();
@@ -94,6 +107,13 @@ export function createXRHitTestController(
 	let anchorSupportDetected = false;
 	let recentHitSamples: Array<{ position: THREE.Vector3; time: number }> = [];
 	let sessionRequestPending = false;
+	let trackedImageTargetIds: string[] = [];
+	let imageTrackingState: XrImageTrackingState = {
+		requested: false,
+		supported: false,
+		active: false,
+		reason: 'idle'
+	};
 
 	function setup(): void {
 
@@ -113,6 +133,15 @@ export function createXRHitTestController(
 		lastHitTestResult = null;
 		anchorSupportDetected = false;
 		recentHitSamples = [];
+		imageTrackingState = {
+			...imageTrackingState,
+			active: imageTrackingState.requested && imageTrackingState.supported,
+			reason: imageTrackingState.requested
+				? imageTrackingState.supported
+					? 'session-active'
+					: imageTrackingState.reason
+				: 'idle'
+		};
 		setStatus( '已进入 AR，请缓慢移动手机，让系统持续识别地面或墙面。' );
 
 		const session = renderer.xr.getSession();
@@ -152,6 +181,13 @@ export function createXRHitTestController(
 		lastHitTestResult = null;
 		anchorSupportDetected = false;
 		recentHitSamples = [];
+		trackedImageTargetIds = [];
+		imageTrackingState = {
+			requested: false,
+			supported: false,
+			active: false,
+			reason: 'session-ended'
+		};
 		onSessionEnd?.();
 		setStatus( 'AR 会话已结束，可再次进入 AR。' );
 
@@ -331,6 +367,22 @@ export function createXRHitTestController(
 
 	}
 
+	function getImageTrackingState(): XrImageTrackingState {
+
+		return { ...imageTrackingState };
+
+	}
+
+	function getTrackedImageTargetId(index: number): string | null {
+
+		if ( index < 0 || index >= trackedImageTargetIds.length ) {
+			return null;
+		}
+
+		return trackedImageTargetIds[ index ] ?? null;
+
+	}
+
 	return {
 		setup,
 		update,
@@ -340,7 +392,9 @@ export function createXRHitTestController(
 		getHitTestQuality,
 		supportsAnchors,
 		createAnchorFromLatestHit,
-		async requestSession() {
+		getImageTrackingState,
+		getTrackedImageTargetId,
+		async requestSession(options?: XrSessionRequestOptions) {
 
 			if ( renderer.xr.isPresenting || sessionRequestPending ) {
 				return;
@@ -355,10 +409,50 @@ export function createXRHitTestController(
 			setStatus( '正在请求 AR 会话...' );
 
 			try {
-				const session = await navigator.xr.requestSession(
-					'immersive-ar',
-					createSessionInit()
-				);
+				const trackedImageResources = await resolveTrackedImageResources( options?.trackedImages ?? [] );
+				const shouldAttemptImageTracking = trackedImageResources.trackedImages.length > 0;
+				trackedImageTargetIds = trackedImageResources.targetIds;
+				imageTrackingState = {
+					requested: ( options?.trackedImages?.length ?? 0 ) > 0,
+					supported: shouldAttemptImageTracking,
+					active: false,
+					reason: shouldAttemptImageTracking
+						? 'requesting'
+						: ( options?.trackedImages?.length ?? 0 ) > 0
+							? trackedImageResources.reason
+							: 'idle'
+				};
+				let session: XRSession;
+
+				try {
+					session = await navigator.xr.requestSession(
+						'immersive-ar',
+						createSessionInit( trackedImageResources.trackedImages )
+					);
+					imageTrackingState = {
+						...imageTrackingState,
+						supported: shouldAttemptImageTracking,
+						active: shouldAttemptImageTracking,
+						reason: shouldAttemptImageTracking ? 'enabled' : imageTrackingState.reason
+					};
+				} catch ( error ) {
+					if ( shouldAttemptImageTracking === false ) {
+						throw error;
+					}
+
+					console.warn( 'XR session request with image-tracking failed, retrying without it:', error );
+					trackedImageTargetIds = [];
+					imageTrackingState = {
+						requested: true,
+						supported: false,
+						active: false,
+						reason: 'unsupported'
+					};
+					session = await navigator.xr.requestSession(
+						'immersive-ar',
+						createSessionInit()
+					);
+				}
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( session );
 			} catch ( error ) {
@@ -399,15 +493,81 @@ export function createXRHitTestController(
 
 }
 
-function createSessionInit(): DepthAwareSessionInit {
+function createSessionInit(trackedImages?: XRTrackedImageInit[]): DepthAwareSessionInit {
 
 	const sessionInit: DepthAwareSessionInit = {
 		requiredFeatures: [ 'hit-test' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		domOverlay: { root: document.body }
 	};
+	if ( trackedImages !== undefined && trackedImages.length > 0 ) {
+		sessionInit.optionalFeatures = [ ...( sessionInit.optionalFeatures ?? [] ), 'image-tracking' ];
+		sessionInit.trackedImages = trackedImages;
+	}
 
 	return sessionInit;
+
+}
+
+async function resolveTrackedImageResources(
+	definitions: NonNullable<XrSessionRequestOptions['trackedImages']>
+): Promise<{
+	trackedImages: XRTrackedImageInit[];
+	targetIds: string[];
+	reason: string;
+}> {
+
+	if ( definitions.length === 0 ) {
+		return {
+			trackedImages: [],
+			targetIds: [],
+			reason: 'no-targets'
+		};
+	}
+
+	if ( typeof createImageBitmap !== 'function' ) {
+		return {
+			trackedImages: [],
+			targetIds: [],
+			reason: 'create-image-bitmap-unavailable'
+		};
+	}
+
+	const trackedImages: XRTrackedImageInit[] = [];
+	const targetIds: string[] = [];
+
+	for ( const definition of definitions ) {
+		try {
+			const response = await fetch( definition.imageUrl );
+			if ( response.ok === false ) {
+				throw new Error( `HTTP ${response.status}` );
+			}
+
+			const blob = await response.blob();
+			const image = await createImageBitmap( blob );
+			trackedImages.push( {
+				image,
+				widthInMeters: definition.widthInMeters
+			} );
+			targetIds.push( definition.targetId );
+			console.info( '[AutoMarkerImageLoaded]', {
+				targetId: definition.targetId,
+				widthInMeters: definition.widthInMeters
+			} );
+		} catch ( error ) {
+			console.warn( '[AutoMarkerImageLoadFailed]', {
+				targetId: definition.targetId,
+				imageUrl: definition.imageUrl,
+				error
+			} );
+		}
+	}
+
+	return {
+		trackedImages,
+		targetIds,
+		reason: trackedImages.length > 0 ? 'ready' : 'image-load-failed'
+	};
 
 }
 
