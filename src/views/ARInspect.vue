@@ -348,35 +348,6 @@ onMounted( () => {
 						</div>
 					</ArPanelSection>
 
-					<div v-if="false" class="sheet-section">
-						<div class="section-label">{{ TEXT.calibrationPanel }}</div>
-						<div class="info-grid compact-info-grid">
-							<div class="info-card">
-								<span>{{ TEXT.cornerProgress }}</span>
-								<strong>{{ calibrationProgressText }}</strong>
-							</div>
-							<div class="info-card">
-								<span>{{ TEXT.nextCorner }}</span>
-								<strong>{{ engine.markerCalibration.nextCornerLabel || '-' }}</strong>
-							</div>
-						</div>
-						<div class="runtime-banner">{{ calibrationActionHint }}</div>
-						<div class="action-row">
-							<button type="button" class="action-button" @click="startMarkerCalibration()">
-								{{ TEXT.startCalibration }}
-							</button>
-							<button type="button" class="action-button" @click="captureMarkerCorner()">
-								{{ TEXT.captureCorner }}
-							</button>
-							<button type="button" class="action-button primary" @click="applyMarkerCalibration()">
-								{{ TEXT.applyCalibration }}
-							</button>
-							<button type="button" class="action-button" @click="resetMarkerCalibration()">
-								{{ TEXT.resetCalibration }}
-							</button>
-						</div>
-					</div>
-
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.inspectionRecord }}</div>
 						<div class="form-grid">

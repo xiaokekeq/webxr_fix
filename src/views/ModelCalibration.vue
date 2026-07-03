@@ -102,52 +102,40 @@ const currentModelName = computed(
 );
 const runtimeStatusText = computed( () => engine.value.runtimeStatus );
 const baselineSummaryCards = computed( () => [
-	{ label: '鐜板満鍩哄噯', value: engine.value.siteCalibrationBaseline.statusText },
-	{ label: '鎺у埗鐐?', value: engine.value.siteCalibrationBaseline.controlTargetCount },
-	{ label: 'GPS 鍋忓樊', value: engine.value.siteCalibrationBaseline.gpsBiasAvailable ? '宸蹭繚瀛?' : '鏈繚瀛?' },
-	{ label: '鏄剧ず妯″紡', value: getDisplayModeLabel( engine.value.displayMode ) }
+	{ label: '现场基准', value: engine.value.siteCalibrationBaseline.statusText },
+	{ label: '控制点', value: engine.value.siteCalibrationBaseline.controlTargetCount },
+	{ label: 'GPS 偏差', value: engine.value.siteCalibrationBaseline.gpsBiasAvailable ? '已保存' : '未保存' },
+	{ label: '显示模式', value: getDisplayModeLabel( engine.value.displayMode ) }
 ] );
-const sessionOverviewCards = computed( () => [
+const sessionSnapshotCards = computed( () => [
 	{ label: '运行状态', value: engine.value.runtimeStatus },
 	{ label: '放置状态', value: engine.value.registrationStatusDetail },
-	{ label: '粗配准诊断', value: engine.value.coarseLocationDebugText },
+	{ label: '粗配准诊断', value: engine.value.coarseLocationDebugText, wide: true },
 	{ label: '空间定位来源', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' },
 	{ label: '模型位置', value: engine.value.placementSummary.positionText, wide: true },
 	{ label: '模型姿态', value: engine.value.placementSummary.quaternionText, wide: true },
-	{ label: '模型缩放', value: engine.value.placementSummary.scaleText },
-	{ label: '角点进度', value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
-	{ label: '待记录角点', value: engine.value.markerCalibration.nextCornerLabel || '-' },
-	{ label: 'GPS 补偿状态', value: engine.value.gpsBiasCorrection.statusText, wide: true }
-] );
-const sessionSnapshotCards = computed( () => [
-	{ label: '杩愯鐘舵€?', value: engine.value.runtimeStatus },
-	{ label: '鏀剧疆鐘舵€?', value: engine.value.registrationStatusDetail },
-	{ label: '绮楅厤鍑嗚瘖鏂?', value: engine.value.coarseLocationDebugText },
-	{ label: '绌洪棿瀹氫綅鏉ユ簮', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' },
-	{ label: '妯″瀷浣嶇疆', value: engine.value.placementSummary.positionText, wide: true },
-	{ label: '妯″瀷濮挎€?', value: engine.value.placementSummary.quaternionText, wide: true },
-	{ label: '妯″瀷缂╂斁', value: engine.value.placementSummary.scaleText }
+	{ label: '模型缩放', value: engine.value.placementSummary.scaleText }
 ] );
 const markerCalibrationCards = computed( () => [
 	{ label: TEXT.cornersCollected, value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
 	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' }
 ] );
 const manualAdjustmentCards = computed( () => [
-	{ label: '骞崇Щ鍋忕Щ', value: engine.value.manualReadout.positionText, wide: true },
-	{ label: '鑸悜淇', value: engine.value.manualReadout.yawText },
-	{ label: '姣斾緥淇', value: engine.value.manualReadout.scaleText }
+	{ label: '平移偏移', value: engine.value.manualReadout.positionText, wide: true },
+	{ label: '航向修正', value: engine.value.manualReadout.yawText },
+	{ label: '比例修正', value: engine.value.manualReadout.scaleText }
 ] );
 const calibrationGuideCards = computed( () => [
 	{
-		label: '鎿嶄綔椤哄簭',
-		value: '鍏堝紑濮嬮噰闆嗭紝鍐嶆寜宸︿笂銆佸彸涓娿€佸彸涓嬨€佸乏涓嬮『搴忚褰?4 涓鐐癸紝鏈€鍚庢墽琛岃В绠楀苟搴旂敤銆?',
+		label: '操作顺序',
+		value: '先开始采集，再按左上、右上、右下、左下顺序记录 4 个角点，最后执行解算并应用。',
 		wide: true
 	}
 ] );
 const gpsBiasCards = computed( () => [
-	{ label: '琛ュ伩鐘舵€?', value: engine.value.gpsBiasCorrection.statusText, wide: true },
-	{ label: 'ENU 鍋忓樊', value: engine.value.gpsBiasCorrection.deltaEnuText },
-	{ label: '鏈€杩戞洿鏂?', value: engine.value.gpsBiasCorrection.updatedAtText }
+	{ label: '补偿状态', value: engine.value.gpsBiasCorrection.statusText, wide: true },
+	{ label: 'ENU 偏差', value: engine.value.gpsBiasCorrection.deltaEnuText },
+	{ label: '最近更新', value: engine.value.gpsBiasCorrection.updatedAtText }
 ] );
 const sliderVisible = computed(
 	() => hasArSession.value
@@ -319,27 +307,6 @@ onMounted( () => {
 				</div>
 			</section>
 
-			<section v-if="false && !hasArSession" class="summary-card">
-				<div class="summary-grid">
-					<div class="summary-item">
-						<span>现场基准</span>
-						<strong>{{ engine.siteCalibrationBaseline.statusText }}</strong>
-					</div>
-					<div class="summary-item">
-						<span>控制点</span>
-						<strong>{{ engine.siteCalibrationBaseline.controlTargetCount }}</strong>
-					</div>
-					<div class="summary-item">
-						<span>GPS 偏差</span>
-						<strong>{{ engine.siteCalibrationBaseline.gpsBiasAvailable ? '已保存' : '未保存' }}</strong>
-					</div>
-					<div class="summary-item">
-						<span>显示模式</span>
-						<strong>{{ getDisplayModeLabel(engine.displayMode) }}</strong>
-					</div>
-				</div>
-			</section>
-
 			<section v-if="!hasArSession" class="summary-card">
 				<ArInfoGrid :items="baselineSummaryCards" />
 			</section>
@@ -388,17 +355,6 @@ onMounted( () => {
 					<ArInfoGrid :items="sessionSnapshotCards" />
 					<div class="runtime-banner">{{ runtimeStatusText }}</div>
 				</ArPanelSection>
-
-				<div v-if="false" class="sheet-section sheet-section-first">
-					<div class="section-label">{{ TEXT.sessionOverview }}</div>
-					<div class="info-grid">
-						<div v-for="item in sessionOverviewCards" :key="item.label" class="info-card" :class="{ wide: item.wide === true }">
-							<span>{{ item.label }}</span>
-							<strong>{{ item.value }}</strong>
-						</div>
-					</div>
-					<div class="runtime-banner">{{ runtimeStatusText }}</div>
-				</div>
 
 				<template v-if="activePanelView === 'placement'">
 					<div class="sheet-section">
@@ -472,16 +428,6 @@ onMounted( () => {
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.precisionCalibration }}</div>
 						<ArInfoGrid :items="markerCalibrationCards" />
-						<div v-if="false" class="info-grid">
-							<div class="info-card">
-								<span>{{ TEXT.cornersCollected }}</span>
-								<strong>{{ engine.markerCalibration.capturedCornerCount }}/{{ engine.markerCalibration.expectedCornerCount }}</strong>
-							</div>
-							<div class="info-card">
-								<span>{{ TEXT.nextCorner }}</span>
-								<strong>{{ engine.markerCalibration.nextCornerLabel || '-' }}</strong>
-							</div>
-						</div>
 						<div class="chip-grid">
 							<button type="button" class="chip-button" @click="handleStartPrecisionCalibration()">
 								{{ TEXT.startCollect }}
@@ -516,20 +462,6 @@ onMounted( () => {
 							</button>
 						</div>
 						<ArInfoGrid :items="manualAdjustmentCards" />
-						<div v-if="false" class="info-grid">
-							<div class="info-card wide">
-								<span>平移偏移</span>
-								<strong>{{ engine.manualReadout.positionText }}</strong>
-							</div>
-							<div class="info-card">
-								<span>航向修正</span>
-								<strong>{{ engine.manualReadout.yawText }}</strong>
-							</div>
-							<div class="info-card">
-								<span>比例修正</span>
-								<strong>{{ engine.manualReadout.scaleText }}</strong>
-							</div>
-						</div>
 						<div class="adjust-grid">
 							<div class="adjust-row">
 								<span>{{ TEXT.xAxis }}</span>
@@ -573,31 +505,11 @@ onMounted( () => {
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.markerCalibration }}</div>
 						<ArInfoGrid :items="calibrationGuideCards" />
-						<div v-if="false" class="info-grid">
-							<div class="info-card wide">
-								<span>操作顺序</span>
-								<strong>先开始采集，再按左上、右上、右下、左下顺序记录 4 个角点，最后执行解算并应用。</strong>
-							</div>
-						</div>
 					</div>
 
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.gpsBias }}</div>
 						<ArInfoGrid :items="gpsBiasCards" />
-						<div v-if="false" class="info-grid">
-							<div class="info-card wide">
-								<span>补偿状态</span>
-								<strong>{{ engine.gpsBiasCorrection.statusText }}</strong>
-							</div>
-							<div class="info-card">
-								<span>ENU 偏差</span>
-								<strong>{{ engine.gpsBiasCorrection.deltaEnuText }}</strong>
-							</div>
-							<div class="info-card">
-								<span>最近更新</span>
-								<strong>{{ engine.gpsBiasCorrection.updatedAtText }}</strong>
-							</div>
-						</div>
 						<div class="action-row">
 							<button type="button" class="action-button" @click="handleRefreshGps()">
 								{{ TEXT.refreshGps }}
