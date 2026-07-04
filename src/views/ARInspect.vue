@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
@@ -15,7 +15,7 @@ type InspectPanelView = 'display' | 'localization' | 'record';
 const TEXT = {
 	title: '堤防 AR 巡查',
 	enterArTitle: '进入 AR 巡查',
-	enterArSub: '读取工程真值配置，进入 AR 后先扫描平面，再对准现场控制标志完成空间校正。Marker 识别成功或手动四角点校正后，模型才会按工程坐标正式显示。',
+	enterArSub: '读取工程真值配置后进入 AR。先扫描平面，再对准现场控制标志完成空间校正；Marker 自动识别成功或手动四角点校正后，模型才会按工程坐标正式显示。',
 	enterAr: '进入 AR',
 	selectModel: '选择站点',
 	status: '状态',
@@ -221,6 +221,8 @@ watch(
 	{ immediate: true }
 );
 
+watch( hasArSession, syncArOverlayClass, { immediate: true } );
+
 function resolveCurrentStep(): string {
 	if ( hasArSession.value === false ) {
 		return 'enter-ar';
@@ -311,6 +313,19 @@ onMounted( () => {
 	void mountEngineHosts();
 	store.actions.setWorkflowMode( 'ar-inspection' );
 } );
+
+onUnmounted( () => {
+	setArOverlayClass( false );
+} );
+
+function syncArOverlayClass(active: boolean): void {
+	setArOverlayClass( active );
+}
+
+function setArOverlayClass(active: boolean): void {
+	document.documentElement.classList.toggle( 'ar-dom-overlay-active', active );
+	document.body.classList.toggle( 'ar-dom-overlay-active', active );
+}
 </script>
 
 <template>
@@ -366,7 +381,13 @@ onMounted( () => {
 			</div>
 		</div>
 
-		<nav class="action-dock action-dock-compact" aria-label="AR 操作" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
+		<nav
+			v-if="hasArSession"
+			class="action-dock action-dock-compact"
+			aria-label="AR 操作"
+			@pointerdown.stop="store.actions.handleArUiInteraction()"
+			@click.stop
+		>
 			<button type="button" class="dock-item dock-item-primary" @click.stop="openWorkspacePanel">
 				<span class="dock-icon">板</span>
 				<span class="dock-label">{{ TEXT.panelTool }}</span>
@@ -554,6 +575,17 @@ onMounted( () => {
 	min-height: 100vh;
 	background: linear-gradient(180deg, #07101b 0%, #0b1625 100%);
 	color: #eff6ff;
+	font-size: 13px;
+}
+
+.inspect-page.ar-active {
+	background: transparent;
+}
+
+:global(html.ar-dom-overlay-active),
+:global(body.ar-dom-overlay-active),
+:global(body.ar-dom-overlay-active #app) {
+	background: transparent !important;
 }
 
 .page-scroll {
@@ -565,36 +597,37 @@ onMounted( () => {
 .page-header {
 	position: fixed;
 	z-index: 5;
-	top: 26px;
-	left: 24px;
-	right: 24px;
+	top: max(14px, env(safe-area-inset-top));
+	left: 18px;
+	right: 18px;
 	display: flex;
 	justify-content: space-between;
-	gap: 16px;
+	gap: 12px;
 	align-items: flex-start;
 	pointer-events: auto;
 }
 
 .page-title {
-	font-size: 30px;
+	font-size: 24px;
 	font-weight: 800;
-	letter-spacing: 0.04em;
+	letter-spacing: 0.03em;
 	text-shadow: 0 2px 14px rgba(0, 0, 0, 0.32);
 }
 
 .page-subtitle {
-	margin-top: 6px;
-	font-size: 14px;
+	margin-top: 4px;
+	font-size: 12px;
 	color: rgba(239, 246, 255, 0.76);
 }
 
 .status-chip {
-	padding: 10px 16px;
+	padding: 8px 12px;
 	border-radius: 999px;
-	background: rgba(15, 23, 42, 0.58);
+	background: rgba(15, 23, 42, 0.48);
 	border: 1px solid rgba(255, 255, 255, 0.16);
 	backdrop-filter: blur(18px);
 	color: #dffaff;
+	font-size: 12px;
 	font-weight: 700;
 }
 
@@ -602,12 +635,19 @@ onMounted( () => {
 .scene-layer {
 	position: fixed;
 	inset: 0;
+	background: transparent;
+}
+
+.inspect-page.ar-active .scene-shell,
+.inspect-page.ar-active .scene-layer {
+	background: transparent;
 }
 
 .scene-layer :deep(canvas) {
 	width: 100% !important;
 	height: 100% !important;
 	display: block;
+	background: transparent !important;
 }
 
 .scene-hidden {
@@ -622,12 +662,12 @@ onMounted( () => {
 
 .launch-overlay {
 	position: fixed;
-	left: 24px;
-	right: 24px;
-	bottom: 96px;
+	left: 20px;
+	right: 20px;
+	bottom: 92px;
 	z-index: 6;
-	padding: 22px;
-	border-radius: 28px;
+	padding: 18px;
+	border-radius: 24px;
 	background: rgba(8, 15, 27, 0.78);
 	border: 1px solid rgba(255, 255, 255, 0.14);
 	box-shadow: 0 26px 72px rgba(0, 0, 0, 0.38);
@@ -635,34 +675,35 @@ onMounted( () => {
 }
 
 .launch-badge {
-	width: 44px;
-	height: 44px;
+	width: 42px;
+	height: 40px;
 	display: grid;
 	place-items: center;
-	border-radius: 16px;
+	border-radius: 14px;
 	background: #00d4ff;
 	color: #00131a;
 	font-weight: 900;
 }
 
 .launch-title {
-	margin-top: 14px;
-	font-size: 24px;
+	margin-top: 12px;
+	font-size: 20px;
 	font-weight: 800;
 }
 
 .launch-subtitle {
-	margin: 8px 0 16px;
+	margin: 8px 0 14px;
 	color: rgba(226, 232, 240, 0.78);
-	line-height: 1.7;
+	font-size: 13px;
+	line-height: 1.6;
 }
 
 .model-field,
 .field {
 	display: grid;
-	gap: 8px;
+	gap: 7px;
 	color: rgba(226, 232, 240, 0.82);
-	font-size: 13px;
+	font-size: 12px;
 }
 
 .select-field,
@@ -670,11 +711,12 @@ onMounted( () => {
 .field textarea {
 	width: 100%;
 	border: 1px solid rgba(148, 163, 184, 0.25);
-	border-radius: 16px;
+	border-radius: 14px;
 	background: rgba(15, 23, 42, 0.74);
 	color: #eff6ff;
-	padding: 12px 14px;
+	padding: 10px 12px;
 	outline: none;
+	font-size: 13px;
 }
 
 .launch-button,
@@ -685,8 +727,9 @@ onMounted( () => {
 	color: #eff6ff;
 	background: rgba(15, 23, 42, 0.82);
 	border: 1px solid rgba(148, 163, 184, 0.22);
-	border-radius: 16px;
-	padding: 12px 14px;
+	border-radius: 14px;
+	padding: 10px 12px;
+	font-size: 12px;
 	font-weight: 800;
 }
 
@@ -705,23 +748,23 @@ onMounted( () => {
 .action-dock {
 	position: fixed;
 	z-index: 7;
-	left: 18px;
-	right: 18px;
-	bottom: 18px;
+	left: 16px;
+	right: 16px;
+	bottom: max(14px, env(safe-area-inset-bottom));
 	display: grid;
 	grid-template-columns: 1.2fr 1fr 1fr;
-	gap: 10px;
-	padding: 10px;
-	border-radius: 26px;
-	background: rgba(8, 15, 27, 0.78);
+	gap: 8px;
+	padding: 8px;
+	border-radius: 22px;
+	background: rgba(8, 15, 27, 0.72);
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	backdrop-filter: blur(24px);
 }
 
 .dock-item {
-	min-height: 58px;
+	min-height: 50px;
 	border: 1px solid rgba(148, 163, 184, 0.18);
-	border-radius: 18px;
+	border-radius: 16px;
 	background: rgba(15, 23, 42, 0.82);
 	color: #eff6ff;
 	font-weight: 800;
@@ -738,25 +781,26 @@ onMounted( () => {
 }
 
 .dock-icon {
-	font-size: 20px;
+	font-size: 18px;
+	line-height: 1;
 }
 
 .dock-label {
-	font-size: 12px;
+	font-size: 11px;
 	margin-top: 2px;
 }
 
 .bottom-sheet {
 	position: fixed;
 	z-index: 8;
-	left: 18px;
-	right: 18px;
-	bottom: 96px;
-	max-height: 70vh;
+	left: 16px;
+	right: 16px;
+	bottom: calc(82px + env(safe-area-inset-bottom));
+	max-height: 62vh;
 	overflow: auto;
-	padding: 16px;
-	border-radius: 28px;
-	background: rgba(8, 15, 27, 0.9);
+	padding: 14px;
+	border-radius: 24px;
+	background: rgba(8, 15, 27, 0.86);
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
 	backdrop-filter: blur(24px);
@@ -764,26 +808,27 @@ onMounted( () => {
 
 .sheet-header {
 	display: flex;
-	gap: 10px;
+	gap: 8px;
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: 14px;
+	margin-bottom: 12px;
 }
 
 .sheet-tabs,
 .chip-grid,
 .action-row {
 	display: flex;
-	gap: 10px;
+	gap: 8px;
 	flex-wrap: wrap;
 }
 
 .sheet-tab {
 	border: 1px solid rgba(148, 163, 184, 0.2);
-	border-radius: 16px;
+	border-radius: 14px;
 	background: rgba(15, 23, 42, 0.74);
 	color: #dbeafe;
-	padding: 10px 12px;
+	padding: 9px 11px;
+	font-size: 12px;
 	font-weight: 800;
 }
 
@@ -794,24 +839,24 @@ onMounted( () => {
 }
 
 .sheet-section {
-	margin-top: 14px;
+	margin-top: 12px;
 }
 
 .section-label {
-	margin-bottom: 10px;
-	font-size: 14px;
+	margin-bottom: 8px;
+	font-size: 13px;
 	font-weight: 900;
 	color: #e0f2fe;
 }
 
 .runtime-banner {
 	margin-top: 10px;
-	padding: 10px 12px;
-	border-radius: 14px;
+	padding: 9px 11px;
+	border-radius: 13px;
 	background: rgba(0, 212, 255, 0.08);
 	border: 1px solid rgba(0, 212, 255, 0.18);
 	font-size: 12px;
-	line-height: 1.6;
+	line-height: 1.55;
 	color: #d5f7ff;
 }
 
@@ -834,12 +879,12 @@ onMounted( () => {
 .side-slider {
 	position: fixed;
 	z-index: 7;
-	right: 16px;
+	right: 12px;
 	top: 50%;
 	transform: translateY(-50%);
-	padding: 18px 10px;
+	padding: 16px 8px;
 	border-radius: 999px;
-	background: rgba(15, 23, 42, 0.52);
+	background: rgba(15, 23, 42, 0.46);
 	border: 1px solid rgba(255, 255, 255, 0.18);
 	box-shadow: 0 18px 54px rgba(0, 0, 0, 0.32);
 	backdrop-filter: blur(20px);
@@ -848,8 +893,8 @@ onMounted( () => {
 .side-slider-range {
 	writing-mode: vertical-lr;
 	direction: rtl;
-	width: 28px;
-	height: 180px;
+	width: 24px;
+	height: 160px;
 	accent-color: #00d4ff;
 }
 
@@ -866,12 +911,17 @@ onMounted( () => {
 
 @media (max-width: 720px) {
 	.page-header {
-		left: 16px;
-		right: 16px;
+		left: 14px;
+		right: 14px;
 	}
 
 	.page-title {
-		font-size: 26px;
+		font-size: 22px;
+	}
+
+	.status-chip {
+		max-width: 42vw;
+		font-size: 11px;
 	}
 
 	.form-grid {
