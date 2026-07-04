@@ -1,18 +1,10 @@
 import * as THREE from 'three';
-import type { CoarsePlacementEstimate, XRHitTestController } from '@/features/ar/types/runtime-types.js';
+import type { XRHitTestController } from '@/features/ar/types/runtime-types.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
 import type { PlacementSession } from './session.js';
-
-interface CoarseRegistrationLike {
-	canEstimate(): boolean;
-	enable(): Promise<void>;
-	getReadyMessage(): string;
-	getMissingRequirementMessage(): string;
-	estimatePlacement(cameraWorldPosition: THREE.Vector3, groundY: number): CoarsePlacementEstimate | null;
-}
 
 interface PlacementWorkflowOptions {
 	placementSession: PlacementSession;
@@ -24,7 +16,6 @@ interface PlacementWorkflowOptions {
 	getPreferredLocalizationOverride(): ArFromEnuSolution | null;
 	getModelTemplate(): THREE.Group | null;
 	getRegistrationSolution(): EngineeringRegistrationSolution | null;
-	getCoarseRegistration(): CoarseRegistrationLike;
 	getHitTestController(): XRHitTestController;
 	getManualApplyToPlacement(): (
 		base: ManualPlacementBase,
@@ -48,8 +39,6 @@ interface PlacementWorkflowOptions {
 
 export class PlacementWorkflow {
 
-	private coarseWarmupPromise: Promise<void> | null = null;
-
 	constructor(private readonly options: PlacementWorkflowOptions) {}
 
 	async placeLocalizedModel(): Promise<void> {
@@ -65,25 +54,15 @@ export class PlacementWorkflow {
 		}
 
 		const localizationOverride = this.options.getPreferredLocalizationOverride();
-		const coarseRegistration = this.options.getCoarseRegistration();
-		if ( localizationOverride === null && coarseRegistration.canEstimate() === false ) {
-			try {
-				this.options.setStatus( '正在准备粗配准数据。' );
-				await this.warmupCoarseRegistration();
-				this.options.setStatus( coarseRegistration.getReadyMessage() );
-			} catch ( error ) {
-				console.error( 'Coarse registration warmup failed:', error );
-				this.options.setStatus(
-					error instanceof Error
-						? error.message
-						: '粗配准准备失败。'
-				);
-				return;
-			}
-		}
-
-		if ( localizationOverride === null && coarseRegistration.canEstimate() === false ) {
-			this.options.setStatus( coarseRegistration.getMissingRequirementMessage() );
+		if ( localizationOverride === null ) {
+			console.info( '[FormalLocalizationRequired]', {
+				mode: this.options.getWorkflowMode(),
+				siteId: this.options.getSiteId(),
+				sessionId: this.options.getCurrentSessionId(),
+				reason: 'formal placement requires marker/manual/rtk localization',
+				createdAt: Date.now()
+			} );
+			this.options.setStatus( '请先完成 Marker 自动识别或手动四角点校正，再应用正式放置。' );
 			return;
 		}
 
@@ -92,8 +71,8 @@ export class PlacementWorkflow {
 		this.options.syncArSessionPhase();
 
 		if ( this.options.placementSession.getPlacedModel() === null ) {
-			if ( this.options.placementSession.getCoarsePlacementPending() ) {
-				this.options.setStatus( '正在执行固定放置...' );
+			if ( this.options.placementSession.getAutoPlacementPending() ) {
+				this.options.setStatus( '正在应用当前会话定位结果...' );
 				return;
 			}
 
@@ -106,15 +85,23 @@ export class PlacementWorkflow {
 
 		this.options.placementSession.requestAutoPlacement( this.options.getModelTemplate() );
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
+			const localizationOverride = this.options.getPreferredLocalizationOverride();
 			console.info( '[ArInspectionAutoPlacementRequested]', {
 				mode: this.options.getWorkflowMode(),
 				siteId: this.options.getSiteId(),
 				sessionId: this.options.getCurrentSessionId(),
 				targetId: this.options.getInspectionTargetId(),
-				source: this.options.getPreferredLocalizationOverride()?.source ?? 'fallback',
+				source: localizationOverride?.source ?? 'fallback',
 				trackingState: 'placement-requested',
 				stableFrameCount: this.options.getInspectionStableFrameCount(),
 				hasHitTest: this.options.getHitTestController().hasGroundHit(),
+				createdAt: Date.now()
+			} );
+			console.info( '[LocalizationPriorityResolved]', {
+				mode: this.options.getWorkflowMode(),
+				siteId: this.options.getSiteId(),
+				sessionId: this.options.getCurrentSessionId(),
+				source: localizationOverride?.source ?? 'fallback',
 				createdAt: Date.now()
 			} );
 		}
@@ -126,12 +113,22 @@ export class PlacementWorkflow {
 
 		const hadPlacedModel = this.options.placementSession.getPlacedModel() !== null;
 		const localizationOverride = this.options.getPreferredLocalizationOverride();
-		this.options.placementSession.attemptCoarsePlacement( {
+		if ( localizationOverride === null ) {
+			console.info( '[FormalLocalizationRequired]', {
+				mode: this.options.getWorkflowMode(),
+				siteId: this.options.getSiteId(),
+				sessionId: this.options.getCurrentSessionId(),
+				reason: 'no formal localization override available',
+				createdAt: Date.now()
+			} );
+			return;
+		}
+
+		this.options.placementSession.attemptLocalizedPlacement( {
 			xrHitTest: this.options.getHitTestController(),
 			modelTemplate: this.options.getModelTemplate(),
 			registrationSolution: this.options.getRegistrationSolution(),
 			arFromEnuSolutionOverride: localizationOverride,
-			coarseRegistration: this.options.getCoarseRegistration(),
 			manualApplyToPlacement: this.options.getManualApplyToPlacement(),
 			manualPositionTarget: this.options.getManualPositionTarget(),
 			manualOrientationTarget: this.options.getManualOrientationTarget(),
@@ -152,26 +149,6 @@ export class PlacementWorkflow {
 
 		this.options.syncArSessionPhase();
 		this.options.emit();
-
-	}
-
-	warmupCoarseRegistration(): Promise<void> {
-
-		const coarseRegistration = this.options.getCoarseRegistration();
-		if ( coarseRegistration.canEstimate() ) {
-			return Promise.resolve();
-		}
-
-		if ( this.coarseWarmupPromise !== null ) {
-			return this.coarseWarmupPromise;
-		}
-
-		this.coarseWarmupPromise = coarseRegistration.enable()
-			.finally( () => {
-				this.coarseWarmupPromise = null;
-			} );
-
-		return this.coarseWarmupPromise;
 
 	}
 

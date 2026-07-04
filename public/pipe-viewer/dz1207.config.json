@@ -8,6 +8,11 @@
     },
     "axes": "enu"
   },
+  "siteOrigin": {
+    "lng": 118.735937335447,
+    "lat": 31.9399836566532,
+    "height": 39.5
+  },
   "anchor": {
     "lng": 118.735937335447,
     "lat": 31.9399836566532,
@@ -79,5 +84,61 @@
       "patternUrl": "/pipe-viewer/markers/dz1207-control-marker.png"
     }
   ],
+  "rtkSurveyDataset": {
+    "siteId": "dz1207",
+    "coordinateSystem": "mixed",
+    "source": "rtk-survey-json",
+    "points": [
+      {
+        "id": "SITE_ORIGIN",
+        "name": "Site origin",
+        "type": "site-origin",
+        "geodetic": {
+          "longitude": 118.735937335447,
+          "latitude": 31.9399836566532,
+          "altitude": 39.5
+        },
+        "note": "Placeholder RTK survey point based on current engineering origin."
+      },
+      {
+        "id": "CP_01",
+        "name": "Control point 01",
+        "type": "ground-control-point",
+        "geodetic": {
+          "longitude": 118.735937335447,
+          "latitude": 31.9399836566532,
+          "altitude": 39.5
+        },
+        "relatedTargetId": "dike-marker-001"
+      }
+    ]
+  },
+  "controlTargets": [
+    {
+      "id": "dike-marker-001",
+      "name": "CP_01 control marker",
+      "markerId": "dike-marker-001",
+      "imageUrl": "/pipe-viewer/markers/dz1207-control-marker.png",
+      "patternUrl": "/pipe-viewer/markers/dz1207-control-marker.png",
+      "centerEnu": [0, 0, 0],
+      "cornersEnu": [
+        [-0.15, 0.15, 0],
+        [0.15, 0.15, 0],
+        [0.15, -0.15, 0],
+        [-0.15, -0.15, 0]
+      ],
+      "yawDeg": 0,
+      "sizeMeters": 0.3,
+      "trackingWidthMeters": 0.3,
+      "plane": "horizontal",
+      "cornerOrder": ["leftTop", "rightTop", "rightBottom", "leftBottom"],
+      "note": "MOCK/DEMO control marker ENU corners; replace with real RTK surveyed marker corners later."
+    }
+  ],
+  "placementAnchorEnu": [0, 0, 0],
+  "placementAnchorMeaning": "site-origin-ground-reference",
+  "undergroundObjects": [],
+  "sensors": [],
+  "riskPoints": [],
   "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json"
 }

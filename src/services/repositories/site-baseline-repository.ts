@@ -161,9 +161,7 @@ function normalizeSiteCalibrationBaseline(value: unknown): SiteCalibrationBaseli
 		return null;
 	}
 
-	const candidate = value as Partial<SiteCalibrationBaseline> & {
-		gpsBiasCorrection?: { source?: string };
-	};
+	const candidate = value as Partial<SiteCalibrationBaseline>;
 	if (
 		typeof candidate.siteId !== 'string'
 		|| Array.isArray( candidate.controlTargets ) === false
@@ -173,18 +171,6 @@ function normalizeSiteCalibrationBaseline(value: unknown): SiteCalibrationBaseli
 		return null;
 	}
 
-	return {
-		...candidate,
-		gpsBiasCorrection: candidate.gpsBiasCorrection === undefined
-			? undefined
-			: {
-				...candidate.gpsBiasCorrection,
-				source: candidate.gpsBiasCorrection.source === 'manual-site-pose'
-					? 'manual-site-pose'
-					: candidate.gpsBiasCorrection.source === 'debug'
-						? 'debug'
-						: 'marker'
-			}
-	} as SiteCalibrationBaseline;
+	return { ...candidate } as SiteCalibrationBaseline;
 
 }

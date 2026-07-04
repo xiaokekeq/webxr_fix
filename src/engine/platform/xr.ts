@@ -19,7 +19,7 @@ interface CreateXRSessionRuntimeOptions {
 	onSessionStart(): void;
 	onSessionEnd(): void;
 	canReportStatus(): boolean;
-	onAttemptCoarsePlacement(): void;
+	onAttemptAutoPlacement(): void;
 	onFrameUpdate(frame: XRFrame): void;
 	getTrackedImages(): XrTrackedImageDefinition[];
 	onImageTrackingStateChange(state: XrImageTrackingState): void;
@@ -43,7 +43,7 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		onSessionStart,
 		onSessionEnd,
 		canReportStatus,
-		onAttemptCoarsePlacement,
+		onAttemptAutoPlacement,
 		onFrameUpdate,
 		getTrackedImages,
 		onImageTrackingStateChange,
@@ -91,7 +91,7 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 				xrHitTest.update( frame );
 				emitImageTrackingState();
 				emitImageTrackingObservations( frame );
-				onAttemptCoarsePlacement();
+				onAttemptAutoPlacement();
 				onFrameUpdate( frame );
 			}
 

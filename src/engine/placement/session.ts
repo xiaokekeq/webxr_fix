@@ -1,5 +1,5 @@
 ﻿import * as THREE from 'three';
-import type { ARSceneBundle, CoarsePlacementEstimate, XRAnchorHandle, XRHitTestController } from '@/features/ar/types/runtime-types.js';
+import type { ARSceneBundle, XRAnchorHandle, XRHitTestController } from '@/features/ar/types/runtime-types.js';
 import { clearPlacedModel } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
@@ -7,7 +7,6 @@ import type { ManualPlacementBase } from '@/localization/manual/manual-registrat
 import { createDefaultTargetGuidanceState } from '@/localization/core/registration-store.js';
 import { createPlacementSummaryState } from '@/engine/session/view-state.js';
 import {
-	createAutoPlacementBase,
 	createHitTestPlacementBase,
 	createPlacementBaseFromArLocalizationSolution,
 	placeAdjustedModel
@@ -16,8 +15,6 @@ import type { PropertySelectionController } from '@/engine/interaction/property-
 
 type ArPlacementSource =
 	| 'hit-test'
-	| 'coarse-registration'
-	| 'gps-bias'
 	| 'marker'
 	| 'manual'
 	| 'unknown';
@@ -54,8 +51,8 @@ export interface PlacementSession {
 	getPlacedModel(): THREE.Group | null;
 	getArPlacedModel(): THREE.Group | null;
 	getPlacementBase(): ManualPlacementBase | null;
-	getCoarsePlacementPending(): boolean;
-	markCoarsePlacementPending(): void;
+	getAutoPlacementPending(): boolean;
+	markAutoPlacementPending(): void;
 	resetPlacement(): void;
 	requestAutoPlacement(modelTemplate: THREE.Group | null): void;
 	placeAtHitTest(args: {
@@ -70,16 +67,11 @@ export interface PlacementSession {
 		manualPositionTarget: THREE.Vector3;
 		manualOrientationTarget: THREE.Quaternion;
 	}): boolean;
-	attemptCoarsePlacement(args: {
+	attemptLocalizedPlacement(args: {
 		xrHitTest: XRHitTestController;
 		modelTemplate: THREE.Group | null;
 		registrationSolution: EngineeringRegistrationSolution | null;
 		arFromEnuSolutionOverride?: ArFromEnuSolution | null;
-		coarseRegistration: {
-			canEstimate(): boolean;
-			estimatePlacement(cameraWorldPosition: THREE.Vector3, groundY: number): CoarsePlacementEstimate | null;
-			getMissingRequirementMessage(): string;
-		};
 		manualApplyToPlacement(
 			base: ManualPlacementBase,
 			targetPosition: THREE.Vector3,
@@ -131,7 +123,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 	let arPlacedModel: THREE.Group | null = null;
 	let arPlacementBase: ManualPlacementBase | null = null;
-	let coarsePlacementPending = false;
+	let autoPlacementPending = false;
 	let trackedArPlacementTransform: TrackedArPlacementTransform | null = null;
 	let activeArAnchor: XRAnchorHandle | null = null;
 	let usesArPlacementAnchor = false;
@@ -190,10 +182,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return 'marker';
 			case 'manual-site-pose':
 				return 'manual';
-			case 'gps-bias':
-				return 'gps-bias';
-			case 'gps-imu':
-				return 'coarse-registration';
 			default:
 				return 'unknown';
 		}
@@ -348,22 +336,22 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		},
 
-		getCoarsePlacementPending() {
+		getAutoPlacementPending() {
 
-			return coarsePlacementPending;
+			return autoPlacementPending;
 
 		},
 
-		markCoarsePlacementPending() {
+		markAutoPlacementPending() {
 
-			coarsePlacementPending = true;
+			autoPlacementPending = true;
 
 		},
 
 		resetPlacement() {
 
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
-			coarsePlacementPending = false;
+			autoPlacementPending = false;
 			arPlacementBase = null;
 			clearActiveArAnchor();
 			clearArPlacementTracking();
@@ -379,7 +367,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return;
 			}
 
-			coarsePlacementPending = true;
+			autoPlacementPending = true;
 			updateRegistrationStatusDetail( '状态：等待命中可用平面' );
 
 		},
@@ -432,7 +420,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelAnchor: sceneBundle.arModelAnchor,
 				adjustedPlacement: finalPlacement
 			} );
-			coarsePlacementPending = false;
+			autoPlacementPending = false;
 			updateRegistrationStatusDetail( '状态：模型已放置' );
 			updatePlacementSummary();
 			trackArPlacement( 'hit-test' );
@@ -440,14 +428,13 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		},
 
-		attemptCoarsePlacement(args) {
+		attemptLocalizedPlacement(args) {
 
 			const {
 				xrHitTest,
 				modelTemplate,
 				registrationSolution,
 				arFromEnuSolutionOverride,
-				coarseRegistration,
 				manualApplyToPlacement,
 				manualPositionTarget,
 				manualOrientationTarget,
@@ -457,7 +444,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			} = args;
 
 			if (
-				coarsePlacementPending === false
+				autoPlacementPending === false
 				|| modelTemplate === null
 				|| registrationSolution === null
 				|| xrHitTest.hasGroundHit() === false
@@ -465,14 +452,11 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return;
 			}
 
-			const groundPosition = xrHitTest.getHitPosition( new THREE.Vector3() );
-			if ( groundPosition === null ) {
+			if ( xrHitTest.getHitPosition( new THREE.Vector3() ) === null ) {
 				updateRegistrationStatusDetail( '状态：等待识别平面' );
 				return;
 			}
-			const xrPlacementCamera = sceneBundle.renderer.xr.getCamera();
 
-			let estimate: CoarsePlacementEstimate | null = null;
 			let usedMarkerOverride = false;
 
 			if ( arFromEnuSolutionOverride !== null && arFromEnuSolutionOverride !== undefined ) {
@@ -484,25 +468,16 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				} );
 				usedMarkerOverride = true;
 			} else {
-				if ( coarseRegistration.canEstimate() === false ) {
-					return;
-				}
-
-				xrPlacementCamera.getWorldPosition( cameraWorldPosition );
-				estimate = coarseRegistration.estimatePlacement( cameraWorldPosition, groundPosition.y );
-				if ( estimate === null ) {
-					updateRegistrationStatusDetail( '状态：等待粗配准数据' );
-					setStatus( coarseRegistration.getMissingRequirementMessage() );
-					return;
-				}
-
-				arPlacementBase = createAutoPlacementBase( {
-					estimate,
-					modelTemplate,
-					registrationSolution,
-					modelOrientationTarget
+				void cameraWorldPosition;
+				console.info( '[FormalLocalizationRequired]', {
+					reason: 'localized placement skipped without formal localization override',
+					hasGroundHit: xrHitTest.hasGroundHit(),
+					createdAt: Date.now()
 				} );
-
+				updateRegistrationStatusDetail( '状态：等待 Marker 或手动四角点定位' );
+				setStatus( '请先完成 Marker 自动识别或手动四角点校正，再进行正式放置。' );
+				autoPlacementPending = false;
+				return;
 			}
 
 			onPlacementBaseResolved?.( arPlacementBase );
@@ -513,7 +488,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			);
 			const placementSource = usedMarkerOverride
 				? resolvePlacementSourceFromArLocalization( arFromEnuSolutionOverride?.source )
-				: 'coarse-registration';
+				: 'unknown';
 			const usesAnchorRoot = tryActivateAnchorFromHit( xrHitTest, placementSource );
 			const finalPlacement = usesAnchorRoot
 				? resolvePlacementRelativeToAnchor( adjustedPlacement )
@@ -527,7 +502,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			} );
 			trackArPlacement( placementSource );
 
-			coarsePlacementPending = false;
+			autoPlacementPending = false;
 			updateRegistrationStatusDetail( '状态：模型已放置' );
 			updatePlacementSummary();
 
@@ -535,18 +510,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				setStatus( '已使用 Marker 校正结果更新 AR 放置。' );
 				return;
 			}
-
-			if ( estimate === null ) {
-				return;
-			}
-
-			const accuracyText = estimate.accuracyMeters === null
-				? 'GPS 精度未知'
-				: `GPS 精度约 ${Math.round( estimate.accuracyMeters )}m`;
-			const groundLockText = `groundY ${estimate.groundY.toFixed( 3 )}m / ENU 垂向偏移${estimate.enuVerticalOffsetApplied ? '已启用' : '已禁用'}`;
-			setStatus(
-				`已完成 ${registrationSolution.modelId} 的粗配准。距离约 ${Math.round( estimate.distanceMeters )}m，RMS ${registrationSolution.modelToSite.rmsErrorMeters.toFixed( 3 )}m，${accuracyText}，${groundLockText}。`
-			);
 
 		},
 

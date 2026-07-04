@@ -7,18 +7,17 @@ export interface VisualControlTarget {
 	imageUrl?: string;
 	patternUrl?: string;
 	centerEnu: [ number, number, number ];
-	yawDeg: number;
-	sizeMeters: number;
+	cornersEnu?: [
+		[ number, number, number ],
+		[ number, number, number ],
+		[ number, number, number ],
+		[ number, number, number ]
+	];
+	yawDeg?: number;
+	sizeMeters?: number;
 	trackingWidthMeters?: number;
 	plane: VisualControlTargetPlane;
 	cornerOrder?: string[];
-}
-
-export interface GpsBiasCorrection {
-	deltaEnu: [ number, number, number ];
-	yawCorrectionDeg?: number;
-	createdAt: number;
-	source: 'marker' | 'manual-site-pose' | 'debug';
 }
 
 export interface SiteCalibrationBaseline {
@@ -30,7 +29,12 @@ export interface SiteCalibrationBaseline {
 	};
 	modelLocalToEnuVersion?: string;
 	controlTargets: VisualControlTarget[];
-	gpsBiasCorrection?: GpsBiasCorrection;
+	rtkSurveyDataset?: import('@/localization/rtk/rtk-survey-dataset.js').RtkSurveyDataset;
+	placementAnchorEnu?: [ number, number, number ];
+	placementAnchorMeaning?: string;
+	undergroundObjects?: unknown[];
+	sensors?: unknown[];
+	riskPoints?: unknown[];
 	createdAt: number;
 	updatedAt?: number;
 	source: 'site-baseline-config';
@@ -43,13 +47,19 @@ export function getControlTargetImageUrl(target: Pick<VisualControlTarget, 'imag
 		return null;
 	}
 
-	return isPattFileUrl( candidate ) ? null : candidate;
+	return isSupportedImageTrackingUrl( candidate ) ? candidate : null;
 
 }
 
 export function isPattFileUrl(url: string): boolean {
 
 	return /\.patt(?:$|\?)/i.test( url );
+
+}
+
+export function isSupportedImageTrackingUrl(url: string): boolean {
+
+	return isPattFileUrl( url ) === false && /\.(?:png|jpe?g|webp)(?:$|\?)/i.test( url );
 
 }
 

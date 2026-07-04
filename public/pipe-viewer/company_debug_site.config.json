@@ -6,6 +6,12 @@
     "height": 50,
     "coordType": "GCJ-02"
   },
+  "siteOrigin": {
+    "lng": 118.7365,
+    "lat": 31.94031,
+    "height": 50,
+    "coordType": "GCJ-02"
+  },
   "anchorModelLocal": [0, 0, 0],
   "yawDeg": 0,
   "scale": 1,
@@ -40,5 +46,53 @@
       "yawDeg": 0,
       "patternUrl": "/pipe-viewer/markers/company-debug-control-marker.png"
     }
-  ]
+  ],
+  "rtkSurveyDataset": {
+    "siteId": "company_debug_site",
+    "coordinateSystem": "site-enu",
+    "source": "rtk-survey-json",
+    "points": [
+      {
+        "id": "SITE_ORIGIN",
+        "name": "Debug site origin",
+        "type": "site-origin",
+        "enu": [0, 0, 0],
+        "note": "Placeholder RTK survey point based on local debug ENU."
+      },
+      {
+        "id": "LOCAL_CP_01",
+        "name": "Local control point 01",
+        "type": "ground-control-point",
+        "enu": [0, 0, 0],
+        "relatedTargetId": "local-debug-marker-001"
+      }
+    ]
+  },
+  "controlTargets": [
+    {
+      "id": "local-debug-marker-001",
+      "name": "LOCAL_CP_01 control marker",
+      "markerId": "local-debug-marker-001",
+      "imageUrl": "/pipe-viewer/markers/company-debug-control-marker.png",
+      "patternUrl": "/pipe-viewer/markers/company-debug-control-marker.png",
+      "centerEnu": [0, 0, 0],
+      "cornersEnu": [
+        [-0.15, 0.15, 0],
+        [0.15, 0.15, 0],
+        [0.15, -0.15, 0],
+        [-0.15, -0.15, 0]
+      ],
+      "yawDeg": 0,
+      "sizeMeters": 0.3,
+      "trackingWidthMeters": 0.3,
+      "plane": "horizontal",
+      "cornerOrder": ["leftTop", "rightTop", "rightBottom", "leftBottom"],
+      "note": "MOCK/DEMO control marker ENU corners; replace with real RTK surveyed marker corners later."
+    }
+  ],
+  "placementAnchorEnu": [0, 0, 0],
+  "placementAnchorMeaning": "site-origin-ground-reference",
+  "undergroundObjects": [],
+  "sensors": [],
+  "riskPoints": []
 }

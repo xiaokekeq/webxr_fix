@@ -1,5 +1,4 @@
 import type {
-	GpsBiasCorrection,
 	SiteCalibrationBaseline,
 	VisualControlTarget,
 	VisualControlTargetPlane
@@ -9,4 +8,4 @@ export type ArWorkflowMode =
 	| 'site-baseline-config'
 	| 'ar-inspection';
 
-export type { VisualControlTargetPlane, VisualControlTarget, GpsBiasCorrection, SiteCalibrationBaseline };
+export type { VisualControlTargetPlane, VisualControlTarget, SiteCalibrationBaseline };

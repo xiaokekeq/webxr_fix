@@ -306,12 +306,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		enableCoarseRegistration(): Promise<void> {
-
-			return ensureController().actions.enableCoarseRegistration();
-
-		},
-
 		refreshGeoLocation(): Promise<void> {
 
 			return ensureController().actions.refreshGeoLocation();
@@ -321,18 +315,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		saveSiteCalibrationBaseline(): void {
 
 			ensureController().actions.saveSiteCalibrationBaseline();
-
-		},
-
-		saveGpsBiasCorrectionFromCurrentPose(): Promise<void> {
-
-			return ensureController().actions.saveGpsBiasCorrectionFromCurrentPose();
-
-		},
-
-		clearGpsBiasCorrection(): void {
-
-			ensureController().actions.clearGpsBiasCorrection();
 
 		},
 

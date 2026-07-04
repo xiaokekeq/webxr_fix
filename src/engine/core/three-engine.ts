@@ -10,17 +10,13 @@ import {
 	exportRegistrationSnapshotFile,
 	exportSceneSnapshot
 } from '@/engine/session/export-runtime.js';
-import { GpsBiasWorkflow } from '@/engine/session/gps-bias-workflow.js';
 import { ArLocalizationRuntime } from '@/engine/session/ar-localization-runtime.js';
 import { RegistrationStateRuntime } from '@/engine/session/registration-state-runtime.js';
 import { SessionLifecycleRuntime } from '@/engine/session/session-lifecycle-runtime.js';
 import { createSceneHostRuntime, type SceneHostRuntimeHosts } from '@/engine/session/scene-host-runtime.js';
 import { createStatusRuntime } from '@/engine/session/status-runtime.js';
 import { createWorkspaceRuntime } from '@/engine/session/workspace-runtime.js';
-import {
-	getFirstGeodeticPointFromDemoModelConfig,
-	type DemoModelConfig
-} from '@/models/config/demo-model-config.js';
+import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
 import {
 	PROJECT_NAME,
 	STATIC_LAYER_NAMES,
@@ -28,13 +24,13 @@ import {
 } from '@/models/catalog/model-api.js';
 import {
 	createDefaultAnnotationDetailState,
-	createDefaultGpsBiasCorrectionState,
 	createDefaultMarkerCalibrationState,
 	createDefaultRegistrationMetricsState,
 	createDefaultRegistrationChainDebugState,
 	createDefaultModelScaleSummaryState,
 	createDefaultSavedMarkerLocalizationState,
 	createDefaultSiteCalibrationBaselineState,
+	createDefaultEngineeringConfigStatusState,
 	createDefaultTargetGuidanceState,
 	createRegistrationStore,
 	type AnnotationDetailState,
@@ -47,25 +43,13 @@ import {
 	type WorkspaceMode
 } from '@/localization/core/registration-store.js';
 import {
-	createCoarseTargetFromEngineeringSolution,
 	type EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
-import { createCoarseRegistrationController } from '@/localization/coarse/coarse-registration.js';
 import {
 	type ArFromEnuSolution
 } from '@/localization/core/ar-from-enu-solution.js';
-import { createEnuFrame, geodeticToEnu, type GeodeticCoordinate } from '@/localization/core/geodesy.js';
 import {
-	createGpsBiasCorrectionFromKnownDeviceEnu,
-	deriveDeviceTrueEnuFromArSolution,
-	shouldAcceptGpsAccuracy
-} from '@/localization/gps-bias/gps-bias-registration.js';
-import {
-	clearGpsBiasCorrection,
-	saveGpsBiasCorrection,
-	type GpsBiasCorrection as StoredGpsBiasCorrection
-} from '@/localization/gps-bias/gps-bias-storage.js';
-import {
+	createMarkerPoseInEnuFromControlTarget,
 	resolveMarkerPoseInEnu,
 	type MarkerLocalizationSolution,
 	type MarkerPoseInEnu
@@ -100,10 +84,7 @@ import {
 	getSectionCutPlaneModeLabel
 } from '@/features/ar/types/display-modes.js';
 import { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-workflow.js';
-import {
-	MarkerCalibrationRuntime,
-	MARKER_CORNER_SEQUENCE
-} from '@/engine/inspection/marker-calibration-runtime.js';
+import { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
 import { ManualRegistrationWorkflow } from '@/engine/placement/manual-registration-workflow.js';
 import { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
 import { getControlTargetImageUrl, isPattFileUrl } from '@/localization/baseline/site-calibration-baseline.js';
@@ -113,16 +94,12 @@ import type {
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
 import type { ArSessionContext } from '@/features/ar/types/ar-session-context.js';
-import { formatGeodetic } from '@/features/ar/utils/formatters.js';
 import { repositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
 
 const MAX_LOG_ITEMS = 24;
 
-const tempMarkerEnuPosition = new THREE.Vector3();
-const tempMarkerEnuQuaternion = new THREE.Quaternion();
-const tempMarkerEnuScale = new THREE.Vector3();
 const tempViewerArPosition = new THREE.Vector3();
 
 export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
@@ -184,8 +161,8 @@ function createInitialState(): RegistrationStoreState {
 		modelScaleSummary: createDefaultModelScaleSummaryState(),
 		registrationChainDebug: createDefaultRegistrationChainDebugState(),
 		siteCalibrationBaseline: createDefaultSiteCalibrationBaselineState(),
+		engineeringConfigStatus: createDefaultEngineeringConfigStatusState(),
 		savedMarkerLocalization: createDefaultSavedMarkerLocalizationState(),
-		gpsBiasCorrection: createDefaultGpsBiasCorrectionState(),
 		markerCalibration: createDefaultMarkerCalibrationState(),
 		placementSummary: {
 			positionText: '-',
@@ -196,7 +173,6 @@ function createInitialState(): RegistrationStoreState {
 		annotationDetail: createDefaultAnnotationDetailState(),
 		registrationStatusDetail: '状态：等待识别平面',
 		runtimeStatus: '正在准备 AR 运行环境',
-		coarseLocationDebugText: '手机 未获取 / 目标 -- / 精度 -- / 距离 --',
 		logMessages: []
 	};
 
@@ -248,7 +224,6 @@ export class ThreeEngine {
 	private readonly pointerSelection;
 	private readonly arSessionStateRuntime;
 	private readonly sceneHostRuntime;
-	private readonly gpsBiasWorkflow;
 	private readonly arLocalizationRuntime;
 	private readonly sessionLifecycleRuntime;
 	private readonly visualizationStateRuntime;
@@ -268,23 +243,16 @@ export class ThreeEngine {
 	private registrationSolution: EngineeringRegistrationSolution | null = null;
 	private resolvedMarkerPosesInEnu: MarkerPoseInEnu[] = [];
 	private activeMarkerArFromEnuSolution: ArFromEnuSolution | null = null;
-	private activeGpsBiasCorrection: StoredGpsBiasCorrection | null = null;
 	private activeSiteCalibrationBaseline: SiteCalibrationBaseline | null = null;
 	private activeMarkerLocalizationResult: SavedMarkerLocalizationResult | null = null;
 	private markerCorrectionFallbackArFromEnuSolution: ArFromEnuSolution | null = null;
 	private currentArSessionContext: ArSessionContext | null = null;
 	private currentArSessionId: string | null = null;
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
-	private currentModelDebugTargetGeodetic: GeodeticCoordinate | null = null;
 	private lastAnnotationLabelsSignature = '';
 	private lastArSessionContextLogSignature = '';
 	private siteBaselineLoadRequestId = 0;
 	private pipesByName = new Map<string, PipeRecord>();
-	private coarseRegistration = createCoarseRegistrationController( {
-		setStatus: ( message ) => {
-			this.setStatus( message );
-		}
-	} );
 
 	constructor() {
 
@@ -367,48 +335,12 @@ export class ThreeEngine {
 			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
 			hasPlacedModel: () => this.placementSession.getArPlacedModel() !== null,
-			isCoarsePlacementPending: () => this.placementSession.getCoarsePlacementPending()
+			isAutoPlacementPending: () => this.placementSession.getAutoPlacementPending()
 		} );
 
 		this.sceneHostRuntime = createSceneHostRuntime( {
 			sceneBundle: this.sceneBundle,
 			resizeScene: resizeARScene
-		} );
-
-		this.gpsBiasWorkflow = new GpsBiasWorkflow( {
-			placementSession: this.placementSession,
-			getWorkflowMode: () => this.workflowMode,
-			getInspectionPlacementSource: () => this.store.getState().inspectionPlacementSource,
-			getSiteId: () => this.demoModelConfig?.modelId ?? null,
-			getCurrentSessionId: () => this.currentArSessionId,
-			getActiveCorrection: () => this.activeGpsBiasCorrection,
-			getCurrentHeadingDeg: () => this.coarseRegistration.getLastHeadingDeg?.() ?? null,
-			getActiveArFromEnuSolution: () => this.getActiveArFromEnuSolution(),
-			getActiveMarkerArFromEnuSolution: () => this.getActiveMarkerArFromEnuSolutionForCurrentSession(),
-			getCurrentViewerArPosition: () => this.getCurrentViewerArPosition(),
-			getPlacementMode: () => this.store.getState().placementMode,
-			getModelTemplate: () => this.modelTemplate,
-			getRegistrationSolution: () => this.registrationSolution,
-			getManualApplyToPlacement: () => this.manualRegistration.applyToPlacement,
-			getManualPositionTarget: () => this.manualPosition,
-			getManualOrientationTarget: () => this.manualOrientation,
-			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
-			getReferenceSpace: () => this.sceneBundle.renderer.xr.getReferenceSpace(),
-			refreshGpsBiasCorrectionState: ( options ) => {
-				this.refreshGpsBiasCorrectionState( options );
-			},
-			syncRegistrationChainDebug: () => {
-				this.syncRegistrationChainDebug();
-			},
-			applyModelLayerVisibility: () => {
-				this.applyModelLayerVisibility();
-			},
-			emit: () => {
-				this.emit();
-			},
-			setStatus: ( message ) => {
-				this.setStatus( message );
-			}
 		} );
 
 		this.arLocalizationRuntime = new ArLocalizationRuntime( {
@@ -420,8 +352,6 @@ export class ThreeEngine {
 			hasActiveManualSitePose: () => this.manualRegistrationWorkflow.hasActiveSitePose(),
 			getActiveMarkerArFromEnuSolution: () => this.activeMarkerArFromEnuSolution,
 			getMarkerCorrectionFallbackArFromEnuSolution: () => this.markerCorrectionFallbackArFromEnuSolution,
-			getGpsBiasArFromEnuSolution: () => this.gpsBiasWorkflow.getSessionSolution(),
-			getCoarseArFromEnuSolution: () => this.coarseRegistration.getLastArFromEnuSolution?.() ?? null
 		} );
 
 		this.inspectionMarkerWorkflow = new InspectionMarkerWorkflow( {
@@ -495,14 +425,7 @@ export class ThreeEngine {
 			getActiveMarkerLocalizationResult: () => this.activeMarkerLocalizationResult,
 			getActiveMarkerArFromEnuSolutionForCurrentSession: () => this.getActiveMarkerArFromEnuSolutionForCurrentSession(),
 			getActiveArFromEnuSolution: () => this.getActiveArFromEnuSolution(),
-			getCurrentGpsBiasSolution: () => this.gpsBiasWorkflow.getSessionSolution(),
-			getLatestAcceptedGpsBiasSample: () => this.gpsBiasWorkflow.getLatestAcceptedSample(),
-			getLatestGpsBiasSample: () => this.gpsBiasWorkflow.getLatestSample(),
-			clearGpsBiasSessionSolution: () => {
-				this.gpsBiasWorkflow.clearSessionSolution();
-			},
 			getActiveSiteCalibrationBaseline: () => this.activeSiteCalibrationBaseline,
-			getActiveGpsBiasCorrection: () => this.activeGpsBiasCorrection,
 			getActiveManualSitePose: () => this.manualRegistrationWorkflow.getActiveSitePose(),
 			hasActiveManualSitePose: () => this.manualRegistrationWorkflow.hasActiveSitePose(),
 			hasRestoredManualSitePose: () => this.manualRegistrationWorkflow.hasRestoredSitePose(),
@@ -556,10 +479,9 @@ export class ThreeEngine {
 			getCurrentSessionId: () => this.currentArSessionId,
 			getInspectionTargetId: () => this.activeMarkerLocalizationResult?.markerId ?? this.inspectionMarkerWorkflow.getStableTargetId(),
 			getInspectionStableFrameCount: () => this.inspectionMarkerWorkflow.getStableFrameCount(),
-			getPreferredLocalizationOverride: () => this.gpsBiasWorkflow.getPreferredLocalizationOverride(),
+			getPreferredLocalizationOverride: () => this.getPreferredFormalLocalizationOverride(),
 			getModelTemplate: () => this.modelTemplate,
 			getRegistrationSolution: () => this.registrationSolution,
-			getCoarseRegistration: () => this.coarseRegistration,
 			getHitTestController: () => this.xrRuntime.getHitTestController(),
 			getManualApplyToPlacement: () => this.manualRegistration.applyToPlacement,
 			getManualPositionTarget: () => this.manualPosition,
@@ -617,9 +539,6 @@ export class ThreeEngine {
 			refreshSiteCalibrationBaselineState: ( options ) => {
 				this.refreshSiteCalibrationBaselineState( options );
 			},
-			refreshGpsBiasCorrectionState: ( options ) => {
-				this.refreshGpsBiasCorrectionState( options );
-			},
 			syncRegistrationChainDebug: () => {
 				this.syncRegistrationChainDebug();
 			},
@@ -638,9 +557,6 @@ export class ThreeEngine {
 			appendLog: ( message ) => {
 				this.appendLog( message );
 			},
-			updateCoarseLocationDebugText: () => {
-				this.updateCoarseLocationDebugText();
-			},
 			setStatus: ( message ) => {
 				this.setStatus( message );
 			},
@@ -657,7 +573,6 @@ export class ThreeEngine {
 			placementWorkflow: this.placementWorkflow,
 			inspectionMarkerWorkflow: this.inspectionMarkerWorkflow,
 			markerCalibrationRuntime: this.markerCalibrationRuntime,
-			gpsBiasWorkflow: this.gpsBiasWorkflow,
 			manualApplyToPlacement: this.manualRegistration.applyToPlacement,
 			manualPositionTarget: this.manualPosition,
 			manualOrientationTarget: this.manualOrientation
@@ -716,15 +631,12 @@ export class ThreeEngine {
 				this.registrationSolution = null;
 				this.resolvedMarkerPosesInEnu = [];
 				this.activeSiteCalibrationBaseline = null;
-				this.activeGpsBiasCorrection = null;
 				this.currentArSessionContext = null;
 				this.lastArSessionContextLogSignature = '';
 				this.siteBaselineLoadRequestId += 1;
-				this.gpsBiasWorkflow.resetRuntimeState();
 				this.resetMarkerLocalizationCorrection();
 				this.markerCalibrationRuntime.resetRuntimeState();
 				this.manualRegistrationWorkflow.resetRuntimeState();
-				this.currentModelDebugTargetGeodetic = null;
 				this.pipesByName = new Map<string, PipeRecord>();
 				this.layerVisibility.reset();
 				this.visualizationStateRuntime.reset();
@@ -735,11 +647,9 @@ export class ThreeEngine {
 					modelLayers: [],
 					annotationDetail: createDefaultAnnotationDetailState(),
 					siteCalibrationBaseline: createDefaultSiteCalibrationBaselineState(),
-					gpsBiasCorrection: createDefaultGpsBiasCorrectionState()
+					engineeringConfigStatus: createDefaultEngineeringConfigStatusState()
 				} );
-				this.updateCoarseLocationDebugText();
 				this.refreshSavedMarkerLocalizationResult( { silentStatus: true } );
-				this.refreshGpsBiasCorrectionState( { silentStatus: true } );
 				this.markerCalibrationRuntime.syncState();
 				this.syncRegistrationChainDebug();
 			},
@@ -749,25 +659,11 @@ export class ThreeEngine {
 				this.modelTemplate = bundle.modelTemplate;
 				this.registrationSolution = bundle.registrationSolution;
 				this.resolvedMarkerPosesInEnu = this.resolveConfiguredMarkerPoses( bundle.demoModelConfig );
-				this.currentModelDebugTargetGeodetic = getFirstGeodeticPointFromDemoModelConfig( bundle.demoModelConfig );
 				this.rebuildModelLayers();
-				this.updateCoarseLocationDebugText();
 				this.syncArSessionContext();
 				this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
 				this.refreshSavedMarkerLocalizationResult( { silentStatus: true } );
-				this.refreshGpsBiasCorrectionState( { silentStatus: true } );
 				this.markerCalibrationRuntime.syncState();
-				this.syncRegistrationChainDebug();
-			},
-			onCreateCoarseRegistrationTarget: ( solution ) => {
-				this.coarseRegistration = createCoarseRegistrationController( {
-					setStatus: ( message ) => {
-						statusRuntime.setStatus( message );
-						this.emit();
-					},
-						target: createCoarseTargetFromEngineeringSolution( solution )
-				} );
-				this.updateCoarseLocationDebugText();
 				this.syncRegistrationChainDebug();
 			},
 			onLoadManualRegistration: ( modelId ) => {
@@ -794,9 +690,9 @@ export class ThreeEngine {
 			},
 			canReportStatus: () => (
 				this.placementSession.getArPlacedModel() === null
-				&& this.placementSession.getCoarsePlacementPending() === false
+				&& this.placementSession.getAutoPlacementPending() === false
 			),
-			onAttemptCoarsePlacement: () => {
+			onAttemptAutoPlacement: () => {
 				this.placementWorkflow.attemptAutoPlacement();
 			},
 			getTrackedImages: () => {
@@ -810,8 +706,6 @@ export class ThreeEngine {
 			},
 			onFrameUpdate: ( frame ) => {
 				this.displayModeController.updateDepthState( frame );
-				this.gpsBiasWorkflow.syncReferenceSpace();
-				this.gpsBiasWorkflow.syncFromFrame();
 				this.inspectionMarkerWorkflow.syncHints();
 				this.placementSession.updateArPlacementAnchor( frame );
 				this.annotationLabelsController.update( this.sceneBundle.renderer.xr.getCamera() );
@@ -891,16 +785,6 @@ export class ThreeEngine {
 			this.applyModelLayerVisibility();
 			this.syncSceneHost();
 			this.refreshSavedMarkerLocalizationResult( { silentStatus: true } );
-
-			void this.coarseRegistration.prime()
-				.then( () => {
-					this.appendLog( '粗配准能力预热完成。' );
-					this.updateCoarseLocationDebugText();
-				} )
-				.catch( () => {
-					this.appendLog( '粗配准预热未能自动完成。' );
-					this.updateCoarseLocationDebugText();
-				} );
 		} catch ( error ) {
 			console.error( 'AR engine initialization failed:', error );
 			this.setStatus(
@@ -933,7 +817,6 @@ export class ThreeEngine {
 		this.layerPeelingController.dispose();
 		this.sectionCutController.dispose();
 		this.annotationLabelsController.dispose();
-		this.gpsBiasWorkflow.resetRuntimeState();
 		this.sceneBundle.renderer.dispose();
 
 	}
@@ -1101,39 +984,21 @@ export class ThreeEngine {
 		} );
 		this.syncArSessionContext();
 		this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
-		this.refreshGpsBiasCorrectionState( { silentStatus: true } );
 		this.syncRegistrationChainDebug();
 		this.emit();
 
 	}
 
-	async enableCoarseRegistration(): Promise<void> {
-
-		try {
-			await this.coarseRegistration.enable();
-			this.updateCoarseLocationDebugText();
-			this.store.patch( { registrationStatusDetail: '状态：粗配准已启用' } );
-			this.setStatus( this.coarseRegistration.getReadyMessage() );
-			this.syncRegistrationChainDebug();
-			this.syncArSessionPhase();
-		} catch ( error ) {
-			console.error( 'Coarse registration enable failed:', error );
-			this.setStatus( error instanceof Error ? error.message : '启用粗配准失败。' );
-		}
-
-	}
-
 	async refreshGeoLocation(): Promise<void> {
 
-		try {
-			await this.coarseRegistration.refreshGeolocation();
-			this.updateCoarseLocationDebugText();
-			this.setStatus( this.coarseRegistration.getReadyMessage() );
-			this.syncArSessionPhase();
-		} catch ( error ) {
-			console.error( 'Geolocation refresh failed:', error );
-			this.setStatus( error instanceof Error ? error.message : '刷新定位失败。' );
-		}
+		console.info( '[RealtimeDeviceLocalizationDisabled]', {
+			mode: this.workflowMode,
+			siteId: this.demoModelConfig?.modelId ?? null,
+			sessionId: this.currentArSessionId,
+			reason: 'refreshGeoLocation disabled in formal route',
+			createdAt: Date.now()
+		} );
+		this.setStatus( 'GPS 仅作为开发诊断或站点提示，不参与正式 AR 空间校正。' );
 
 	}
 
@@ -1296,140 +1161,6 @@ export class ThreeEngine {
 
 	}
 
-	async saveGpsBiasCorrectionFromCurrentPose(): Promise<void> {
-
-		if ( this.sceneBundle.renderer.xr.isPresenting === false ) {
-			this.setStatus( '请先进入当前 AR 会话，再记录 GPS 偏差补偿。' );
-			return;
-		}
-
-		if ( this.demoModelConfig === null ) {
-			this.setStatus( '站点配置尚未准备完成。' );
-			return;
-		}
-
-			const trustedSolution = this.gpsBiasWorkflow.getTrustedArFromEnuSolutionForCapture();
-			if ( trustedSolution === null ) {
-				this.setStatus( '请先完成 Marker 或手动场景定位，再记录 GPS 偏差。' );
-				return;
-			}
-
-			try {
-				const gpsSample = await this.gpsBiasWorkflow.fetchSample( { force: true } );
-				if ( gpsSample === null ) {
-					this.setStatus( '当前无法获取 GPS，请稍后重试。' );
-					return;
-			}
-
-			if ( shouldAcceptGpsAccuracy( gpsSample.accuracyMeters ) === false ) {
-				console.warn( '[GpsBiasCorrectionRejectedLowAccuracy]', {
-					siteId: this.demoModelConfig.modelId,
-					sessionId: this.currentArSessionId,
-					accuracyMeters: gpsSample.accuracyMeters ?? null
-				} );
-				this.setStatus( `当前 GPS 精度较低（${formatAccuracyText( gpsSample.accuracyMeters )}），建议到开阔处后重试。` );
-				return;
-			}
-
-			const viewerPositionAr = this.getCurrentViewerArPosition();
-			if ( viewerPositionAr === null ) {
-				this.setStatus( '当前无法读取 XR viewerPose，请稍后重试。' );
-				return;
-			}
-
-			const deviceTrueEnu = deriveDeviceTrueEnuFromArSolution( {
-				arFromEnuSolution: trustedSolution,
-				viewerPositionAr
-			} );
-			const currentHeadingDeg = this.coarseRegistration.getLastHeadingDeg?.() ?? null;
-			const yawCorrectionDeg = currentHeadingDeg === null
-				? undefined
-				: normalizeSignedDegrees( trustedSolution.headingDeg - currentHeadingDeg );
-			const correctionResult = createGpsBiasCorrectionFromKnownDeviceEnu( {
-				siteId: this.demoModelConfig.modelId,
-				origin: this.demoModelConfig.siteFrame.origin,
-				rawGpsSample: gpsSample,
-				deviceTrueEnu,
-				source: trustedSolution.source === 'marker' || trustedSolution.source === 'marker-auto-image'
-					? 'calibration-marker'
-					: 'calibration-manual-site-pose',
-				yawCorrectionDeg
-			} );
-
-			console.info( '[GpsBiasCorrectionCreated]', {
-				siteId: correctionResult.correction.siteId,
-				sessionId: this.currentArSessionId,
-				accuracyMeters: gpsSample.accuracyMeters ?? null,
-				rawGpsEnu: vector3ToObject( correctionResult.rawGpsEnu ),
-				deltaEnu: vector3ToObject( correctionResult.deltaEnu ),
-				correctedDeviceEnu: vector3ToObject( deviceTrueEnu ),
-				source: correctionResult.correction.source,
-				createdAt: correctionResult.correction.createdAt
-			} );
-
-			const saved = saveGpsBiasCorrection( correctionResult.correction );
-			if ( saved === false ) {
-				this.setStatus( 'GPS 偏差补偿保存失败，请稍后重试。' );
-				return;
-			}
-
-			console.info( '[GpsBiasCorrectionSaved]', {
-				siteId: correctionResult.correction.siteId,
-				sessionId: this.currentArSessionId,
-				accuracyMeters: gpsSample.accuracyMeters ?? null,
-				rawGpsEnu: vector3ToObject( correctionResult.rawGpsEnu ),
-				deltaEnu: vector3ToObject( correctionResult.deltaEnu ),
-				correctedDeviceEnu: vector3ToObject( deviceTrueEnu ),
-				source: correctionResult.correction.source,
-				createdAt: correctionResult.correction.createdAt
-			} );
-			if ( this.workflowMode === 'site-baseline-config' ) {
-				console.info( '[SiteBaselineGpsBiasSaved]', {
-					mode: this.workflowMode,
-					siteId: correctionResult.correction.siteId,
-					sessionId: this.currentArSessionId,
-					source: correctionResult.correction.source,
-					targetId: null,
-					createdAt: correctionResult.correction.createdAt,
-					trackingState: 'gps-bias-saved',
-					stableFrameCount: 0
-				} );
-			}
-
-			this.activeGpsBiasCorrection = correctionResult.correction;
-			this.gpsBiasWorkflow.setAcceptedSample( gpsSample );
-			this.refreshGpsBiasCorrectionState( { silentStatus: true } );
-			this.syncRegistrationChainDebug();
-			this.setStatus( '已保存 GPS 偏差补偿。该补偿仅用于粗定位增强，不代表精确配准。' );
-			this.emit();
-		} catch ( error ) {
-			console.error( 'GPS bias correction save failed:', error );
-			this.setStatus(
-				error instanceof Error
-					? error.message
-					: '记录 GPS 偏差补偿失败。'
-			);
-		}
-
-	}
-
-	clearGpsBiasCorrection(): void {
-
-		if ( this.demoModelConfig === null ) {
-			this.setStatus( '站点配置尚未准备完成。' );
-			return;
-		}
-
-		const cleared = clearGpsBiasCorrection( this.demoModelConfig.modelId );
-		this.activeGpsBiasCorrection = null;
-		this.gpsBiasWorkflow.clearSessionSolution();
-		this.refreshGpsBiasCorrectionState( { silentStatus: true } );
-		this.syncRegistrationChainDebug();
-		this.setStatus( cleared ? '已清除 GPS 偏差补偿。' : '当前没有可清除的 GPS 偏差补偿。' );
-		this.emit();
-
-	}
-
 	resetPlacement(): void {
 
 		this.sessionLifecycleRuntime.resetPlacement();
@@ -1534,7 +1265,7 @@ export class ThreeEngine {
 
 		const previousMarkerId = this.activeMarkerLocalizationResult?.markerId ?? null;
 		const fallbackSolution = this.getMarkerCorrectionFallbackSolution();
-		const fallbackSource = fallbackSolution?.source ?? 'gps-imu';
+		const fallbackSource = fallbackSolution?.source ?? 'unknown';
 
 		this.activeMarkerArFromEnuSolution = null;
 		this.activeMarkerLocalizationResult = null;
@@ -1557,18 +1288,6 @@ export class ThreeEngine {
 		}
 
 		this.syncRegistrationChainDebug();
-		if ( this.workflowMode === 'ar-inspection' && ( fallbackSource === 'gps-bias' || fallbackSource === 'gps-imu' ) ) {
-			console.info( '[ArInspectionFallbackToGpsBias]', {
-				mode: this.workflowMode,
-				siteId: this.demoModelConfig?.modelId ?? null,
-				sessionId: this.currentArSessionId,
-				source: fallbackSource,
-				targetId: previousMarkerId,
-				createdAt: Date.now(),
-				trackingState: 'marker-cleared',
-				stableFrameCount: 0
-			} );
-		}
 		console.info( '[MarkerCorrectionCleared]', {
 			previousMarkerId,
 			fallbackSource
@@ -1632,9 +1351,7 @@ export class ThreeEngine {
 		this.setStatus(
 			source === 'marker-auto'
 				? '已切换为隐藏式 Marker 自动识别，扫描成功后会自动放置模型。'
-				: source === 'gps-bias'
-					? '已切换为 GPS / 粗配准固定放置。'
-					: '已切换为当前平面临时放置。'
+				: '已切换为当前平面临时放置。'
 		);
 
 		if (
@@ -1645,9 +1362,6 @@ export class ThreeEngine {
 		) {
 			if ( source === 'plane-hit-test' ) {
 				this.placeModelAtHitTest();
-			} else if ( source === 'gps-bias' ) {
-				this.pointerSelection.suppressSelectionFor( 1200 );
-				this.placementWorkflow.requestAutoPlacement();
 			}
 		}
 
@@ -1825,14 +1539,6 @@ export class ThreeEngine {
 
 	}
 
-	private refreshGpsBiasCorrectionState(options?: {
-		silentStatus?: boolean;
-	}): void {
-
-		this.activeGpsBiasCorrection = this.registrationStateRuntime.refreshGpsBiasCorrectionState( options );
-
-	}
-
 	private refreshSiteCalibrationBaselineState(options?: {
 		silentStatus?: boolean;
 	}): void {
@@ -1922,7 +1628,6 @@ export class ThreeEngine {
 			this.activeSiteCalibrationBaseline = baseline;
 			this.syncArSessionContext();
 			this.registrationStateRuntime.applySiteCalibrationBaselineState( baseline, options );
-			this.refreshGpsBiasCorrectionState( { silentStatus: true } );
 			this.syncRegistrationChainDebug();
 			this.markerCalibrationRuntime.syncState();
 			this.emit();
@@ -1946,7 +1651,6 @@ export class ThreeEngine {
 			this.activeSiteCalibrationBaseline = null;
 			this.syncArSessionContext();
 			this.registrationStateRuntime.applySiteCalibrationBaselineState( null, { silentStatus: true } );
-			this.refreshGpsBiasCorrectionState( { silentStatus: true } );
 			this.syncRegistrationChainDebug();
 			this.markerCalibrationRuntime.syncState();
 			if ( options?.silentStatus !== true ) {
@@ -2045,34 +1749,7 @@ export class ThreeEngine {
 			return [];
 		}
 
-		return this.demoModelConfig.markers.map( ( marker ) => {
-			const markerPose = resolveMarkerPoseInEnu( this.demoModelConfig as DemoModelConfig, marker.id );
-			markerPose.matrix.decompose(
-				tempMarkerEnuPosition,
-				tempMarkerEnuQuaternion,
-				tempMarkerEnuScale
-			);
-			const imageUrl = typeof marker.patternUrl === 'string' ? marker.patternUrl : undefined;
-			return {
-				id: marker.id,
-				name: marker.bindControlPointId ?? marker.id,
-				markerId: marker.id,
-				imageUrl,
-				patternUrl: imageUrl,
-				centerEnu: [
-					tempMarkerEnuPosition.x,
-					tempMarkerEnuPosition.y,
-					tempMarkerEnuPosition.z
-				],
-				yawDeg: marker.yawDeg ?? 0,
-				sizeMeters: marker.sizeMeters,
-				trackingWidthMeters: imageUrl === undefined
-					? undefined
-					: marker.trackingWidthMeters ?? marker.sizeMeters,
-				plane: 'vertical',
-				cornerOrder: MARKER_CORNER_SEQUENCE.map( ( item ) => item.id )
-			};
-		} );
+		return this.demoModelConfig.controlTargets;
 
 	}
 
@@ -2085,6 +1762,11 @@ export class ThreeEngine {
 	}
 
 	private getPrimaryConfiguredMarkerPose(): MarkerPoseInEnu | null {
+
+		const primaryControlTarget = this.getCurrentControlTargets()[ 0 ];
+		if ( primaryControlTarget !== undefined ) {
+			return createMarkerPoseInEnuFromControlTarget( primaryControlTarget );
+		}
 
 		return this.resolvedMarkerPosesInEnu[ 0 ] ?? null;
 
@@ -2159,8 +1841,28 @@ export class ThreeEngine {
 			this.arSessionStateRuntime.markPlacementCommitted( true );
 		} else if ( this.workflowMode === 'ar-inspection' ) {
 			this.pointerSelection.suppressSelectionFor( 1200 );
+			console.info( '[MarkerAutoPlacementRequested]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				source: solution.arFromEnuSolution.source,
+				targetId: metadata.markerId,
+				hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
+				createdAt: Date.now()
+			} );
 			this.placementWorkflow.requestAutoPlacement();
 			appliedToPlacedModel = this.placementSession.getPlacedModel() !== null;
+		}
+
+		if ( appliedToPlacedModel && this.workflowMode === 'ar-inspection' ) {
+			console.info( '[MarkerAutoPlacementCompleted]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				source: solution.arFromEnuSolution.source,
+				targetId: metadata.markerId,
+				createdAt: Date.now()
+			} );
 		}
 
 		this.syncRegistrationChainDebug();
@@ -2205,24 +1907,12 @@ export class ThreeEngine {
 				? this.workflowMode === 'ar-inspection'
 					? '空间校正完成，模型已自动放置。'
 					: '当前会话 Marker 校正已应用到模型。'
-				: this.workflowMode === 'ar-inspection' && this.placementSession.getCoarsePlacementPending()
+				: this.workflowMode === 'ar-inspection' && this.placementSession.getAutoPlacementPending()
 					? '空间校正完成，请继续扫描平面，模型将自动放置。'
 					: '当前会话 Marker 校正已生成，但尚未应用到模型。'
 		);
 		this.emit();
 		return true;
-
-	}
-
-	private getCoarseArFromEnuSolution(): ArFromEnuSolution | null {
-
-		return this.coarseRegistration.getLastArFromEnuSolution?.() ?? null;
-
-	}
-
-	private getGpsBiasArFromEnuSolution(): ArFromEnuSolution | null {
-
-		return this.gpsBiasWorkflow.getSessionSolution();
 
 	}
 
@@ -2235,6 +1925,39 @@ export class ThreeEngine {
 	private getCurrentNonMarkerArFromEnuSolution(): ArFromEnuSolution | null {
 
 		return this.arLocalizationRuntime.getCurrentNonMarkerArFromEnuSolution();
+
+	}
+
+	private getPreferredFormalLocalizationOverride(): ArFromEnuSolution | null {
+
+		const markerSolution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
+		if ( markerSolution !== null ) {
+			console.info( '[LocalizationPriorityResolved]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				source: markerSolution.source,
+				createdAt: Date.now()
+			} );
+			return markerSolution;
+		}
+
+		const nonMarkerSolution = this.getCurrentNonMarkerArFromEnuSolution();
+		if (
+			nonMarkerSolution !== null
+			&& ( nonMarkerSolution.source === 'manual-site-pose' || nonMarkerSolution.source === 'rtk' )
+		) {
+			console.info( '[LocalizationPriorityResolved]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig?.modelId ?? null,
+				sessionId: this.currentArSessionId,
+				source: nonMarkerSolution.source,
+				createdAt: Date.now()
+			} );
+			return nonMarkerSolution;
+		}
+
+		return null;
 
 	}
 
@@ -2277,41 +2000,6 @@ export class ThreeEngine {
 
 	}
 
-	private updateCoarseLocationDebugText(): void {
-
-		const debugSnapshot = this.coarseRegistration.getDebugSnapshot();
-		const displayTargetGeodetic = this.getModelDebugGeodeticTarget() ?? debugSnapshot.targetGeodetic;
-		const displayDistanceMeters = this.getDisplayTargetDistanceMeters(
-			debugSnapshot.currentGeodetic,
-			displayTargetGeodetic
-		) ?? debugSnapshot.distanceMeters;
-		const currentText = debugSnapshot.currentGeodetic === null
-			? '手机 未获取'
-			: `手机 ${formatGeodetic(
-				debugSnapshot.currentGeodetic.lat,
-				debugSnapshot.currentGeodetic.lon,
-				debugSnapshot.currentGeodetic.alt
-			)}`;
-		const targetText = displayTargetGeodetic === null
-			? '目标 --'
-			: `目标 ${formatGeodetic(
-				displayTargetGeodetic.lat,
-				displayTargetGeodetic.lon,
-				displayTargetGeodetic.alt
-			)}`;
-		const accuracyText = debugSnapshot.accuracyMeters === null
-			? '精度 --'
-			: `精度 ${Math.round( debugSnapshot.accuracyMeters )}m`;
-		const distanceText = displayDistanceMeters === null
-			? '距离 --'
-			: `距离 ${Math.round( displayDistanceMeters )}m`;
-
-		this.store.patch( {
-			coarseLocationDebugText: `${currentText} / ${targetText} / ${accuracyText} / ${distanceText}`
-		} );
-
-	}
-
 	private resolveConfiguredMarkerPoses(config: DemoModelConfig): MarkerPoseInEnu[] {
 
 		return config.markers.flatMap( ( marker ) => {
@@ -2325,26 +2013,6 @@ export class ThreeEngine {
 				return [];
 			}
 		} );
-
-	}
-
-	private getModelDebugGeodeticTarget(): GeodeticCoordinate | null {
-
-		return this.currentModelDebugTargetGeodetic;
-
-	}
-
-	private getDisplayTargetDistanceMeters(
-		currentGeodetic: GeodeticCoordinate | null,
-		targetGeodetic: GeodeticCoordinate | null
-	): number | null {
-
-		if ( currentGeodetic === null || targetGeodetic === null ) {
-			return null;
-		}
-
-		const currentEnuFrame = createEnuFrame( currentGeodetic );
-		return geodeticToEnu( targetGeodetic, currentEnuFrame ).length();
 
 	}
 

@@ -179,6 +179,63 @@ export function resolveMarkerCornersInEnu(
 ): MarkerCornerInEnu[] {
 
 	const markerPoseInEnu = resolveMarkerPoseInEnu( config, markerId );
+	const corners = createMarkerCornersFromPoseInEnu( markerPoseInEnu );
+
+	console.info( '[MarkerCornersEnuResolved]', {
+		targetId: markerId,
+		source: 'markers',
+		hasCornersEnu: false,
+		cornerCount: corners.length,
+		createdAt: Date.now()
+	} );
+
+	return corners;
+
+}
+
+export function resolveMarkerCornersInEnuFromControlTarget(
+	target: VisualControlTarget
+): MarkerCornerInEnu[] {
+
+	if ( target.cornersEnu !== undefined ) {
+		const cornerIds = resolveControlTargetCornerIds( target.cornerOrder );
+		const corners = target.cornersEnu.map( ( corner, index ) => ( {
+			id: cornerIds[ index ],
+			label: getMarkerCornerLabel( cornerIds[ index ] ),
+			position: new THREE.Vector3( corner[ 0 ], corner[ 1 ], corner[ 2 ] )
+		} ) );
+
+		console.info( '[MarkerCornersEnuResolved]', {
+			targetId: target.id,
+			source: 'controlTargets.cornersEnu',
+			hasCornersEnu: true,
+			cornerCount: corners.length,
+			createdAt: Date.now()
+		} );
+
+		return corners;
+	}
+
+	const corners = createMarkerCornersFromPoseInEnu(
+		createMarkerPoseInEnuFromControlTarget( target )
+	);
+
+	console.info( '[MarkerCornersEnuResolved]', {
+		targetId: target.id,
+		source: 'controlTargets.centerEnu',
+		hasCornersEnu: false,
+		cornerCount: corners.length,
+		createdAt: Date.now()
+	} );
+
+	return corners;
+
+}
+
+function createMarkerCornersFromPoseInEnu(
+	markerPoseInEnu: MarkerPoseInEnu
+): MarkerCornerInEnu[] {
+
 	markerPoseInEnu.matrix.decompose(
 		tempMarkerEnuPosition,
 		tempMarkerEnuQuaternion,
@@ -220,10 +277,61 @@ export function resolveMarkerCornersInEnu(
 
 }
 
+function resolveControlTargetCornerIds(
+	cornerOrder: string[] | undefined
+): MarkerCornerInEnu['id'][] {
+
+	const fallback: MarkerCornerInEnu['id'][] = [ 'top-left', 'top-right', 'bottom-right', 'bottom-left' ];
+	if ( Array.isArray( cornerOrder ) === false || cornerOrder.length !== 4 ) {
+		return fallback;
+	}
+
+	return cornerOrder.map( ( item, index ) => normalizeCornerId( item ) ?? fallback[ index ] );
+
+}
+
+function normalizeCornerId(value: string): MarkerCornerInEnu['id'] | null {
+
+	switch ( value ) {
+		case 'top-left':
+		case 'leftTop':
+			return 'top-left';
+		case 'top-right':
+		case 'rightTop':
+			return 'top-right';
+		case 'bottom-right':
+		case 'rightBottom':
+			return 'bottom-right';
+		case 'bottom-left':
+		case 'leftBottom':
+			return 'bottom-left';
+		default:
+			return null;
+	}
+
+}
+
+function getMarkerCornerLabel(id: MarkerCornerInEnu['id']): string {
+
+	switch ( id ) {
+		case 'top-left':
+			return '左上角';
+		case 'top-right':
+			return '右上角';
+		case 'bottom-right':
+			return '右下角';
+		case 'bottom-left':
+			return '左下角';
+	}
+
+}
+
 export function createMarkerPoseInEnuFromControlTarget(
 	target: VisualControlTarget
 ): MarkerPoseInEnu {
 
+	const yawDeg = target.yawDeg ?? 0;
+	const sizeMeters = target.sizeMeters ?? target.trackingWidthMeters ?? 1;
 	const matrix = new THREE.Matrix4().compose(
 		new THREE.Vector3(
 			target.centerEnu[ 0 ],
@@ -232,7 +340,7 @@ export function createMarkerPoseInEnuFromControlTarget(
 		),
 		new THREE.Quaternion().setFromAxisAngle(
 			new THREE.Vector3( 0, 0, 1 ),
-			THREE.MathUtils.degToRad( target.yawDeg )
+			THREE.MathUtils.degToRad( yawDeg )
 		),
 		new THREE.Vector3( 1, 1, 1 )
 	);
@@ -240,7 +348,7 @@ export function createMarkerPoseInEnuFromControlTarget(
 	return {
 		markerId: target.id,
 		matrix,
-		sizeMeters: target.sizeMeters
+		sizeMeters
 	};
 
 }

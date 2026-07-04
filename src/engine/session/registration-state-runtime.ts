@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-	createDefaultGpsBiasCorrectionState,
+	createDefaultEngineeringConfigStatusState,
 	createDefaultRegistrationMetricsState,
 	createDefaultSavedMarkerLocalizationState,
 	createDefaultSiteCalibrationBaselineState,
@@ -9,16 +9,6 @@ import {
 } from '@/localization/core/registration-store.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
-import { geodeticToEnu } from '@/localization/core/geodesy.js';
-import {
-	type GpsBiasGeolocationSample,
-	geolocationSampleToGeodeticPosition,
-	shouldAcceptGpsAccuracy
-} from '@/localization/gps-bias/gps-bias-registration.js';
-import {
-	loadGpsBiasCorrection,
-	type GpsBiasCorrection as StoredGpsBiasCorrection
-} from '@/localization/gps-bias/gps-bias-storage.js';
 import {
 	loadLastStableMarkerLocalizationResult,
 	type SavedMarkerLocalizationResult
@@ -27,7 +17,6 @@ import type { MarkerPoseInEnu } from '@/localization/marker/marker-localization.
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
 import type {
 	ArWorkflowMode,
-	GpsBiasCorrection as SiteBaselineGpsBiasCorrection,
 	SiteCalibrationBaseline,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
@@ -44,12 +33,7 @@ interface RegistrationStateRuntimeOptions {
 	getActiveMarkerLocalizationResult(): SavedMarkerLocalizationResult | null;
 	getActiveMarkerArFromEnuSolutionForCurrentSession(): ArFromEnuSolution | null;
 	getActiveArFromEnuSolution(): ArFromEnuSolution | null;
-	getCurrentGpsBiasSolution(): ArFromEnuSolution | null;
-	getLatestAcceptedGpsBiasSample(): GpsBiasGeolocationSample | null;
-	getLatestGpsBiasSample(): GpsBiasGeolocationSample | null;
-	clearGpsBiasSessionSolution(): void;
 	getActiveSiteCalibrationBaseline(): SiteCalibrationBaseline | null;
-	getActiveGpsBiasCorrection(): StoredGpsBiasCorrection | null;
 	getActiveManualSitePose():
 		| {
 			rootSiteEnu: THREE.Vector3;
@@ -83,9 +67,7 @@ export class RegistrationStateRuntime {
 				return;
 			}
 
-			this.options.store.patch( {
-				registrationMetrics: nextMetrics
-			} );
+			this.options.store.patch( { registrationMetrics: nextMetrics } );
 			return;
 		}
 
@@ -100,7 +82,6 @@ export class RegistrationStateRuntime {
 			: null;
 		const currentRmsErrorMeters = markerRmsErrorMeters ?? registrationSolution.modelToSite.rmsErrorMeters;
 		const rmsSource: 'engineering' | 'marker' = markerRmsErrorMeters === null ? 'engineering' : 'marker';
-
 		const nextMetrics = {
 			gpsText: formatGeodetic(
 				demoModelConfig.anchor.lat,
@@ -127,15 +108,14 @@ export class RegistrationStateRuntime {
 			return;
 		}
 
-		this.options.store.patch( {
-			registrationMetrics: nextMetrics
-		} );
+		this.options.store.patch( { registrationMetrics: nextMetrics } );
 
 	}
 
 	syncRegistrationChainDebug(): void {
 
 		this.syncRegistrationMetrics();
+		this.syncEngineeringConfigStatus();
 		const registrationSolution = this.options.getRegistrationSolution();
 		const arFromEnuSolution = this.options.getActiveArFromEnuSolution();
 		const demoModelConfig = this.options.getDemoModelConfig();
@@ -187,101 +167,116 @@ export class RegistrationStateRuntime {
 
 	}
 
-	refreshGpsBiasCorrectionState(options?: {
-		silentStatus?: boolean;
-	}): StoredGpsBiasCorrection | null {
+	private syncEngineeringConfigStatus(): void {
 
 		const demoModelConfig = this.options.getDemoModelConfig();
-		const siteId = demoModelConfig?.modelId ?? null;
-		const correction = siteId === null
-			? null
-			: this.resolvePersistedGpsBiasCorrection( siteId );
-		const acceptedSample = this.options.getLatestAcceptedGpsBiasSample();
-		const latestSample = this.options.getLatestGpsBiasSample();
-		const currentSolution = this.options.getCurrentGpsBiasSolution();
-
-		if ( correction === null ) {
-			this.options.clearGpsBiasSessionSolution();
+		const registrationSolution = this.options.getRegistrationSolution();
+		if ( demoModelConfig === null ) {
 			this.options.store.patch( {
-				gpsBiasCorrection: createDefaultGpsBiasCorrectionState()
+				engineeringConfigStatus: createDefaultEngineeringConfigStatusState()
 			} );
-			if ( options?.silentStatus !== true && siteId !== null ) {
-				this.options.setStatus( '当前站点还没有记录 GPS 偏差补偿。' );
-			}
-			return null;
+			return;
 		}
 
-		console.info( '[GpsBiasCorrectionLoaded]', {
-			siteId: correction.siteId,
-			sessionId: this.options.getCurrentSessionId(),
-			accuracyMeters: correction.accuracyMeters ?? null,
-			rawGpsEnu: acceptedSample === null
-				? null
-				: vector3ToObject(
-					geodeticToEnu( geolocationSampleToGeodeticPosition( acceptedSample ), correction.origin )
-				),
-			deltaEnu: {
-				x: correction.deltaEnu[ 0 ],
-				y: correction.deltaEnu[ 1 ],
-				z: correction.deltaEnu[ 2 ]
-			},
-			correctedDeviceEnu: acceptedSample === null
-				? null
-				: vector3ToObject(
-					geodeticToEnu( geolocationSampleToGeodeticPosition( acceptedSample ), correction.origin )
-						.add( new THREE.Vector3( correction.deltaEnu[ 0 ], correction.deltaEnu[ 1 ], correction.deltaEnu[ 2 ] ) )
-				),
-			source: correction.source,
-			createdAt: correction.createdAt
-		} );
+		const baseline = this.options.getActiveSiteCalibrationBaseline();
+		const siteConfigTargets = this.options.resolveBaselineControlTargets();
+		const useBaselineTargets = this.options.getWorkflowMode() === 'ar-inspection'
+			&& baseline !== null
+			&& baseline.controlTargets.length > 0;
+		const activeTargets = useBaselineTargets ? baseline.controlTargets : siteConfigTargets;
+		const firstTarget = activeTargets[ 0 ];
+		const firstImageUrl = firstTarget === undefined ? null : getControlTargetImageUrl( firstTarget );
+		const baselineMismatch = baseline !== null
+			&& siteConfigTargets.length > 0
+			&& areControlTargetsEquivalent( baseline.controlTargets, siteConfigTargets ) === false;
+		const controlTargetSource = activeTargets.length === 0
+			? 'none'
+			: useBaselineTargets ? 'baseline' : 'site-config';
+		const controlTargetSourceText = controlTargetSource === 'baseline'
+			? '已保存现场基准'
+			: controlTargetSource === 'site-config'
+				? '模型配置 JSON / 后端配置'
+				: '未加载控制标志';
 
 		this.options.store.patch( {
-			gpsBiasCorrection: {
-				available: true,
-				siteId: correction.siteId,
-				source: formatGpsBiasCorrectionSourceLabel( correction.source ),
-				statusText: latestSample !== null && shouldAcceptGpsAccuracy( latestSample.accuracyMeters ) === false
-					? '当前定位精度较低，等待 GPS 稳定后再更新补偿定位。'
-					: '该补偿仅用于粗定位增强，不代表精确配准。',
-				originText: formatGeodetic(
-					correction.origin.lat,
-					correction.origin.lon,
-					correction.origin.alt
+			engineeringConfigStatus: {
+				hasSiteOrigin: true,
+				hasModelLocalToEnu: registrationSolution !== null,
+				hasRtkSurveyDataset: demoModelConfig.rtkSurveyDataset !== undefined
+					&& demoModelConfig.rtkSurveyDataset.points.length > 0,
+				hasControlTargets: activeTargets.length > 0,
+				hasPlacementAnchor: demoModelConfig.placementAnchorEnu !== undefined,
+				controlTargetCount: activeTargets.length,
+				activeControlTargetId: firstTarget?.id,
+				controlTargetSource,
+				controlTargetSourceText,
+				baselineMismatch,
+				rtkPointCount: demoModelConfig.rtkSurveyDataset?.points.length ?? 0,
+				undergroundObjectCount: demoModelConfig.undergroundObjects?.length ?? 0,
+				sensorCount: demoModelConfig.sensors?.length ?? 0,
+				riskPointCount: demoModelConfig.riskPoints?.length ?? 0,
+				markerImageReady: firstImageUrl !== null,
+				markerImageIssue: resolveMarkerImageIssue( firstTarget ),
+				siteOriginText: formatGeodetic(
+					demoModelConfig.siteFrame.origin.lat,
+					demoModelConfig.siteFrame.origin.lon,
+					demoModelConfig.siteFrame.origin.alt
 				),
-				deltaEnuText: `${correction.deltaEnu[ 0 ].toFixed( 3 )}, ${correction.deltaEnu[ 1 ].toFixed( 3 )}, ${correction.deltaEnu[ 2 ].toFixed( 3 )}`,
-				accuracyText: formatAccuracyText( acceptedSample?.accuracyMeters ?? correction.accuracyMeters ),
-				yawCorrectionText: typeof correction.yawCorrectionDeg === 'number'
-					? `${correction.yawCorrectionDeg.toFixed( 3 )}deg`
-					: '-',
-				updatedAtText: formatTimestampText( correction.updatedAt ?? correction.createdAt ),
-				usingInSession: this.options.getActiveArFromEnuSolution()?.source === 'gps-bias',
-				sessionSolutionAvailable: currentSolution !== null,
-				sessionId: currentSolution?.sessionId ?? this.options.getCurrentSessionId() ?? undefined,
-				rawGpsEnuText: acceptedSample === null
+				placementAnchorText: demoModelConfig.placementAnchorEnu === undefined
 					? '-'
-					: formatVector3Text(
-						geodeticToEnu( geolocationSampleToGeodeticPosition( acceptedSample ), correction.origin )
-					),
-				correctedDeviceEnuText: acceptedSample === null
-					? '-'
-					: formatVector3Text(
-						geodeticToEnu( geolocationSampleToGeodeticPosition( acceptedSample ), correction.origin )
-							.add( new THREE.Vector3( correction.deltaEnu[ 0 ], correction.deltaEnu[ 1 ], correction.deltaEnu[ 2 ] ) )
-					),
-				headingDegText: currentSolution === null
-					? '-'
-					: `${currentSolution.headingDeg.toFixed( 3 )}deg`
+					: formatTupleText( demoModelConfig.placementAnchorEnu ),
+				controlTargetSummaries: activeTargets.map( ( target ) => ( {
+					id: target.id,
+					name: target.name ?? target.markerId ?? target.id,
+					imageUrl: target.imageUrl ?? target.patternUrl ?? '-',
+					centerEnuText: formatTupleText( target.centerEnu ),
+					cornersEnuText: target.cornersEnu === undefined
+						? '未配置，将尝试由 centerEnu + yawDeg + sizeMeters 推算'
+						: target.cornersEnu.map( formatTupleText ).join( ' / ' ),
+					yawDegText: typeof target.yawDeg === 'number' ? `${target.yawDeg.toFixed( 2 )}deg` : '未配置',
+					sizeMetersText: typeof target.sizeMeters === 'number' ? `${target.sizeMeters.toFixed( 3 )}m` : '未配置',
+					trackingWidthMetersText: typeof target.trackingWidthMeters === 'number'
+						? `${target.trackingWidthMeters.toFixed( 3 )}m`
+						: '未配置',
+					planeText: target.plane === 'vertical' ? '竖直' : '水平'
+				} ) )
 			}
 		} );
 
-		return correction;
+		const eventName = controlTargetSource === 'baseline'
+			? 'SiteBaselineControlTargetsUsed'
+			: controlTargetSource === 'site-config'
+				? 'SiteConfigControlTargetsUsed'
+				: 'ArUiConfigStatusResolved';
+		console.info( `[${eventName}]`, this.createUiLogPayload( {
+			currentStep: 'load-config',
+			localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
+			targetId: firstTarget?.id ?? null,
+			message: `控制标志来源：${controlTargetSourceText}`
+		} ) );
+
+		if ( baselineMismatch ) {
+			console.warn( '[SiteBaselineControlTargetsMismatchWarning]', this.createUiLogPayload( {
+				currentStep: 'load-config',
+				localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
+				targetId: firstTarget?.id ?? null,
+				message: '当前已保存现场基准与模型配置可能不一致，请确认是否更新基准配置。'
+			} ) );
+		}
+
+		console.info( '[ArUiConfigStatusResolved]', this.createUiLogPayload( {
+			currentStep: 'load-config',
+			localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
+			targetId: firstTarget?.id ?? null,
+			message: '工程真值配置状态已解析'
+		} ) );
 
 	}
 
 	applySiteCalibrationBaselineState(
 		baseline: SiteCalibrationBaseline | null,
 		options?: {
-		silentStatus?: boolean;
+			silentStatus?: boolean;
 		}
 	): SiteCalibrationBaseline | null {
 
@@ -314,10 +309,10 @@ export class RegistrationStateRuntime {
 					? '现场基准已加载'
 					: '当前站点已有现场基准',
 				controlTargetCount: baseline.controlTargets.length,
-				gpsBiasAvailable: baseline.gpsBiasCorrection !== undefined,
 				updatedAtText: formatTimestampText( baseline.updatedAt ?? baseline.createdAt )
 			}
 		} );
+
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
 			for ( const target of baseline.controlTargets ) {
 				const imageUrl = getControlTargetImageUrl( target );
@@ -370,7 +365,12 @@ export class RegistrationStateRuntime {
 			siteOrigin: { ...demoModelConfig.siteFrame.origin },
 			modelLocalToEnuVersion: 'engineering-registration-v1',
 			controlTargets: this.options.resolveBaselineControlTargets(),
-			gpsBiasCorrection: toSiteBaselineGpsBiasCorrection( this.options.getActiveGpsBiasCorrection() ),
+			rtkSurveyDataset: demoModelConfig.rtkSurveyDataset,
+			placementAnchorEnu: demoModelConfig.placementAnchorEnu,
+			placementAnchorMeaning: demoModelConfig.placementAnchorMeaning,
+			undergroundObjects: demoModelConfig.undergroundObjects,
+			sensors: demoModelConfig.sensors,
+			riskPoints: demoModelConfig.riskPoints,
 			createdAt: existingCreatedAt ?? now,
 			updatedAt: now,
 			source: 'site-baseline-config'
@@ -378,9 +378,39 @@ export class RegistrationStateRuntime {
 
 	}
 
-	refreshSavedMarkerLocalizationResult(options?: {
-		silentStatus?: boolean;
-	}): void {
+	private createUiLogPayload(args: {
+		currentStep: string;
+		localizationSource: string;
+		targetId: string | null;
+		message: string;
+	}): {
+		mode: ArWorkflowMode;
+		siteId: string | null;
+		modelId: string | null;
+		sessionId: string | null;
+		currentStep: string;
+		localizationSource: string;
+		targetId: string | null;
+		message: string;
+		createdAt: number;
+	} {
+
+		const modelId = this.options.getDemoModelConfig()?.modelId ?? null;
+		return {
+			mode: this.options.getWorkflowMode(),
+			siteId: modelId,
+			modelId,
+			sessionId: this.options.getCurrentSessionId(),
+			currentStep: args.currentStep,
+			localizationSource: args.localizationSource,
+			targetId: args.targetId,
+			message: args.message,
+			createdAt: Date.now()
+		};
+
+	}
+
+	refreshSavedMarkerLocalizationResult(options?: { silentStatus?: boolean }): void {
 
 		const saved = loadLastStableMarkerLocalizationResult();
 		if ( saved === null ) {
@@ -429,39 +459,6 @@ export class RegistrationStateRuntime {
 
 	}
 
-	private resolvePersistedGpsBiasCorrection(siteId: string): StoredGpsBiasCorrection | null {
-
-		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
-			const activeSiteCalibrationBaseline = this.options.getActiveSiteCalibrationBaseline();
-			const demoModelConfig = this.options.getDemoModelConfig();
-			if (
-				activeSiteCalibrationBaseline?.siteId !== siteId
-				|| demoModelConfig === null
-				|| activeSiteCalibrationBaseline.gpsBiasCorrection === undefined
-			) {
-				return null;
-			}
-
-			const baselineCorrection = activeSiteCalibrationBaseline.gpsBiasCorrection;
-			return {
-				siteId,
-				origin: activeSiteCalibrationBaseline.siteOrigin ?? demoModelConfig.siteFrame.origin,
-				deltaEnu: [ baselineCorrection.deltaEnu[ 0 ], baselineCorrection.deltaEnu[ 1 ], baselineCorrection.deltaEnu[ 2 ] ],
-				yawCorrectionDeg: baselineCorrection.yawCorrectionDeg,
-				createdAt: baselineCorrection.createdAt,
-				updatedAt: activeSiteCalibrationBaseline.updatedAt ?? baselineCorrection.createdAt,
-				source: baselineCorrection.source === 'manual-site-pose'
-					? 'calibration-manual-site-pose'
-					: baselineCorrection.source === 'debug'
-						? 'debug'
-						: 'calibration-marker'
-			};
-		}
-
-		return loadGpsBiasCorrection( siteId );
-
-	}
-
 }
 
 function formatVector3Text(vector: THREE.Vector3): string {
@@ -470,30 +467,65 @@ function formatVector3Text(vector: THREE.Vector3): string {
 
 }
 
-function formatAccuracyText(value: number | null | undefined): string {
+function formatTupleText(tuple: [ number, number, number ]): string {
 
-	return typeof value === 'number' && Number.isFinite( value )
-		? `${value.toFixed( 1 )}m`
-		: '-';
+	return `${tuple[ 0 ].toFixed( 3 )}, ${tuple[ 1 ].toFixed( 3 )}, ${tuple[ 2 ].toFixed( 3 )}`;
 
 }
 
-function formatGpsBiasCorrectionSourceLabel(source: string): string {
+function areControlTargetsEquivalent(
+	left: VisualControlTarget[],
+	right: VisualControlTarget[]
+): boolean {
 
-	switch ( source ) {
-		case 'admin-marker':
-		case 'calibration-marker':
-			return '模型配准页 Marker 校正';
-		case 'manual-site-pose':
-			return '手动场景定位';
-		case 'admin-manual-site-pose':
-		case 'calibration-manual-site-pose':
-			return '模型配准页手动定位';
-		case 'debug':
-			return '调试';
-		default:
-			return source;
+	if ( left.length !== right.length ) {
+		return false;
 	}
+
+	return left.every( ( target, index ) => {
+		const other = right[ index ];
+		if ( other === undefined ) {
+			return false;
+		}
+
+		return target.id === other.id
+			&& ( target.imageUrl ?? target.patternUrl ?? '' ) === ( other.imageUrl ?? other.patternUrl ?? '' )
+			&& areEnuTuplesEqual( target.centerEnu, other.centerEnu );
+	} );
+
+}
+
+function areEnuTuplesEqual(
+	left: [ number, number, number ],
+	right: [ number, number, number ]
+): boolean {
+
+	return Math.abs( left[ 0 ] - right[ 0 ] ) <= 1e-6
+		&& Math.abs( left[ 1 ] - right[ 1 ] ) <= 1e-6
+		&& Math.abs( left[ 2 ] - right[ 2 ] ) <= 1e-6;
+
+}
+
+function resolveMarkerImageIssue(target: VisualControlTarget | undefined): string | undefined {
+
+	if ( target === undefined ) {
+		return '未配置控制标志';
+	}
+
+	const imageUrl = target.imageUrl ?? target.patternUrl;
+	if ( typeof imageUrl !== 'string' || imageUrl.trim().length === 0 ) {
+		return '当前控制标志未配置可识别图片';
+	}
+
+	if ( isPattFileUrl( imageUrl ) ) {
+		return '.patt 不能用于 WebXR Image Tracking，请配置 PNG/JPG/WebP 图片';
+	}
+
+	if ( getControlTargetImageUrl( target ) === null ) {
+		return '控制标志图片格式无效，请配置 PNG/JPG/WebP 图片';
+	}
+
+	return undefined;
 
 }
 
@@ -506,36 +538,5 @@ function formatTimestampText(timestamp: number | undefined): string {
 	return new Date( timestamp ).toLocaleString( 'zh-CN', {
 		hour12: false
 	} );
-
-}
-
-function vector3ToObject(vector: THREE.Vector3): { x: number; y: number; z: number } {
-
-	return {
-		x: vector.x,
-		y: vector.y,
-		z: vector.z
-	};
-
-}
-
-function toSiteBaselineGpsBiasCorrection(
-	correction: StoredGpsBiasCorrection | null
-): SiteBaselineGpsBiasCorrection | undefined {
-
-	if ( correction === null ) {
-		return undefined;
-	}
-
-	return {
-		deltaEnu: [ correction.deltaEnu[ 0 ], correction.deltaEnu[ 1 ], correction.deltaEnu[ 2 ] ],
-		yawCorrectionDeg: correction.yawCorrectionDeg,
-		createdAt: correction.updatedAt ?? correction.createdAt,
-		source: correction.source === 'calibration-manual-site-pose'
-			? 'manual-site-pose'
-			: correction.source === 'debug'
-				? 'debug'
-				: 'marker'
-	};
 
 }

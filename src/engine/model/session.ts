@@ -14,8 +14,7 @@ import {
 } from '@/models/catalog/model-api.js';
 import type { PlaceableTemplateReport } from '@/engine/core/model.js';
 import type {
-	EngineeringControlPoint,
-	EngineeringRegistrationSolution
+	EngineeringControlPoint
 } from '@/localization/coarse/engineering-registration.js';
 import type { SetStatus } from '@/features/ar/types/runtime-types.js';
 import { loadModelRuntimeBundle, type LoadedModelRuntimeBundle } from './runtime.js';
@@ -28,7 +27,6 @@ interface CreateModelSessionOptions {
 	resetPlacement(): void;
 	onRuntimeReset(): void;
 	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle): void;
-	onCreateCoarseRegistrationTarget(solution: EngineeringRegistrationSolution): void;
 	onLoadManualRegistration(modelId: string): void;
 	canRequestAutoPlacement(): boolean;
 	requestAutoPlacement(): void;
@@ -50,7 +48,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 		resetPlacement,
 		onRuntimeReset,
 		onRuntimeBundleLoaded,
-		onCreateCoarseRegistrationTarget,
 		onLoadManualRegistration,
 		canRequestAutoPlacement,
 		requestAutoPlacement
@@ -117,7 +114,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			}
 		}
 
-		onCreateCoarseRegistrationTarget( bundle.registrationSolution );
 		store.patch( {
 			registrationStatusDetail: controlPointDiagnostics.length > 0
 				? '\u72b6\u6001\uff1a\u6a21\u578b\u5df2\u5c31\u7eea\uff0c\u4f46\u63a7\u5236\u70b9\u6570\u636e\u9700\u8981\u590d\u6838'

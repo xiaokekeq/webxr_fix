@@ -40,11 +40,8 @@ export interface LoadModelArController {
 		timelineNext(): void;
 		timelinePlay(): void;
 		setWorkflowMode(mode: ArWorkflowMode): void;
-		enableCoarseRegistration(): Promise<void>;
 		refreshGeoLocation(): Promise<void>;
 		saveSiteCalibrationBaseline(): void;
-		saveGpsBiasCorrectionFromCurrentPose(): Promise<void>;
-		clearGpsBiasCorrection(): void;
 		refreshSavedMarkerLocalization(): void;
 		startCurrentSessionMarkerCalibration(): void;
 		captureCurrentSessionMarkerCorner(): void;
@@ -203,12 +200,6 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			enableCoarseRegistration() {
-
-				return engine.enableCoarseRegistration();
-
-			},
-
 			refreshGeoLocation() {
 
 				return engine.refreshGeoLocation();
@@ -218,18 +209,6 @@ export function createLoadModelArController(): LoadModelArController {
 			saveSiteCalibrationBaseline() {
 
 				engine.saveSiteCalibrationBaseline();
-
-			},
-
-			saveGpsBiasCorrectionFromCurrentPose() {
-
-				return engine.saveGpsBiasCorrectionFromCurrentPose();
-
-			},
-
-			clearGpsBiasCorrection() {
-
-				engine.clearGpsBiasCorrection();
 
 			},
 

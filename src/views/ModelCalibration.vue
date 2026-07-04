@@ -1,94 +1,73 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import AppTabBar from '../components/AppTabBar.vue';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS,
-	getDisplayModeLabel,
-	getDisplayModeSliderValueText
+	getDisplayModeLabel
 } from '@/features/ar/types/display-modes.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 import type { ManualAdjustmentPreset } from '@/localization/manual/manual-registration.js';
 
-type CalibrationPanelView = 'overview' | 'placement' | 'display' | 'calibration';
-
-const PLACEMENT_STATUS_TITLE = '放置方式';
+type CalibrationPanelView = 'overview' | 'config' | 'marker' | 'ar-check' | 'display' | 'debug';
 
 const TEXT = {
 	title: '现场基准配置',
-	enterArTitle: '进入 AR 配准',
-	enterArSub: '先选择模型，再进入 AR 完成放置、微调和现场基准保存。',
-	enterAr: '进入 AR',
-	selectModel: '选择模型',
+	subtitle: '工程真值校验',
+	enterArTitle: '进入 AR 校验',
+	enterArSub: '本页面用于校验模型配置、RTK 工程真值和控制标志。不会保存当前 AR 会话矩阵、XR anchor 或 modelRoot.position。',
+	enterAr: '进入 AR 校验',
+	selectModel: '选择站点',
 	status: '状态',
 	waiting: '待进入 AR',
-	scanning: '正在识别平面',
-	ready: '可开始放置',
-	placing: '正在放置模型',
-	placed: '模型已放置',
-	placement: '模型放置',
-	display: '显示控制',
-	calibration: '空间校准',
+	scanning: '正在扫描平面',
+	ready: '平面已检测',
+	placing: '正在应用校验放置',
+	placed: '校验中',
+	panelTool: '校验面板',
 	exit: '退出 AR',
-	panelTool: '控制面板',
 	closePanel: '收起',
-	placeModel: '应用配准放置',
-	placeHitTest: '应用平面临放',
-	resetPlacement: '清除当前放置',
-	placementActions: '放置操作',
-	sessionOverview: '会话总览',
 	overview: '总览',
+	config: '配置检查',
+	marker: '控制标志',
+	arCheck: 'AR 校验',
+	display: '显示控制',
+	debug: '调试',
 	displayMode: '模型显示',
 	sectionPlane: '剖切方向',
-	projectStage: '阶段筛选',
-	markerCalibration: '角点采集说明',
-	precisionCalibration: '控制标志精配',
-	startCollect: '开始角点采集',
-	captureCorner: '记录当前角点',
-	solveApply: '解算并应用精配',
+	startCollect: '开始四角点采集',
+	captureCorner: '采集当前角点',
+	solveApply: '完成校验校正',
 	resetMarker: '重置角点',
-	clearMarker: '清除精配结果',
-	cornersCollected: '已记录角点',
-	nextCorner: '待记录角点',
-	manualAdjustment: '放置微调',
-	finePreset: '细调',
-	mediumPreset: '中调',
-	coarsePreset: '粗调',
-	xAxis: 'X 轴',
-	yAxis: 'Y 轴',
-	zAxis: 'Z 轴',
-	yaw: '旋转',
-	scale: '缩放',
-	negative: '减',
-	positive: '加',
-	saveManual: '保存本次微调结果',
-	resetManual: '重置本次微调',
-	clearSavedManual: '清除已存微调',
-	gpsBias: '粗配准与 GPS 补偿',
-	refreshGps: '刷新定位',
-	enableCoarse: '启用粗配准',
-	saveGpsBias: '记录 GPS 补偿',
-	clearGpsBias: '清除 GPS 补偿',
-	saveBaseline: '保存现场基准',
-	markerDebug: '打开诊断页',
+	clearMarker: '清除本次校正',
+	saveBaseline: '保存基准确认',
+	markerDebug: '打开调试页',
+	temporaryPlacement: '临时演示放置',
+	localizedPlacement: '按校正结果放置',
+	resetPlacement: '清除当前放置',
+	manualAdjustment: '手动校验调整',
+	saveManual: '保存手动校验结果',
+	resetManual: '重置本次调整',
+	clearSavedManual: '清除已存调整',
 	unknownModel: '未选择站点'
 } as const;
 
 const PANEL_OPTIONS: Array<{ value: CalibrationPanelView; label: string }> = [
 	{ value: 'overview', label: TEXT.overview },
-	{ value: 'placement', label: TEXT.placement },
+	{ value: 'config', label: TEXT.config },
+	{ value: 'marker', label: TEXT.marker },
+	{ value: 'ar-check', label: TEXT.arCheck },
 	{ value: 'display', label: TEXT.display },
-	{ value: 'calibration', label: TEXT.calibration }
+	{ value: 'debug', label: TEXT.debug }
 ];
 
 const MANUAL_PRESET_OPTIONS: Array<{ value: ManualAdjustmentPreset; label: string }> = [
-	{ value: 'fine', label: TEXT.finePreset },
-	{ value: 'medium', label: TEXT.mediumPreset },
-	{ value: 'coarse', label: TEXT.coarsePreset }
+	{ value: 'fine', label: '细调' },
+	{ value: 'medium', label: '中调' },
+	{ value: 'coarse', label: '粗调' }
 ];
 
 const route = useRoute();
@@ -102,52 +81,101 @@ const activePanelView = ref<CalibrationPanelView>( 'overview' );
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
-const currentModelName = computed(
-	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
+const configStatus = computed( () => engine.value.engineeringConfigStatus );
+const currentModel = computed(
+	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )
 );
-const runtimeStatusText = computed( () => engine.value.runtimeStatus );
-const baselineSummaryCards = computed( () => [
-	{ label: '现场基准', value: engine.value.siteCalibrationBaseline.statusText },
-	{ label: '控制点', value: engine.value.siteCalibrationBaseline.controlTargetCount },
-	{ label: 'GPS 偏差', value: engine.value.siteCalibrationBaseline.gpsBiasAvailable ? '已保存' : '未保存' },
-	{ label: '显示模式', value: getDisplayModeLabel( engine.value.displayMode ) }
-] );
-const sessionSnapshotCards = computed( () => [
-	{ label: '运行状态', value: engine.value.runtimeStatus },
-	{ label: '放置状态', value: engine.value.registrationStatusDetail },
-	{ label: '粗配准诊断', value: engine.value.coarseLocationDebugText, wide: true },
-	{ label: '空间定位来源', value: engine.value.registrationChainDebug.arSessionLocalization.source || '-' },
-	{ label: '模型位置', value: engine.value.placementSummary.positionText, wide: true },
-	{ label: '模型姿态', value: engine.value.placementSummary.quaternionText, wide: true },
-	{ label: '模型缩放', value: engine.value.placementSummary.scaleText }
-] );
+const currentModelName = computed( () => currentModel.value?.name ?? TEXT.unknownModel );
+const currentConfigUrl = computed( () => currentModel.value?.configUrl ?? '-' );
+
+const sessionStatusText = computed( () => {
+	if ( hasArSession.value === false ) {
+		return TEXT.waiting;
+	}
+
+	switch ( engine.value.arSessionPhase ) {
+		case 'scanning':
+			return TEXT.scanning;
+		case 'ready-to-place':
+			return TEXT.ready;
+		case 'placing':
+			return TEXT.placing;
+		case 'placed':
+			return TEXT.placed;
+		default:
+			return engine.value.runtimeStatus;
+	}
+} );
+
 const overviewCards = computed( () => [
-	{ label: '当前显示', value: getDisplayModeLabel( engine.value.displayMode ) },
-	{ label: '当前阶段', value: engine.value.timelineStages[ engine.value.currentTimelineStageIndex ] ?? '-' },
-	{ label: '角点进度', value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
-	{ label: 'GPS 补偿', value: engine.value.gpsBiasCorrection.statusText, wide: true }
+	{ label: '当前站点', value: currentModelName.value },
+	{ label: '配置 JSON', value: currentConfigUrl.value, wide: true },
+	{ label: 'RTK 工程真值', value: configStatus.value.hasRtkSurveyDataset ? `已加载 ${configStatus.value.rtkPointCount} 点` : '未加载' },
+	{ label: '控制标志', value: configStatus.value.hasControlTargets ? `已配置 ${configStatus.value.controlTargetCount} 个` : '未配置' },
+	{ label: '控制标志来源', value: configStatus.value.controlTargetSourceText },
+	{ label: '当前显示', value: getDisplayModeLabel( engine.value.displayMode ) }
 ] );
+
+const configCards = computed( () => [
+	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
+	{ label: 'modelLocalToEnu', value: configStatus.value.hasModelLocalToEnu ? '已配置' : '未配置' },
+	{ label: 'rtkSurveyDataset', value: configStatus.value.hasRtkSurveyDataset ? `已加载 ${configStatus.value.rtkPointCount} 点` : '未加载' },
+	{ label: 'controlTargets', value: configStatus.value.hasControlTargets ? `${configStatus.value.controlTargetCount} 个` : '未配置' },
+	{ label: 'placementAnchorEnu', value: configStatus.value.hasPlacementAnchor ? configStatus.value.placementAnchorText : '未配置', wide: true },
+	{ label: 'undergroundObjects', value: `${configStatus.value.undergroundObjectCount} 个` },
+	{ label: 'sensors', value: `${configStatus.value.sensorCount} 个` },
+	{ label: 'riskPoints', value: `${configStatus.value.riskPointCount} 个` }
+] );
+
+const configWarnings = computed( () => {
+	const warnings: string[] = [];
+	if ( configStatus.value.hasRtkSurveyDataset === false ) {
+		warnings.push( '当前模型未配置 RTK 测量数据，请先补充工程真值配置。' );
+	}
+	if ( configStatus.value.hasControlTargets === false ) {
+		warnings.push( '当前模型未配置控制标志，无法进行正式 AR 空间校正。' );
+	}
+	if ( configStatus.value.hasPlacementAnchor === false ) {
+		warnings.push( '当前模型未配置地面参考点，手动场景定位可能不可用。' );
+	}
+	if ( configStatus.value.baselineMismatch ) {
+		warnings.push( '当前已保存现场基准与模型配置可能不一致，请确认是否更新基准配置。' );
+	}
+	return warnings;
+} );
+
+const markerCards = computed( () => {
+	if ( configStatus.value.controlTargetSummaries.length === 0 ) {
+		return [ { label: '控制标志', value: '未配置', wide: true } ];
+	}
+
+	return configStatus.value.controlTargetSummaries.flatMap( ( target, index ) => [
+		{ label: `Marker ${index + 1}`, value: `${target.name} / ${target.id}`, wide: true },
+		{ label: 'imageUrl', value: target.imageUrl, wide: true },
+		{ label: 'centerEnu', value: target.centerEnuText, wide: true },
+		{ label: 'cornersEnu', value: target.cornersEnuText, wide: true },
+		{ label: 'yawDeg', value: target.yawDegText },
+		{ label: 'sizeMeters', value: target.sizeMetersText },
+		{ label: 'trackingWidthMeters', value: target.trackingWidthMetersText },
+		{ label: 'plane', value: target.planeText }
+	] );
+} );
+
 const markerCalibrationCards = computed( () => [
-	{ label: TEXT.cornersCollected, value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
-	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' }
+	{ label: '目标 Marker', value: configStatus.value.controlTargetSummaries[ 0 ]?.name ?? engine.value.markerCalibration.markerId ?? '-' },
+	{ label: 'Marker id', value: engine.value.markerCalibration.markerId ?? configStatus.value.activeControlTargetId ?? '-' },
+	{ label: '当前要采集', value: engine.value.markerCalibration.nextCornerLabel || '-' },
+	{ label: '已采集数量', value: `${engine.value.markerCalibration.capturedCornerCount}` },
+	{ label: '角点总数', value: `${engine.value.markerCalibration.expectedCornerCount}` },
+	{ label: '失败原因', value: engine.value.runtimeStatus || '-', wide: true }
 ] );
+
 const manualAdjustmentCards = computed( () => [
 	{ label: '平移偏移', value: engine.value.manualReadout.positionText, wide: true },
 	{ label: '航向修正', value: engine.value.manualReadout.yawText },
 	{ label: '比例修正', value: engine.value.manualReadout.scaleText }
 ] );
-const calibrationGuideCards = computed( () => [
-	{
-		label: '操作顺序',
-		value: '先开始采集，再按左上、右上、右下、左下顺序记录 4 个角点，最后执行解算并应用。',
-		wide: true
-	}
-] );
-const gpsBiasCards = computed( () => [
-	{ label: '补偿状态', value: engine.value.gpsBiasCorrection.statusText, wide: true },
-	{ label: 'ENU 偏差', value: engine.value.gpsBiasCorrection.deltaEnuText },
-	{ label: '最近更新', value: engine.value.gpsBiasCorrection.updatedAtText }
-] );
+
 const sliderVisible = computed(
 	() => hasArSession.value
 		&& (
@@ -171,27 +199,6 @@ const sliderValue = computed<number>( {
 	},
 	set(value: number) {
 		store.actions.setStructureRevealValue( value );
-	}
-} );
-const sliderText = computed( () =>
-	getDisplayModeSliderValueText( engine.value.displayMode, sliderValue.value )
-);
-const sessionStatusText = computed( () => {
-	if ( hasArSession.value === false ) {
-		return TEXT.waiting;
-	}
-
-	switch ( engine.value.arSessionPhase ) {
-		case 'scanning':
-			return TEXT.scanning;
-		case 'ready-to-place':
-			return TEXT.ready;
-		case 'placing':
-			return TEXT.placing;
-		case 'placed':
-			return TEXT.placed;
-		default:
-			return engine.value.runtimeStatus;
 	}
 } );
 
@@ -237,14 +244,6 @@ function toggleWorkspacePanel(): void {
 	store.actions.activatePanel( 'registration' );
 }
 
-async function handleEnableCoarseRegistration(): Promise<void> {
-	await store.actions.enableCoarseRegistration();
-}
-
-async function handleRefreshGps(): Promise<void> {
-	await store.actions.refreshGeoLocation();
-}
-
 async function handleApplyLocalizedPlacement(): Promise<void> {
 	store.actions.setPlacementMode( 'localized' );
 	await store.actions.placeModel();
@@ -252,17 +251,41 @@ async function handleApplyLocalizedPlacement(): Promise<void> {
 
 function handleApplyHitTestPlacement(): void {
 	store.actions.setPlacementMode( 'hit-test-temporary' );
+	console.info( '[ArUiTemporaryPlacementWarningShown]', {
+		mode: engine.value.workflowMode,
+		siteId: engine.value.selectedModelId || null,
+		modelId: engine.value.selectedModelId || null,
+		sessionId: engine.value.markerCalibration.currentSessionId,
+		currentStep: 'debug-temporary-placement',
+		localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
+		targetId: configStatus.value.activeControlTargetId ?? null,
+		message: '临时演示放置仅用于调试展示，不代表工程真实位置'
+	} );
 	store.actions.placeModelAtHitTest();
 }
 
 function handleStartPrecisionCalibration(): void {
-	activePanelView.value = 'calibration';
+	activePanelView.value = 'ar-check';
 	store.actions.startCurrentSessionMarkerCalibration();
 }
 
 function handleSolvePrecisionCalibration(): void {
-	activePanelView.value = 'calibration';
+	activePanelView.value = 'ar-check';
 	store.actions.solveAndApplyCurrentSessionMarkerCalibration();
+}
+
+function handleSaveBaseline(): void {
+	console.info( '[ArUiConfigStatusResolved]', {
+		mode: engine.value.workflowMode,
+		siteId: engine.value.selectedModelId || null,
+		modelId: engine.value.selectedModelId || null,
+		sessionId: engine.value.markerCalibration.currentSessionId,
+		currentStep: 'load-config',
+		localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
+		targetId: configStatus.value.activeControlTargetId ?? null,
+		message: '仅保存配置确认状态和备注，不保存 ENU -> AR local、XR anchor 或 modelRoot.position'
+	} );
+	store.actions.saveSiteCalibrationBaseline();
 }
 
 function openMarkerDebug(): void {
@@ -281,7 +304,7 @@ onMounted( () => {
 			<header class="page-header" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
 				<div>
 					<div class="page-title">{{ TEXT.title }}</div>
-					<div class="page-subtitle">{{ currentModelName }}</div>
+					<div class="page-subtitle">{{ TEXT.subtitle }}：{{ currentModelName }}</div>
 				</div>
 				<div class="status-chip">{{ TEXT.status }}：{{ sessionStatusText }}</div>
 			</header>
@@ -296,7 +319,7 @@ onMounted( () => {
 					@pointerdown.stop="store.actions.handleArUiInteraction()"
 					@click.stop
 				>
-					<div class="launch-badge">AR</div>
+					<div class="launch-badge">RTK</div>
 					<div class="launch-title">{{ TEXT.enterArTitle }}</div>
 					<p class="launch-subtitle">{{ TEXT.enterArSub }}</p>
 					<label class="model-field">
@@ -307,23 +330,13 @@ onMounted( () => {
 							</option>
 						</select>
 					</label>
-					<div class="launch-actions">
-						<button type="button" class="launch-button" @click.stop="startArSession">
-							{{ TEXT.enterAr }}
-						</button>
-						<button type="button" class="secondary-button" @click.stop="openMarkerDebug">
-							{{ TEXT.markerDebug }}
-						</button>
-					</div>
+					<button type="button" class="launch-button" @click.stop="startArSession">
+						{{ TEXT.enterAr }}
+					</button>
 				</div>
 			</section>
 
-			<section v-if="!hasArSession" class="summary-card">
-				<ArInfoGrid :items="baselineSummaryCards" />
-			</section>
-
 			<div v-if="sliderVisible" class="side-slider">
-				<div class="side-slider-text">{{ sliderText }}</div>
 				<input
 					v-model="sliderValue"
 					class="side-slider-range"
@@ -331,9 +344,10 @@ onMounted( () => {
 					min="0"
 					max="100"
 					step="1"
+					aria-label="模型显示强度"
 					@pointerdown.stop="store.actions.handleArUiInteraction()"
 					@click.stop
-				/>
+				>
 			</div>
 		</div>
 
@@ -362,31 +376,61 @@ onMounted( () => {
 					</button>
 				</div>
 
-				<ArPlacementStatusSection :state="engine" :title="PLACEMENT_STATUS_TITLE" first />
-
 				<template v-if="activePanelView === 'overview'">
-					<ArPanelSection :title="TEXT.sessionOverview">
+					<ArPanelSection title="配置校验总览" first>
 						<ArInfoGrid :items="overviewCards" />
-						<div class="runtime-banner">{{ runtimeStatusText }}</div>
+						<div class="runtime-banner">
+							RTK 测量数据用于建立工程真值。本页面用于校验模型配置、控制标志和现场空间关系，不保存本次 AR 会话矩阵。
+						</div>
+						<div class="runtime-banner">
+							当前静态 JSON 需要在配置文件或后端中修改，浏览器运行时不会直接写回 public JSON。
+						</div>
 					</ArPanelSection>
 				</template>
 
-				<template v-else-if="activePanelView === 'placement'">
-					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.placementActions }}</div>
-						<div class="runtime-banner">应用配准放置会基于当前配准结果固定模型；应用平面临放仅按当前识别平面临时放置。</div>
-						<div class="action-row">
-							<button type="button" class="action-button" @click="handleApplyLocalizedPlacement()">
-								{{ TEXT.placeModel }}
+				<template v-else-if="activePanelView === 'config'">
+					<ArPanelSection title="工程真值配置检查" first>
+						<ArInfoGrid :items="configCards" />
+						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
+							{{ warning }}
+						</div>
+					</ArPanelSection>
+				</template>
+
+				<template v-else-if="activePanelView === 'marker'">
+					<ArPanelSection title="控制标志详情" first>
+						<ArInfoGrid :items="markerCards" />
+						<div class="runtime-banner">
+							一个带方向 Marker 可以完成当前会话配准；普通无方向控制点只能确定位置，不能稳定确定朝向。普通控制点方案建议至少两个点，或一个点 + 手动 yaw 校正。
+						</div>
+					</ArPanelSection>
+				</template>
+
+				<template v-else-if="activePanelView === 'ar-check'">
+					<ArPlacementStatusSection :state="engine" title="AR 校验状态" first />
+					<ArPanelSection title="手动四角点校验">
+						<ArInfoGrid :items="markerCalibrationCards" />
+						<div class="runtime-banner">
+							请按 leftTop 左上角、rightTop 右上角、rightBottom 右下角、leftBottom 左下角的顺序采集控制标志四角。
+						</div>
+						<div class="chip-grid">
+							<button type="button" class="chip-button" @click="handleStartPrecisionCalibration()">
+								{{ TEXT.startCollect }}
 							</button>
-							<button type="button" class="action-button" @click="handleApplyHitTestPlacement()">
-								{{ TEXT.placeHitTest }}
+							<button type="button" class="chip-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
+								{{ TEXT.captureCorner }}
 							</button>
-							<button type="button" class="action-button" @click="store.actions.resetPlacement()">
-								{{ TEXT.resetPlacement }}
+							<button type="button" class="chip-button active" @click="handleSolvePrecisionCalibration()">
+								{{ TEXT.solveApply }}
+							</button>
+							<button type="button" class="chip-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
+								{{ TEXT.resetMarker }}
+							</button>
+							<button type="button" class="chip-button" @click="store.actions.clearMarkerLocalizationCorrection()">
+								{{ TEXT.clearMarker }}
 							</button>
 						</div>
-					</div>
+					</ArPanelSection>
 				</template>
 
 				<template v-else-if="activePanelView === 'display'">
@@ -421,43 +465,23 @@ onMounted( () => {
 							</button>
 						</div>
 					</div>
-
-					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.projectStage }}</div>
-						<div class="chip-grid">
-							<button
-								v-for="(stage, index) in engine.timelineStages"
-								:key="stage"
-								type="button"
-								class="chip-button"
-								:class="{ active: engine.currentTimelineStageIndex === index }"
-								@click="store.actions.setTimelineStage(index)"
-							>
-								{{ stage }}
-							</button>
-						</div>
-					</div>
 				</template>
 
 				<template v-else>
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.precisionCalibration }}</div>
-						<ArInfoGrid :items="markerCalibrationCards" />
-						<div class="chip-grid">
-							<button type="button" class="chip-button" @click="handleStartPrecisionCalibration()">
-								{{ TEXT.startCollect }}
+						<div class="section-label">调试 / 临时演示</div>
+						<div class="runtime-banner warning">
+							临时演示放置和手动校验调整仅用于调试展示，不代表工程真实位置，不应作为正式巡查定位结果。
+						</div>
+						<div class="action-row">
+							<button type="button" class="action-button" @click="handleApplyLocalizedPlacement()">
+								{{ TEXT.localizedPlacement }}
 							</button>
-							<button type="button" class="chip-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
-								{{ TEXT.captureCorner }}
+							<button type="button" class="action-button" @click="handleApplyHitTestPlacement()">
+								{{ TEXT.temporaryPlacement }}
 							</button>
-							<button type="button" class="chip-button active" @click="handleSolvePrecisionCalibration()">
-								{{ TEXT.solveApply }}
-							</button>
-							<button type="button" class="chip-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
-								{{ TEXT.resetMarker }}
-							</button>
-							<button type="button" class="chip-button" @click="store.actions.clearMarkerLocalizationCorrection()">
-								{{ TEXT.clearMarker }}
+							<button type="button" class="action-button" @click="store.actions.resetPlacement()">
+								{{ TEXT.resetPlacement }}
 							</button>
 						</div>
 					</div>
@@ -479,29 +503,29 @@ onMounted( () => {
 						<ArInfoGrid :items="manualAdjustmentCards" />
 						<div class="adjust-grid">
 							<div class="adjust-row">
-								<span>{{ TEXT.xAxis }}</span>
-								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('x', -1)">{{ TEXT.negative }}</button>
-								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('x', 1)">{{ TEXT.positive }}</button>
+								<span>X 轴</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('x', -1)">负向</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('x', 1)">正向</button>
 							</div>
 							<div class="adjust-row">
-								<span>{{ TEXT.yAxis }}</span>
-								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('y', -1)">{{ TEXT.negative }}</button>
-								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('y', 1)">{{ TEXT.positive }}</button>
+								<span>Y 轴</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('y', -1)">负向</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('y', 1)">正向</button>
 							</div>
 							<div class="adjust-row">
-								<span>{{ TEXT.zAxis }}</span>
-								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('z', -1)">{{ TEXT.negative }}</button>
-								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('z', 1)">{{ TEXT.positive }}</button>
+								<span>Z 轴</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('z', -1)">负向</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustTranslation('z', 1)">正向</button>
 							</div>
 							<div class="adjust-row">
-								<span>{{ TEXT.yaw }}</span>
-								<button type="button" class="adjust-button" @click="store.actions.adjustYaw(-1)">{{ TEXT.negative }}</button>
-								<button type="button" class="adjust-button" @click="store.actions.adjustYaw(1)">{{ TEXT.positive }}</button>
+								<span>旋转</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustYaw(-1)">负向</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustYaw(1)">正向</button>
 							</div>
 							<div class="adjust-row">
-								<span>{{ TEXT.scale }}</span>
-								<button type="button" class="adjust-button" @click="store.actions.adjustScale(-1)">{{ TEXT.negative }}</button>
-								<button type="button" class="adjust-button" @click="store.actions.adjustScale(1)">{{ TEXT.positive }}</button>
+								<span>缩放</span>
+								<button type="button" class="adjust-button" @click="store.actions.adjustScale(-1)">缩小</button>
+								<button type="button" class="adjust-button" @click="store.actions.adjustScale(1)">放大</button>
 							</div>
 						</div>
 						<div class="action-row">
@@ -518,37 +542,16 @@ onMounted( () => {
 					</div>
 
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.markerCalibration }}</div>
-						<ArInfoGrid :items="calibrationGuideCards" />
-					</div>
-
-					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.gpsBias }}</div>
-						<ArInfoGrid :items="gpsBiasCards" />
 						<div class="action-row">
-							<button type="button" class="action-button" @click="handleRefreshGps()">
-								{{ TEXT.refreshGps }}
-							</button>
-							<button type="button" class="action-button" @click="handleEnableCoarseRegistration()">
-								{{ TEXT.enableCoarse }}
-							</button>
-							<button type="button" class="action-button" @click="store.actions.saveGpsBiasCorrectionFromCurrentPose()">
-								{{ TEXT.saveGpsBias }}
-							</button>
-							<button type="button" class="action-button" @click="store.actions.clearGpsBiasCorrection()">
-								{{ TEXT.clearGpsBias }}
-							</button>
-						</div>
-					</div>
-
-					<div class="sheet-section">
-						<div class="action-row">
-							<button type="button" class="action-button primary" @click="store.actions.saveSiteCalibrationBaseline()">
+							<button type="button" class="action-button primary" @click="handleSaveBaseline()">
 								{{ TEXT.saveBaseline }}
 							</button>
 							<button type="button" class="action-button" @click="openMarkerDebug">
 								{{ TEXT.markerDebug }}
 							</button>
+						</div>
+						<div class="runtime-banner">
+							仅保存配置确认状态和备注，不保存 ENU -> AR local、XR anchor 或 modelRoot.position。
 						</div>
 					</div>
 				</template>
@@ -558,7 +561,7 @@ onMounted( () => {
 		<nav
 			v-if="hasArSession"
 			class="action-dock action-dock-compact"
-			aria-label="AR 配准操作"
+			aria-label="AR 校验操作"
 			@pointerdown.stop="store.actions.handleArUiInteraction()"
 			@click.stop
 		>
@@ -571,8 +574,6 @@ onMounted( () => {
 				<span class="dock-label">{{ TEXT.exit }}</span>
 			</button>
 		</nav>
-
-		<AppTabBar v-if="!hasArSession" />
 	</div>
 </template>
 
@@ -583,398 +584,249 @@ onMounted( () => {
 	color: #eff6ff;
 }
 
-.calibration-page.ar-active {
-	background: transparent;
-}
-
 .page-scroll {
 	position: relative;
-	padding: max(16px, env(safe-area-inset-top)) 16px calc(102px + env(safe-area-inset-bottom));
-}
-
-.calibration-page.ar-active .page-scroll {
-	padding: max(12px, env(safe-area-inset-top)) 12px calc(110px + env(safe-area-inset-bottom));
+	min-height: 100vh;
+	overflow: hidden;
 }
 
 .page-header {
-	position: relative;
-	z-index: 22;
+	position: fixed;
+	z-index: 5;
+	top: 26px;
+	left: 24px;
+	right: 24px;
 	display: flex;
-	align-items: center;
 	justify-content: space-between;
-	gap: 12px;
+	gap: 16px;
+	align-items: flex-start;
 }
 
 .page-title {
-	font-size: 24px;
-	font-weight: 700;
+	font-size: 30px;
+	font-weight: 800;
+	letter-spacing: 0.04em;
+	text-shadow: 0 2px 14px rgba(0, 0, 0, 0.32);
 }
 
 .page-subtitle {
-	margin-top: 4px;
-	font-size: 12px;
-	color: rgba(210, 225, 255, 0.72);
+	margin-top: 6px;
+	font-size: 14px;
+	color: rgba(239, 246, 255, 0.76);
 }
 
 .status-chip {
-	display: inline-flex;
-	align-items: center;
-	padding: 8px 12px;
+	padding: 10px 16px;
 	border-radius: 999px;
-	border: 1px solid rgba(69, 208, 255, 0.24);
-	background: rgba(0, 212, 255, 0.08);
-	font-size: 12px;
-	color: #bff3ff;
-	backdrop-filter: blur(10px);
+	background: rgba(15, 23, 42, 0.58);
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	backdrop-filter: blur(18px);
+	color: #dffaff;
+	font-weight: 700;
 }
 
-.scene-shell {
-	position: relative;
-	height: min(52vh, 500px);
-	margin-top: 18px;
-	border-radius: 24px;
-	overflow: hidden;
-	border: 1px solid rgba(69, 208, 255, 0.18);
-	background: rgba(8, 14, 24, 0.86);
-}
-
-.calibration-page.ar-active .scene-shell {
+.scene-shell,
+.scene-layer {
 	position: fixed;
 	inset: 0;
-	height: 100dvh;
-	margin-top: 0;
-	border: 0;
-	border-radius: 0;
-	background: transparent;
-	z-index: 1;
 }
 
-.scene-layer,
-.scene-ar {
-	position: absolute;
-	inset: 0;
+.scene-layer :deep(canvas) {
+	width: 100% !important;
+	height: 100% !important;
+	display: block;
 }
 
 .scene-hidden {
 	position: absolute;
-	width: 0;
-	height: 0;
+	inset: auto 0 0 auto;
+	width: 1px;
+	height: 1px;
 	overflow: hidden;
+	opacity: 0;
 	pointer-events: none;
 }
 
 .launch-overlay {
-	position: absolute;
-	inset: 0;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	padding: 24px;
-	background: linear-gradient(180deg, rgba(8, 13, 24, 0.78), rgba(8, 13, 24, 0.56));
-	backdrop-filter: blur(10px);
-	text-align: center;
-	z-index: 5;
+	position: fixed;
+	left: 24px;
+	right: 24px;
+	bottom: 96px;
+	z-index: 6;
+	padding: 22px;
+	border-radius: 28px;
+	background: rgba(8, 15, 27, 0.78);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	box-shadow: 0 26px 72px rgba(0, 0, 0, 0.38);
+	backdrop-filter: blur(24px);
 }
 
 .launch-badge {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 72px;
-	height: 72px;
-	border-radius: 22px;
-	background: linear-gradient(180deg, #17c8ff, #1594ff);
-	font-size: 32px;
-	font-weight: 800;
+	width: 48px;
+	height: 44px;
+	display: grid;
+	place-items: center;
+	border-radius: 16px;
+	background: #00d4ff;
+	color: #00131a;
+	font-weight: 900;
 }
 
 .launch-title {
-	margin-top: 16px;
-	font-size: 28px;
-	font-weight: 700;
+	margin-top: 14px;
+	font-size: 24px;
+	font-weight: 800;
 }
 
 .launch-subtitle {
-	margin: 10px 0 0;
-	max-width: 360px;
-	font-size: 13px;
-	line-height: 1.6;
-	color: rgba(220, 234, 255, 0.76);
+	margin: 8px 0 16px;
+	color: rgba(226, 232, 240, 0.78);
+	line-height: 1.7;
 }
 
 .model-field {
 	display: grid;
 	gap: 8px;
-	width: min(320px, 100%);
-	margin-top: 18px;
-	text-align: left;
-}
-
-.model-field span {
-	font-size: 12px;
-	color: rgba(210, 225, 255, 0.72);
+	color: rgba(226, 232, 240, 0.82);
+	font-size: 13px;
 }
 
 .select-field {
 	width: 100%;
-	padding: 12px 14px;
-	border-radius: 14px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(148, 163, 184, 0.25);
+	border-radius: 16px;
+	background: rgba(15, 23, 42, 0.74);
 	color: #eff6ff;
-}
-
-.launch-actions,
-.action-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 10px;
-}
-
-.launch-actions {
-	margin-top: 18px;
-	justify-content: center;
+	padding: 12px 14px;
+	outline: none;
 }
 
 .launch-button,
-.secondary-button,
-.dock-item,
-.sheet-tab,
-.sheet-close,
-.chip-button,
 .action-button,
+.chip-button,
+.sheet-close,
 .adjust-button {
 	border: 0;
-}
-
-.launch-button,
-.secondary-button {
-	padding: 12px 22px;
-	border-radius: 999px;
-	font-size: 14px;
-	font-weight: 700;
+	color: #eff6ff;
+	background: rgba(15, 23, 42, 0.82);
+	border: 1px solid rgba(148, 163, 184, 0.22);
+	border-radius: 16px;
+	padding: 12px 14px;
+	font-weight: 800;
 }
 
 .launch-button,
 .action-button.primary,
-.dock-item-primary,
-.chip-button.active,
-.sheet-tab.active {
-	background: rgba(0, 212, 255, 0.16);
-	border-color: rgba(0, 212, 255, 0.34);
-	color: #fff;
+.chip-button.active {
+	background: linear-gradient(135deg, rgba(0, 212, 255, 0.34), rgba(20, 184, 166, 0.24));
+	border-color: rgba(0, 212, 255, 0.44);
 }
 
 .launch-button {
-	background: #11c9ff;
-	color: #031019;
-}
-
-.secondary-button,
-.sheet-close,
-.sheet-tab,
-.chip-button,
-.action-button,
-.adjust-button {
-	padding: 10px 14px;
-	border-radius: 14px;
-	background: rgba(255, 255, 255, 0.04);
-	color: rgba(225, 236, 255, 0.74);
-	font-size: 12px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.summary-card {
-	margin-top: 16px;
-	padding: 16px;
-	border-radius: 22px;
-	background: rgba(12, 22, 36, 0.9);
-	border: 1px solid rgba(94, 194, 255, 0.12);
-	box-shadow: 0 16px 30px rgba(0, 0, 0, 0.18);
-}
-
-.summary-grid,
-.info-grid {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 10px;
-}
-
-.summary-item,
-.info-card {
-	padding: 12px;
-	border-radius: 16px;
-	background: rgba(255, 255, 255, 0.04);
-	border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.summary-item span,
-.info-card span {
-	display: block;
-	font-size: 11px;
-	color: rgba(210, 225, 255, 0.64);
-}
-
-.summary-item strong,
-.info-card strong {
-	display: block;
-	margin-top: 6px;
-	font-size: 13px;
-	font-weight: 600;
-	word-break: break-word;
-}
-
-.info-card.wide {
-	grid-column: 1 / -1;
-}
-
-.side-slider {
-	position: fixed;
-	right: 8px;
-	top: 50%;
-	transform: translateY(-50%);
-	z-index: 34;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 10px;
-	padding: 12px 8px;
-	border-radius: 18px;
-	background: rgba(7, 12, 21, 0.74);
-	backdrop-filter: blur(16px);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
-	pointer-events: none;
-}
-
-.side-slider-text {
-	min-width: 92px;
-	padding: 6px 10px;
-	border-radius: 999px;
-	background: rgba(0, 212, 255, 0.12);
-	color: #d8f8ff;
-	font-size: 11px;
-	font-weight: 600;
-	line-height: 1;
-	text-align: center;
-	white-space: nowrap;
-}
-
-.side-slider-range {
-	width: 176px;
-	height: 22px;
-	margin: 0;
-	transform: rotate(-90deg);
-	transform-origin: center;
-	accent-color: #00d4ff;
-	pointer-events: auto;
+	width: 100%;
+	margin-top: 14px;
 }
 
 .action-dock {
 	position: fixed;
-	left: 12px;
-	right: 12px;
-	bottom: calc(12px + env(safe-area-inset-bottom));
-	z-index: 36;
+	z-index: 7;
+	left: 18px;
+	right: 18px;
+	bottom: 18px;
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-columns: 1.2fr 1fr;
 	gap: 10px;
 	padding: 10px;
-	border-radius: 22px;
-	background: rgba(7, 12, 21, 0.88);
-	backdrop-filter: blur(18px);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
-}
-
-.action-dock-compact {
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	border-radius: 26px;
+	background: rgba(8, 15, 27, 0.78);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	backdrop-filter: blur(24px);
 }
 
 .dock-item {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	min-height: 54px;
-	border-radius: 16px;
-	background: rgba(255, 255, 255, 0.04);
-	color: rgba(225, 236, 255, 0.78);
-	border: 1px solid rgba(255, 255, 255, 0.06);
+	min-height: 58px;
+	border: 1px solid rgba(148, 163, 184, 0.18);
+	border-radius: 18px;
+	background: rgba(15, 23, 42, 0.82);
+	color: #eff6ff;
+	font-weight: 800;
 }
 
 .dock-item-primary {
-	background: rgba(0, 212, 255, 0.16);
-	border-color: rgba(0, 212, 255, 0.32);
-	color: #fff;
+	background: rgba(0, 212, 255, 0.18);
+	border-color: rgba(0, 212, 255, 0.36);
+}
+
+.dock-icon,
+.dock-label {
+	display: block;
 }
 
 .dock-icon {
-	font-size: 15px;
-	font-weight: 700;
-	line-height: 1;
+	font-size: 20px;
 }
 
 .dock-label {
-	font-size: 11px;
-	line-height: 1;
+	font-size: 12px;
+	margin-top: 2px;
 }
 
 .bottom-sheet {
 	position: fixed;
-	left: 12px;
-	right: 12px;
-	bottom: calc(92px + env(safe-area-inset-bottom));
-	z-index: 38;
-	height: min(58vh, 520px);
-	padding: 14px;
-	overflow-y: auto;
-	border-radius: 24px;
-	background: rgba(10, 16, 28, 0.94);
-	backdrop-filter: blur(22px);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
+	z-index: 8;
+	left: 18px;
+	right: 18px;
+	bottom: 96px;
+	max-height: 70vh;
+	overflow: auto;
+	padding: 16px;
+	border-radius: 28px;
+	background: rgba(8, 15, 27, 0.9);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+	backdrop-filter: blur(24px);
 }
 
 .sheet-header {
 	display: flex;
+	gap: 10px;
 	align-items: center;
 	justify-content: space-between;
-	gap: 12px;
-	margin-bottom: 10px;
+	margin-bottom: 14px;
 }
 
-.sheet-tabs {
+.sheet-tabs,
+.chip-grid,
+.action-row {
 	display: flex;
+	gap: 10px;
 	flex-wrap: wrap;
-	gap: 8px;
 }
 
-.sheet-section-first {
-	margin-top: 0;
-	padding-top: 0;
-	border-top: 0;
+.sheet-tab {
+	border: 1px solid rgba(148, 163, 184, 0.2);
+	border-radius: 16px;
+	background: rgba(15, 23, 42, 0.74);
+	color: #dbeafe;
+	padding: 10px 12px;
+	font-weight: 800;
 }
 
-.sheet-section + .sheet-section {
+.sheet-tab.active {
+	background: rgba(0, 212, 255, 0.2);
+	border-color: rgba(0, 212, 255, 0.42);
+	color: #fff;
+}
+
+.sheet-section {
 	margin-top: 14px;
-	padding-top: 14px;
-	border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .section-label {
-	font-size: 12px;
-	font-weight: 600;
-	color: rgba(226, 236, 255, 0.88);
-}
-
-.chip-grid {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-	margin-top: 10px;
+	margin-bottom: 10px;
+	font-size: 14px;
+	font-weight: 900;
+	color: #e0f2fe;
 }
 
 .runtime-banner {
@@ -984,73 +836,71 @@ onMounted( () => {
 	background: rgba(0, 212, 255, 0.08);
 	border: 1px solid rgba(0, 212, 255, 0.18);
 	font-size: 12px;
+	line-height: 1.6;
 	color: #d5f7ff;
+}
+
+.runtime-banner.warning {
+	background: rgba(245, 158, 11, 0.12);
+	border-color: rgba(245, 158, 11, 0.28);
+	color: #ffe8b6;
 }
 
 .adjust-grid {
 	display: grid;
-	gap: 8px;
+	gap: 10px;
 	margin-top: 12px;
 }
 
 .adjust-row {
 	display: grid;
-	grid-template-columns: minmax(64px, 1fr) 72px 72px;
+	grid-template-columns: 80px 1fr 1fr;
 	gap: 8px;
 	align-items: center;
+	color: #dbeafe;
 }
 
-.adjust-row span {
-	font-size: 12px;
-	color: rgba(220, 234, 255, 0.84);
+.side-slider {
+	position: fixed;
+	z-index: 7;
+	right: 16px;
+	top: 50%;
+	transform: translateY(-50%);
+	padding: 18px 10px;
+	border-radius: 999px;
+	background: rgba(15, 23, 42, 0.52);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	box-shadow: 0 18px 54px rgba(0, 0, 0, 0.32);
+	backdrop-filter: blur(20px);
+}
+
+.side-slider-range {
+	writing-mode: vertical-lr;
+	direction: rtl;
+	width: 28px;
+	height: 180px;
+	accent-color: #00d4ff;
 }
 
 .sheet-fade-enter-active,
 .sheet-fade-leave-active {
-	transition: opacity 0.22s ease, transform 0.22s ease;
+	transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .sheet-fade-enter-from,
 .sheet-fade-leave-to {
 	opacity: 0;
-	transform: translateY(10px);
+	transform: translateY(12px);
 }
 
-@media (max-width: 420px) {
+@media (max-width: 720px) {
+	.page-header {
+		left: 16px;
+		right: 16px;
+	}
+
 	.page-title {
-		font-size: 21px;
-	}
-
-	.launch-title {
-		font-size: 22px;
-	}
-
-	.summary-grid,
-	.info-grid {
-		grid-template-columns: 1fr;
-	}
-
-	.side-slider {
-		right: 4px;
-		padding: 10px 6px;
-	}
-
-	.side-slider-range {
-		width: 152px;
-	}
-
-	.action-dock {
-		gap: 8px;
-		padding: 8px;
-	}
-
-	.bottom-sheet {
-		bottom: calc(88px + env(safe-area-inset-bottom));
-		height: min(62vh, 540px);
-	}
-
-	.adjust-row {
-		grid-template-columns: 1fr 1fr 1fr;
+		font-size: 26px;
 	}
 }
 </style>

@@ -8,7 +8,7 @@ interface CreateArSessionStateRuntimeOptions {
 	isPresenting(): boolean;
 	hasGroundHit(): boolean;
 	hasPlacedModel(): boolean;
-	isCoarsePlacementPending(): boolean;
+	isAutoPlacementPending(): boolean;
 }
 
 export interface ArSessionStateRuntime {
@@ -27,7 +27,7 @@ export function createArSessionStateRuntime(
 		isPresenting,
 		hasGroundHit,
 		hasPlacedModel,
-		isCoarsePlacementPending
+		isAutoPlacementPending
 	} = options;
 
 	let hasCommittedPlacement = false;
@@ -65,7 +65,7 @@ export function createArSessionStateRuntime(
 				return;
 			}
 
-			if ( isCoarsePlacementPending() ) {
+			if ( isAutoPlacementPending() ) {
 				patchPhase( 'placing' );
 				return;
 			}

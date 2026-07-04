@@ -15,8 +15,6 @@ interface ArLocalizationRuntimeOptions {
 	hasActiveManualSitePose(): boolean;
 	getActiveMarkerArFromEnuSolution(): ArFromEnuSolution | null;
 	getMarkerCorrectionFallbackArFromEnuSolution(): ArFromEnuSolution | null;
-	getGpsBiasArFromEnuSolution(): ArFromEnuSolution | null;
-	getCoarseArFromEnuSolution(): ArFromEnuSolution | null;
 }
 
 const tempDerivedArPosition = new THREE.Vector3();
@@ -42,13 +40,7 @@ export class ArLocalizationRuntime {
 			return placedModelSolution;
 		}
 
-		const gpsBiasSolution = this.options.getGpsBiasArFromEnuSolution();
-		if ( gpsBiasSolution !== null ) {
-			return cloneArFromEnuSolution( gpsBiasSolution );
-		}
-
-		const coarseSolution = this.options.getCoarseArFromEnuSolution();
-		return coarseSolution === null ? null : cloneArFromEnuSolution( coarseSolution );
+		return null;
 
 	}
 
@@ -59,13 +51,7 @@ export class ArLocalizationRuntime {
 			return placedModelSolution;
 		}
 
-		const gpsBiasSolution = this.options.getGpsBiasArFromEnuSolution();
-		if ( gpsBiasSolution !== null ) {
-			return cloneArFromEnuSolution( gpsBiasSolution );
-		}
-
-		const coarseSolution = this.options.getCoarseArFromEnuSolution();
-		return coarseSolution === null ? null : cloneArFromEnuSolution( coarseSolution );
+		return null;
 
 	}
 
@@ -76,13 +62,7 @@ export class ArLocalizationRuntime {
 			return cloneArFromEnuSolution( markerFallbackSolution );
 		}
 
-		const gpsBiasSolution = this.options.getGpsBiasArFromEnuSolution();
-		if ( gpsBiasSolution !== null ) {
-			return cloneArFromEnuSolution( gpsBiasSolution );
-		}
-
-		const coarseSolution = this.options.getCoarseArFromEnuSolution();
-		return coarseSolution === null ? null : cloneArFromEnuSolution( coarseSolution );
+		return null;
 
 	}
 
@@ -131,8 +111,7 @@ export class ArLocalizationRuntime {
 		const hasManualSitePose = this.options.hasManualAdjustments()
 			|| this.options.hasActiveManualSitePose();
 		const fallbackSource = placementBase.siteContext.source
-			?? this.options.getCoarseArFromEnuSolution()?.source
-			?? 'gps-imu';
+			?? 'unknown';
 
 		return createArFromEnuSolution( {
 			position: siteOriginArPosition,

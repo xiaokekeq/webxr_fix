@@ -2,14 +2,10 @@
 import type {
 	EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
-import {
-	createArFromEnuSolution,
-	type ArFromEnuSolution
-} from '@/localization/core/ar-from-enu-solution.js';
+import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import { composeModelQuaternionInAr } from '@/localization/coarse/engineering-registration.js';
 import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
 import { computeModelBusinessLocalBounds, placeModelAt } from '@/engine/core/model.js';
-import type { CoarsePlacementEstimate } from '@/features/ar/types/runtime-types.js';
 import { getPlacementResidualScale } from './camera-fit.js';
 
 const tempEuler = new THREE.Euler();
@@ -20,35 +16,6 @@ const tempHitTestBusinessBounds = new THREE.Box3();
 const tempHitTestSupportPoint = new THREE.Vector3();
 const tempHitTestSupportOffset = new THREE.Vector3();
 const tempHitTestPlacementPosition = new THREE.Vector3();
-
-export function createAutoPlacementBase(options: {
-	estimate: CoarsePlacementEstimate;
-	modelTemplate: THREE.Group;
-	registrationSolution: EngineeringRegistrationSolution;
-	modelOrientationTarget: THREE.Quaternion;
-}): ManualPlacementBase {
-
-	const {
-		estimate,
-		modelTemplate,
-		registrationSolution,
-		modelOrientationTarget
-	} = options;
-
-	return createPlacementBaseFromArLocalizationSolution( {
-		arFromEnuSolution: createArFromEnuSolution( {
-			position: estimate.position,
-			orientation: estimate.orientation,
-			headingDeg: estimate.headingDeg,
-			source: 'gps-imu',
-			accuracyMeters: estimate.accuracyMeters ?? undefined
-		} ),
-		modelTemplate,
-		registrationSolution,
-		modelOrientationTarget
-	} );
-
-}
 
 export function createPlacementBaseFromArLocalizationSolution(options: {
 	arFromEnuSolution: ArFromEnuSolution;

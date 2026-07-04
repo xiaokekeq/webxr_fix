@@ -5,6 +5,8 @@ import {
 	type GeodeticCoordinate
 } from '@/localization/core/geodesy.js';
 import { convertGeodeticToWgs84 } from '@/localization/core/coordinate-systems.js';
+import type { RtkSurveyDataset } from '@/localization/rtk/rtk-survey-dataset.js';
+import type { VisualControlTarget } from '@/localization/baseline/site-calibration-baseline.js';
 
 export interface DemoModelLocalPoint {
 	x: number;
@@ -55,6 +57,15 @@ export interface MarkerEngineeringConfig {
 	};
 	yawDeg?: number;
 	patternUrl?: string;
+	imageUrl?: string;
+	centerEnu?: [ number, number, number ];
+	cornersEnu?: [
+		[ number, number, number ],
+		[ number, number, number ],
+		[ number, number, number ],
+		[ number, number, number ]
+	];
+	plane?: 'horizontal' | 'vertical';
 }
 
 export type DemoModelRegistrationMode = 'rigid' | 'similarity';
@@ -75,6 +86,13 @@ export interface DemoModelConfig {
 	controlPoints: Record<string, DemoModelControlPointCorrespondence>;
 	markers: MarkerEngineeringConfig[];
 	attachments: DemoModelAttachment[];
+	rtkSurveyDataset?: RtkSurveyDataset;
+	controlTargets: VisualControlTarget[];
+	placementAnchorEnu?: [ number, number, number ];
+	placementAnchorMeaning?: string;
+	undergroundObjects?: unknown[];
+	sensors?: unknown[];
+	riskPoints?: unknown[];
 }
 
 interface LegacyControlPointShape {
@@ -119,9 +137,16 @@ interface LocalDebugModelConfig {
 	markers?: MarkerEngineeringConfig[];
 	attachments?: RawDemoModelAttachmentShape[];
 	attachmentsUrl?: string;
+	rtkSurveyDataset?: RtkSurveyDataset;
+	controlTargets?: VisualControlTarget[];
+	placementAnchorEnu?: [ number, number, number ];
+	placementAnchorMeaning?: string;
+	undergroundObjects?: unknown[];
+	sensors?: unknown[];
+	riskPoints?: unknown[];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	controlPoints: Record<string, {
@@ -131,6 +156,13 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	markers?: MarkerEngineeringConfig[];
 	attachments?: RawDemoModelAttachmentShape[];
 	attachmentsUrl?: string;
+	rtkSurveyDataset?: RtkSurveyDataset;
+	controlTargets?: VisualControlTarget[];
+	placementAnchorEnu?: [ number, number, number ];
+	placementAnchorMeaning?: string;
+	undergroundObjects?: unknown[];
+	sensors?: unknown[];
+	riskPoints?: unknown[];
 }
 
 type RawDemoModelConfig = LegacyDemoModelConfig | LocalDebugModelConfig;
@@ -231,6 +263,9 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		};
 	}
 
+	const markers = loadMarkerEngineeringConfigs( config.markers );
+	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.modelId );
+
 	return {
 		modelId: config.modelId,
 		siteFrame,
@@ -239,8 +274,15 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		scale: config.scale,
 		registration,
 		controlPoints: normalizedControlPoints,
-		markers: loadMarkerEngineeringConfigs( config.markers ),
-		attachments: normalizeAttachments( config.attachments )
+		markers,
+		attachments: normalizeAttachments( config.attachments ),
+		rtkSurveyDataset: normalizeRtkSurveyDataset( config.rtkSurveyDataset, config.modelId ),
+		controlTargets,
+		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
+		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
+		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
+		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
+		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : []
 	};
 
 }
@@ -249,6 +291,9 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 
 	const origin = normalizeLocalDebugOrigin( config.origin );
 	const normalizedControlPoints = normalizeLocalDebugControlPoints( config, origin );
+
+	const markers = loadMarkerEngineeringConfigs( config.markers );
+	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.siteId );
 
 	return {
 		modelId: config.siteId,
@@ -266,8 +311,15 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 			minControlPoints: 3
 		},
 		controlPoints: normalizedControlPoints,
-		markers: loadMarkerEngineeringConfigs( config.markers ),
-		attachments: normalizeAttachments( config.attachments )
+		markers,
+		attachments: normalizeAttachments( config.attachments ),
+		rtkSurveyDataset: normalizeRtkSurveyDataset( config.rtkSurveyDataset, config.siteId ),
+		controlTargets,
+		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
+		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
+		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
+		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
+		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : []
 	};
 
 }
@@ -452,6 +504,9 @@ export function loadMarkerEngineeringConfigs(
 		const patternUrl = typeof marker.patternUrl === 'string' && marker.patternUrl.trim().length > 0
 			? marker.patternUrl.trim()
 			: undefined;
+		const imageUrl = typeof marker.imageUrl === 'string' && marker.imageUrl.trim().length > 0
+			? marker.imageUrl.trim()
+			: undefined;
 
 		return {
 			id: marker.id.trim(),
@@ -460,9 +515,184 @@ export function loadMarkerEngineeringConfigs(
 			trackingWidthMeters,
 			enu,
 			yawDeg,
-			patternUrl
+			patternUrl,
+			imageUrl,
+			centerEnu: normalizeEnuTuple( marker.centerEnu ),
+			cornersEnu: normalizeCornersEnu( marker.cornersEnu ),
+			plane: marker.plane === 'vertical' ? 'vertical' : 'horizontal'
 		};
 	} );
+
+}
+
+function normalizeRtkSurveyDataset(
+	dataset: RtkSurveyDataset | undefined,
+	siteId: string
+): RtkSurveyDataset | undefined {
+
+	if ( dataset === undefined ) {
+		console.info( '[RtkSurveyDatasetLoaded]', {
+			siteId,
+			pointCount: 0,
+			source: null,
+			coordinateSystem: null,
+			createdAt: Date.now()
+		} );
+		return undefined;
+	}
+
+	const normalized: RtkSurveyDataset = {
+		siteId: typeof dataset.siteId === 'string' && dataset.siteId.length > 0
+			? dataset.siteId
+			: siteId,
+		coordinateSystem: dataset.coordinateSystem === 'WGS84' || dataset.coordinateSystem === 'mixed'
+			? dataset.coordinateSystem
+			: 'site-enu',
+		measuredAt: typeof dataset.measuredAt === 'string' ? dataset.measuredAt : undefined,
+		source: dataset.source,
+		points: Array.isArray( dataset.points ) ? dataset.points : []
+	};
+
+	console.info( '[RtkSurveyDatasetLoaded]', {
+		siteId: normalized.siteId,
+		pointCount: normalized.points.length,
+		source: normalized.source ?? null,
+		coordinateSystem: normalized.coordinateSystem,
+		createdAt: Date.now()
+	} );
+	return normalized;
+
+}
+
+function normalizeSiteConfigControlTargets(
+	targets: VisualControlTarget[] | undefined,
+	markers: MarkerEngineeringConfig[],
+	siteId: string
+): VisualControlTarget[] {
+
+	const normalizedTargets = normalizeVisualControlTargets( targets );
+	const targetIds = new Set( normalizedTargets.map( ( target ) => target.id ) );
+	const markerFallbackTargets = markers.flatMap( ( marker ) => {
+		if ( targetIds.has( marker.id ) ) {
+			return [];
+		}
+
+		const centerEnu = marker.centerEnu
+			?? (
+				marker.enu === undefined
+					? undefined
+					: [ marker.enu.east, marker.enu.north, marker.enu.up ?? 0 ] as [ number, number, number ]
+			);
+		if ( centerEnu === undefined ) {
+			return [];
+		}
+
+		const imageUrl = marker.imageUrl ?? marker.patternUrl;
+		return [ {
+			id: marker.id,
+			name: marker.bindControlPointId ?? marker.id,
+			markerId: marker.id,
+			imageUrl,
+			patternUrl: marker.patternUrl,
+			centerEnu,
+			cornersEnu: marker.cornersEnu,
+			yawDeg: marker.yawDeg,
+			sizeMeters: marker.sizeMeters,
+			trackingWidthMeters: marker.trackingWidthMeters ?? marker.sizeMeters,
+			plane: marker.plane ?? 'horizontal',
+			cornerOrder: [ 'leftTop', 'rightTop', 'rightBottom', 'leftBottom' ]
+		} satisfies VisualControlTarget ];
+	} );
+	const resolvedTargets = [ ...normalizedTargets, ...markerFallbackTargets ];
+
+	console.info( '[SiteConfigControlTargetsResolved]', {
+		siteId,
+		sourceControlTargetsCount: Array.isArray( targets ) ? targets.length : 0,
+		sourceMarkersCount: markers.length,
+		resolvedControlTargetsCount: resolvedTargets.length,
+		usedMarkerFallbackCount: markerFallbackTargets.length,
+		createdAt: Date.now()
+	} );
+
+	return resolvedTargets;
+
+}
+
+function normalizeVisualControlTargets(
+	targets: VisualControlTarget[] | undefined
+): VisualControlTarget[] {
+
+	if ( Array.isArray( targets ) === false ) {
+		return [];
+	}
+
+	return targets.flatMap( ( target, index ) => {
+		if ( typeof target?.id !== 'string' || target.id.trim().length === 0 ) {
+			return [];
+		}
+
+		const centerEnu = normalizeEnuTuple( target.centerEnu );
+		if ( centerEnu === undefined ) {
+			console.warn( '[RtkSurveyControlTargetResolved]', {
+				targetId: target.id,
+				resolved: false,
+				reason: `controlTargets[${index}].centerEnu missing`,
+				createdAt: Date.now()
+			} );
+			return [];
+		}
+
+		console.info( '[RtkSurveyControlTargetResolved]', {
+			targetId: target.id,
+			resolved: true,
+			hasCornersEnu: normalizeCornersEnu( target.cornersEnu ) !== undefined,
+			createdAt: Date.now()
+		} );
+
+		return [ {
+			...target,
+			id: target.id.trim(),
+			centerEnu,
+			cornersEnu: normalizeCornersEnu( target.cornersEnu ),
+			yawDeg: typeof target.yawDeg === 'number' && Number.isFinite( target.yawDeg ) ? target.yawDeg : undefined,
+			sizeMeters: typeof target.sizeMeters === 'number' && Number.isFinite( target.sizeMeters ) ? target.sizeMeters : undefined,
+			trackingWidthMeters: typeof target.trackingWidthMeters === 'number' && Number.isFinite( target.trackingWidthMeters )
+				? target.trackingWidthMeters
+				: undefined,
+			plane: target.plane === 'vertical' ? 'vertical' : 'horizontal'
+		} ];
+	} );
+
+}
+
+function normalizeEnuTuple(value: [ number, number, number ] | number[] | undefined): [ number, number, number ] | undefined {
+
+	if (
+		Array.isArray( value ) === false
+		|| value.length < 3
+		|| value.slice( 0, 3 ).every( ( item ) => typeof item === 'number' && Number.isFinite( item ) ) === false
+	) {
+		return undefined;
+	}
+
+	return [ value[ 0 ], value[ 1 ], value[ 2 ] ];
+
+}
+
+function normalizeCornersEnu(
+	value: VisualControlTarget['cornersEnu'] | undefined
+): VisualControlTarget['cornersEnu'] | undefined {
+
+	if ( Array.isArray( value ) === false || value.length !== 4 ) {
+		return undefined;
+	}
+
+	const corners = value.map( ( corner ) => normalizeEnuTuple( corner ) );
+	if ( corners.some( ( corner ) => corner === undefined ) ) {
+		return undefined;
+	}
+
+	return corners as VisualControlTarget['cornersEnu'];
 
 }
 

@@ -16,13 +16,18 @@ const AUTO_MARKER_MAX_POSITION_JITTER_METERS = 0.15;
 const AUTO_MARKER_MAX_ROTATION_JITTER_DEGREES = 5;
 const AUTO_MARKER_FALLBACK_TIMEOUT_MS = 8000;
 
-const STATUS_SCAN_PLANE_AND_ALIGN_MARKER = '请先扫描平面，然后对准现场控制标志。';
-const STATUS_AUTO_TRACKING_MARKER = '正在自动识别控制标志...';
-const STATUS_STABILIZING_MARKER = '已识别控制标志，正在稳定定位...';
-const STATUS_MANUAL_NO_TRACKED_IMAGE = '当前站点未配置可追踪控制标志图片，请使用手动四角点校正。';
+const STATUS_SCAN_PLANE_AND_ALIGN_MARKER = '请先扫描平面，等待 AR 跟踪稳定，然后对准现场控制标志完成空间校正。';
+const STATUS_AUTO_TRACKING_MARKER = '自动控制标志识别中，请让控制标志保持在视野中。';
+const STATUS_STABILIZING_MARKER = '已识别控制标志，正在稳定定位。';
+const STATUS_AUTO_TRACKING_NOT_READY = '自动识别暂未成功，可继续对准控制标志或切换手动四角点校正。';
+const STATUS_MANUAL_NO_TRACKED_IMAGE = '当前控制标志未配置可识别图片，请使用手动四角点校正。';
+const STATUS_MANUAL_PATT_NOT_ALLOWED = '.patt 不能用于 WebXR Image Tracking，请配置 PNG/JPG/WebP 图片并使用手动四角点校正。';
+const STATUS_MANUAL_INVALID_TRACKED_IMAGE = '控制标志图片或 trackingWidthMeters 配置不可用，请检查 marker 配置并使用手动四角点校正。';
 const STATUS_MANUAL_UNSUPPORTED = '当前设备不支持自动识别，请使用手动四角点校正。';
 const STATUS_MANUAL_IMAGE_LOAD_FAILED = '控制标志图片加载失败，请检查 marker 配置。';
 const STATUS_SCAN_PLANE_AND_MANUAL = '请先扫描平面，然后开始手动四角点校正。';
+const STATUS_TEMP_PLANE_PLACEMENT = '已识别平面，当前为临时演示放置，不代表正式定位。';
+const STATUS_WAIT_FOR_TEMP_PLANE = '请先扫描平面，识别成功后可进行临时演示放置。';
 
 interface InspectionMarkerWorkflowOptions {
 	getWorkflowMode(): ArWorkflowMode;
@@ -60,6 +65,7 @@ export class InspectionMarkerWorkflow {
 	private samples: XrImageTrackingObservation[] = [];
 	private planeReadyLogged = false;
 	private preferredPlacementRequested = false;
+	private autoNotReadyLogged = false;
 
 	constructor(private readonly options: InspectionMarkerWorkflowOptions) {}
 
@@ -74,75 +80,33 @@ export class InspectionMarkerWorkflow {
 
 		const siteId = this.options.getSiteId();
 		const trackedImages = this.options.getControlTargets()
-			.flatMap( ( target ) => {
-				const imageUrl = getControlTargetImageUrl( target );
-				if ( imageUrl === null ) {
-					if ( typeof target.patternUrl === 'string' && isPattFileUrl( target.patternUrl ) ) {
-						console.warn( '[MarkerImageUrlInvalidPattFile]', {
-							mode: this.options.getWorkflowMode(),
-							siteId: siteId ?? null,
-							sessionId: this.options.getCurrentSessionId(),
-							targetId: target.id,
-							imageUrl: target.imageUrl ?? null,
-							patternUrl: target.patternUrl,
-							createdAt: Date.now()
-						} );
-					} else {
-						console.warn( '[MarkerImageUrlMissing]', {
-							mode: this.options.getWorkflowMode(),
-							siteId: siteId ?? null,
-							sessionId: this.options.getCurrentSessionId(),
-							targetId: target.id,
-							imageUrl: target.imageUrl ?? null,
-							patternUrl: target.patternUrl ?? null,
-							createdAt: Date.now()
-						} );
-					}
-					return [];
-				}
+			.flatMap( ( target ) => this.createTrackedImageDefinition( target, siteId ) );
 
-				const widthInMeters = target.trackingWidthMeters ?? target.sizeMeters;
-				if ( Number.isFinite( widthInMeters ) === false || widthInMeters <= 0 ) {
-					return [];
-				}
-
-				return [ {
-					targetId: target.id,
-					siteId: siteId ?? undefined,
-					markerId: target.id,
-					imageUrl,
-					patternUrl: target.patternUrl ?? imageUrl,
-					widthInMeters,
-					trackingWidthMeters: target.trackingWidthMeters,
-					sizeMeters: target.sizeMeters
-				} ];
+		if ( trackedImages.length === 0 ) {
+			console.info( '[ArInspectionTrackedImagesEmpty]', {
+				mode: this.options.getWorkflowMode(),
+				siteId: siteId ?? null,
+				sessionId: this.options.getCurrentSessionId(),
+				targetId: null,
+				source: 'marker-auto-image',
+				trackedImagesCount: 0,
+				createdAt: Date.now()
 			} );
-		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
-			if ( trackedImages.length === 0 ) {
-				console.info( '[ArInspectionTrackedImagesEmpty]', {
-					mode: this.options.getWorkflowMode(),
-					siteId: siteId ?? null,
-					sessionId: this.options.getCurrentSessionId(),
-					targetId: null,
-					source: 'marker-auto-image',
-					trackedImagesCount: 0,
-					createdAt: Date.now()
-				} );
-			} else {
-				for ( const trackedImage of trackedImages ) {
-					console.info( '[ArInspectionTrackedImagePrepared]', {
-						mode: this.options.getWorkflowMode(),
-						siteId: siteId ?? null,
-						sessionId: this.options.getCurrentSessionId(),
-						targetId: trackedImage.targetId,
-						source: 'marker-auto-image',
-						imageUrl: trackedImage.imageUrl,
-						patternUrl: trackedImage.patternUrl ?? null,
-						trackedImagesCount: trackedImages.length,
-						createdAt: Date.now()
-					} );
-				}
-			}
+			return [];
+		}
+
+		for ( const trackedImage of trackedImages ) {
+			console.info( '[ArInspectionTrackedImagePrepared]', {
+				mode: this.options.getWorkflowMode(),
+				siteId: siteId ?? null,
+				sessionId: this.options.getCurrentSessionId(),
+				targetId: trackedImage.targetId,
+				source: 'marker-auto-image',
+				imageUrl: trackedImage.imageUrl,
+				patternUrl: trackedImage.patternUrl ?? null,
+				trackedImagesCount: trackedImages.length,
+				createdAt: Date.now()
+			} );
 		}
 
 		return trackedImages;
@@ -162,6 +126,7 @@ export class InspectionMarkerWorkflow {
 		this.samples = [];
 		this.planeReadyLogged = false;
 		this.preferredPlacementRequested = false;
+		this.autoNotReadyLogged = false;
 		this.imageTrackingState = {
 			requested: trackedImages.length > 0,
 			supported: false,
@@ -182,20 +147,23 @@ export class InspectionMarkerWorkflow {
 				hasHitTest: this.options.hasGroundHit(),
 				createdAt: Date.now()
 			} ) );
-			this.options.setStatus(
-				trackedImages.length > 0
-					? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
-					: STATUS_MANUAL_NO_TRACKED_IMAGE
-			);
+
+			if ( trackedImages.length === 0 ) {
+				this.fallbackToManual( this.getTrackedImageUnavailableMessage() );
+				return;
+			}
+
+			this.options.setStatus( STATUS_SCAN_PLANE_AND_ALIGN_MARKER );
+			console.info( '[ArUiMarkerAlignmentPromptShown]', this.buildUiLogPayload( {
+				currentStep: 'scan-plane-and-align-marker',
+				localizationSource: 'marker-auto-image',
+				targetId: this.options.getPrimaryTargetId(),
+				message: STATUS_SCAN_PLANE_AND_ALIGN_MARKER
+			} ) );
 			return;
 		}
 
-		if ( preferredSource === 'gps-bias' ) {
-			this.options.setStatus( '请先扫描平面，随后将按 GPS / 粗配准自动放置模型。' );
-			return;
-		}
-
-		this.options.setStatus( '请先扫描平面，识别成功后会按当前平面临时放置模型。' );
+		this.options.setStatus( STATUS_WAIT_FOR_TEMP_PLANE );
 
 	}
 
@@ -216,6 +184,7 @@ export class InspectionMarkerWorkflow {
 		this.samples = [];
 		this.planeReadyLogged = false;
 		this.preferredPlacementRequested = false;
+		this.autoNotReadyLogged = false;
 
 	}
 
@@ -362,11 +331,7 @@ export class InspectionMarkerWorkflow {
 				: STATUS_AUTO_TRACKING_MARKER
 		);
 
-		if ( this.samples.length < AUTO_MARKER_STABLE_FRAME_COUNT ) {
-			return;
-		}
-
-		if ( this.isStable() === false ) {
+		if ( this.samples.length < AUTO_MARKER_STABLE_FRAME_COUNT || this.isStable() === false ) {
 			return;
 		}
 
@@ -398,37 +363,7 @@ export class InspectionMarkerWorkflow {
 		const hasGroundHit = this.options.hasGroundHit();
 		if ( hasGroundHit && this.planeReadyLogged === false ) {
 			this.planeReadyLogged = true;
-			console.info( '[ArInspectionPlaneReady]', this.buildLogPayload( {
-				targetId: this.options.getPrimaryTargetId(),
-				source: this.imageTrackingState.requested ? 'marker-auto-image' : 'marker',
-				trackingState: 'plane-ready',
-				stableFrameCount: this.stableFrameCount,
-				hasHitTest: hasGroundHit,
-				createdAt: Date.now()
-			} ) );
-			if ( this.options.hasPlacedModel() === false ) {
-				const preferredSource = this.options.getInspectionPlacementSource();
-				if ( preferredSource === 'marker-auto' ) {
-					this.options.setStatus(
-						this.imageTrackingState.requested
-							? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
-							: STATUS_SCAN_PLANE_AND_MANUAL
-					);
-				} else if ( preferredSource === 'gps-bias' ) {
-					this.options.setStatus( '已识别平面，正在按 GPS / 粗配准准备自动放置模型。' );
-				} else {
-					this.options.setStatus( '已识别平面，正在按当前平面临时放置模型。' );
-				}
-			}
-
-			if (
-				this.options.hasPlacedModel() === false
-				&& this.preferredPlacementRequested === false
-				&& this.options.getInspectionPlacementSource() !== 'marker-auto'
-			) {
-				this.preferredPlacementRequested = true;
-				this.options.requestPreferredPlacement();
-			}
+			this.handlePlaneReadyHint();
 		} else if ( hasGroundHit === false ) {
 			this.planeReadyLogged = false;
 			this.preferredPlacementRequested = false;
@@ -440,8 +375,107 @@ export class InspectionMarkerWorkflow {
 			&& this.fallbackTriggered === false
 			&& Date.now() - this.startedAt >= AUTO_MARKER_FALLBACK_TIMEOUT_MS
 			&& this.lastObservationAt === 0
+			&& this.autoNotReadyLogged === false
 		) {
-			this.fallbackToManual( STATUS_MANUAL_UNSUPPORTED );
+			this.autoNotReadyLogged = true;
+			this.options.setStatus( STATUS_AUTO_TRACKING_NOT_READY );
+			console.info( '[ArUiMarkerAlignmentPromptShown]', this.buildUiLogPayload( {
+				currentStep: 'marker-auto-image-not-yet-observed',
+				localizationSource: 'marker-auto-image',
+				targetId: this.options.getPrimaryTargetId(),
+				message: STATUS_AUTO_TRACKING_NOT_READY
+			} ) );
+		}
+
+	}
+
+	private createTrackedImageDefinition(
+		target: VisualControlTarget,
+		siteId: string | null
+	): XrTrackedImageDefinition[] {
+
+		const imageUrl = getControlTargetImageUrl( target );
+		if ( imageUrl === null ) {
+			console.warn(
+				typeof target.patternUrl === 'string' && isPattFileUrl( target.patternUrl )
+					? '[MarkerImageUrlInvalidPattFile]'
+					: '[MarkerImageUrlMissing]',
+				{
+					mode: this.options.getWorkflowMode(),
+					siteId: siteId ?? null,
+					sessionId: this.options.getCurrentSessionId(),
+					targetId: target.id,
+					imageUrl: target.imageUrl ?? null,
+					patternUrl: target.patternUrl ?? null,
+					createdAt: Date.now()
+				}
+			);
+			return [];
+		}
+
+		const widthInMeters = target.trackingWidthMeters ?? target.sizeMeters;
+		if (
+			typeof widthInMeters !== 'number'
+			|| Number.isFinite( widthInMeters ) === false
+			|| widthInMeters <= 0
+		) {
+			return [];
+		}
+
+		return [ {
+			targetId: target.id,
+			siteId: siteId ?? undefined,
+			markerId: target.id,
+			imageUrl,
+			patternUrl: target.patternUrl ?? imageUrl,
+			widthInMeters,
+			trackingWidthMeters: target.trackingWidthMeters,
+			sizeMeters: target.sizeMeters
+		} ];
+
+	}
+
+	private handlePlaneReadyHint(): void {
+
+		console.info( '[ArInspectionPlaneReady]', this.buildLogPayload( {
+			targetId: this.options.getPrimaryTargetId(),
+			source: this.imageTrackingState.requested ? 'marker-auto-image' : 'marker',
+			trackingState: 'plane-ready',
+			stableFrameCount: this.stableFrameCount,
+			hasHitTest: true,
+			createdAt: Date.now()
+		} ) );
+
+		if ( this.options.hasPlacedModel() === false ) {
+			if ( this.options.getInspectionPlacementSource() === 'marker-auto' ) {
+				const message = this.imageTrackingState.requested
+					? STATUS_SCAN_PLANE_AND_ALIGN_MARKER
+					: STATUS_SCAN_PLANE_AND_MANUAL;
+				this.options.setStatus( message );
+				console.info( '[ArUiMarkerAlignmentPromptShown]', this.buildUiLogPayload( {
+					currentStep: 'plane-ready-align-marker',
+					localizationSource: this.imageTrackingState.requested ? 'marker-auto-image' : 'marker',
+					targetId: this.options.getPrimaryTargetId(),
+					message
+				} ) );
+			} else {
+				this.options.setStatus( STATUS_TEMP_PLANE_PLACEMENT );
+				console.info( '[ArUiTemporaryPlacementWarningShown]', this.buildUiLogPayload( {
+					currentStep: 'hit-test-temporary-placement',
+					localizationSource: 'fallback',
+					targetId: this.options.getPrimaryTargetId(),
+					message: STATUS_TEMP_PLANE_PLACEMENT
+				} ) );
+			}
+		}
+
+		if (
+			this.options.hasPlacedModel() === false
+			&& this.preferredPlacementRequested === false
+			&& this.options.getInspectionPlacementSource() !== 'marker-auto'
+		) {
+			this.preferredPlacementRequested = true;
+			this.options.requestPreferredPlacement();
 		}
 
 	}
@@ -466,7 +500,40 @@ export class InspectionMarkerWorkflow {
 			hasHitTest: this.options.hasGroundHit(),
 			createdAt: Date.now()
 		} ) );
+		console.info( '[ArUiMarkerAutoImageUnavailableFallbackManual]', this.buildUiLogPayload( {
+			currentStep: 'fallback-manual-corners',
+			localizationSource: 'marker-auto-image',
+			targetId: this.stableTargetId ?? this.options.getPrimaryTargetId(),
+			message
+		} ) );
 		this.options.startManualCalibration( message );
+
+	}
+
+	private getTrackedImageUnavailableMessage(): string {
+
+		const targets = this.options.getControlTargets();
+		if ( targets.length === 0 ) {
+			return '当前模型未配置控制标志，请使用手动四角点校正。';
+		}
+
+		const hasPattFile = targets.some( ( target ) => (
+			( typeof target.patternUrl === 'string' && isPattFileUrl( target.patternUrl ) )
+			|| ( typeof target.imageUrl === 'string' && isPattFileUrl( target.imageUrl ) )
+		) );
+		if ( hasPattFile ) {
+			return STATUS_MANUAL_PATT_NOT_ALLOWED;
+		}
+
+		const hasDeclaredImage = targets.some( ( target ) => (
+			( typeof target.patternUrl === 'string' && target.patternUrl.trim().length > 0 )
+			|| ( typeof target.imageUrl === 'string' && target.imageUrl.trim().length > 0 )
+		) );
+		if ( hasDeclaredImage === false ) {
+			return STATUS_MANUAL_NO_TRACKED_IMAGE;
+		}
+
+		return STATUS_MANUAL_INVALID_TRACKED_IMAGE;
 
 	}
 
@@ -476,12 +543,11 @@ export class InspectionMarkerWorkflow {
 			return false;
 		}
 
-		const samples = this.samples;
-		const basePosition = samples[ 0 ].position;
-		const baseRotation = samples[ 0 ].rotation;
+		const basePosition = this.samples[ 0 ].position;
+		const baseRotation = this.samples[ 0 ].rotation;
 
-		for ( let index = 1; index < samples.length; index += 1 ) {
-			const current = samples[ index ];
+		for ( let index = 1; index < this.samples.length; index += 1 ) {
+			const current = this.samples[ index ];
 			const positionDistance = Math.sqrt(
 				( current.position[ 0 ] - basePosition[ 0 ] ) ** 2
 				+ ( current.position[ 1 ] - basePosition[ 1 ] ) ** 2
@@ -534,6 +600,27 @@ export class InspectionMarkerWorkflow {
 			stableFrameCount: args.stableFrameCount,
 			hasHitTest: args.hasHitTest,
 			createdAt: args.createdAt
+		};
+
+	}
+
+	private buildUiLogPayload(args: {
+		currentStep: string;
+		localizationSource: 'marker' | 'marker-auto-image' | 'fallback';
+		targetId: string | null;
+		message: string;
+	}): Record<string, unknown> {
+
+		return {
+			mode: this.options.getWorkflowMode(),
+			siteId: this.options.getSiteId(),
+			modelId: null,
+			sessionId: this.options.getCurrentSessionId(),
+			currentStep: args.currentStep,
+			localizationSource: args.localizationSource,
+			targetId: args.targetId,
+			message: args.message,
+			createdAt: Date.now()
 		};
 
 	}

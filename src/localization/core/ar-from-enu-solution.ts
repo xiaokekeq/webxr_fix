@@ -2,11 +2,9 @@
 import type { SavedMarkerLocalizationResult } from '@/localization/marker/marker-localization-storage.js';
 
 export type ArLocalizationSource =
-	| 'gps-imu'
-	| 'gps-bias'
-	| 'manual-site-pose'
 	| 'marker'
 	| 'marker-auto-image'
+	| 'manual-site-pose'
 	| 'rtk'
 	| 'fallback'
 	| 'vps'
@@ -48,7 +46,7 @@ export function createArFromEnuSolution(args: {
 		siteOriginArPosition: position,
 		orientation,
 		headingDeg: args.headingDeg,
-		source: args.source ?? 'gps-imu',
+		source: args.source ?? 'unknown',
 		sessionId: args.sessionId ?? null,
 		accuracyMeters: args.accuracyMeters,
 		yawAccuracyDegrees: args.yawAccuracyDegrees,

@@ -10,7 +10,6 @@ import type { ManualRegistrationWorkflow } from '@/engine/placement/manual-regis
 import type { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
 import type { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-workflow.js';
 import type { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
-import type { GpsBiasWorkflow } from '@/engine/session/gps-bias-workflow.js';
 import type { SavedMarkerLocalizationResult } from '@/localization/marker/marker-localization-storage.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 
@@ -29,14 +28,12 @@ interface SessionLifecycleRuntimeOptions {
 	getRegistrationSolution(): EngineeringRegistrationSolution | null;
 	resetMarkerLocalizationCorrection(): void;
 	refreshSiteCalibrationBaselineState(options?: { silentStatus?: boolean }): void;
-	refreshGpsBiasCorrectionState(options?: { silentStatus?: boolean }): void;
 	syncRegistrationChainDebug(): void;
 	syncArSessionPhase(): void;
 	syncSceneHost(): void;
 	applyModelLayerVisibility(): void;
 	emit(): void;
 	appendLog(message: string): void;
-	updateCoarseLocationDebugText(): void;
 	setStatus(message: string): void;
 	suppressSelection(durationMs: number): void;
 	clearSelection(): void;
@@ -47,7 +44,6 @@ interface SessionLifecycleRuntimeOptions {
 	placementWorkflow: PlacementWorkflow;
 	inspectionMarkerWorkflow: InspectionMarkerWorkflow;
 	markerCalibrationRuntime: MarkerCalibrationRuntime;
-	gpsBiasWorkflow: GpsBiasWorkflow;
 	manualApplyToPlacement(
 		base: ManualPlacementBase,
 		targetPosition: THREE.Vector3,
@@ -67,12 +63,11 @@ export class SessionLifecycleRuntime {
 		this.options.placementSession.resetPlacement();
 		this.options.syncArSessionPhase();
 		this.options.syncSceneHost();
-		if ( this.options.isPresenting() ) {
-			this.options.setStatus( '模型位置已重置，请重新识别平面后再放置。' );
-			return;
-		}
-
-		this.options.setStatus( '模型位置已重置。' );
+		this.options.setStatus(
+			this.options.isPresenting()
+				? '模型位置已重置，请重新完成 Marker 或手动四角点校正后再放置。'
+				: '模型位置已重置。'
+		);
 
 	}
 
@@ -80,7 +75,6 @@ export class SessionLifecycleRuntime {
 
 		const currentSessionId = createArSessionId();
 		this.options.setCurrentSessionId( currentSessionId );
-		this.options.gpsBiasWorkflow.resetRuntimeState();
 		this.options.inspectionMarkerWorkflow.startSession();
 		this.options.resetMarkerLocalizationCorrection();
 		this.options.markerCalibrationRuntime.resetRuntimeState();
@@ -108,10 +102,13 @@ export class SessionLifecycleRuntime {
 				stableFrameCount: 0
 			}
 		);
-		void this.options.placementWorkflow.warmupCoarseRegistration().catch( ( error ) => {
-			console.error( 'Coarse registration warmup after session start failed:', error );
-			this.options.appendLog( 'AR 会话后的粗配准预热失败。' );
-			this.options.updateCoarseLocationDebugText();
+		console.info( '[RtkRealtimeDeviceLocalizationReserved]', {
+			mode: this.options.getWorkflowMode(),
+			siteId: this.options.getSiteId(),
+			sessionId: currentSessionId,
+			active: false,
+			reason: 'reserved for future realtime RTK device localization',
+			createdAt: Date.now()
 		} );
 		this.options.emit();
 
@@ -122,13 +119,11 @@ export class SessionLifecycleRuntime {
 		const endedSessionId = this.options.getCurrentSessionId();
 		this.options.inspectionMarkerWorkflow.stopSession();
 		this.options.resetMarkerLocalizationCorrection();
-		this.options.gpsBiasWorkflow.resetRuntimeState();
 		this.options.setCurrentSessionId( null );
 		this.options.markerCalibrationRuntime.resetRuntimeState();
 		this.options.arSessionStateRuntime.handleSessionEnd();
 		this.options.placementSession.resetPlacement();
 		this.options.manualRegistrationWorkflow.syncForHeading( 0 );
-		this.options.refreshGpsBiasCorrectionState( { silentStatus: true } );
 		this.options.syncRegistrationChainDebug();
 		this.options.syncSceneHost();
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
@@ -201,6 +196,13 @@ export class SessionLifecycleRuntime {
 			return;
 		}
 
+		console.info( '[TemporaryPlacementDebugOnly]', {
+			mode: this.options.getWorkflowMode(),
+			siteId: this.options.getSiteId(),
+			sessionId: this.options.getCurrentSessionId(),
+			reason: 'hit-test temporary placement is debug-only',
+			createdAt: Date.now()
+		} );
 		this.options.clearSelection();
 		this.options.suppressSelection( 1200 );
 		const placed = this.options.placementSession.placeAtHitTest( {
@@ -222,7 +224,7 @@ export class SessionLifecycleRuntime {
 		this.options.applyModelLayerVisibility();
 		this.handlePlacementCompleted();
 		this.options.syncSceneHost();
-		this.options.setStatus( '已按当前 hit-test 平面临时放置模型，不使用定位或配准结果。' );
+		this.options.setStatus( '已按当前 hit-test 平面临时放置模型，该结果不作为正式巡查定位。' );
 		this.options.emit();
 
 	}

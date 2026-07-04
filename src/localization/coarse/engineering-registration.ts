@@ -4,7 +4,6 @@ import type {
 	DemoModelControlPointCorrespondence,
 	DemoModelRegistrationMode
 } from '@/models/config/demo-model-config.js';
-import type { AbsoluteSiteTarget } from '@/localization/coarse/coarse-registration-config.js';
 import {
 	createEnuFrame,
 	enuToGeodetic,
@@ -112,24 +111,6 @@ export function solveEngineeringRegistration(
 		rootHeadingDeg,
 		modelPivotOffset,
 		modelUnitScale
-	};
-
-}
-
-export function createCoarseTargetFromEngineeringSolution(
-	solution: EngineeringRegistrationSolution
-): AbsoluteSiteTarget {
-
-	// The coarse runtime only needs the site origin and a heading seed. The full
-	// model -> site transform remains in EngineeringRegistrationSolution.
-	return {
-		mode: 'absolute-site',
-		label: `${solution.modelId} site origin`,
-		latitude: solution.siteOrigin.lat,
-		longitude: solution.siteOrigin.lon,
-		altitude: solution.siteOrigin.alt,
-		targetHeadingDeg: solution.rootHeadingDeg,
-		assetYawOffsetDeg: 0
 	};
 
 }

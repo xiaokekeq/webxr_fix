@@ -8,7 +8,7 @@ export type AppMode = 'pre-ar' | 'ar-session';
 export type ArSupportState = 'checking' | 'supported' | 'unsupported';
 export type ArSessionPhase = 'scanning' | 'ready-to-place' | 'placing' | 'placed';
 export type ArPlacementMode = 'localized' | 'hit-test-temporary';
-export type InspectionPlacementSource = 'marker-auto' | 'gps-bias' | 'plane-hit-test';
+export type InspectionPlacementSource = 'marker-auto' | 'plane-hit-test';
 export type ArDisplayMode =
 	| 'solid-overlay'
 	| 'transparent-xray'
@@ -90,8 +90,39 @@ export interface SiteCalibrationBaselineState {
 	source?: string;
 	statusText: string;
 	controlTargetCount: number;
-	gpsBiasAvailable: boolean;
 	updatedAtText: string;
+}
+
+export interface EngineeringConfigStatusState {
+	hasSiteOrigin: boolean;
+	hasModelLocalToEnu: boolean;
+	hasRtkSurveyDataset: boolean;
+	hasControlTargets: boolean;
+	hasPlacementAnchor: boolean;
+	controlTargetCount: number;
+	activeControlTargetId?: string;
+	controlTargetSource: 'site-config' | 'baseline' | 'none';
+	controlTargetSourceText: string;
+	baselineMismatch: boolean;
+	rtkPointCount: number;
+	undergroundObjectCount: number;
+	sensorCount: number;
+	riskPointCount: number;
+	markerImageReady: boolean;
+	markerImageIssue?: string;
+	siteOriginText: string;
+	placementAnchorText: string;
+	controlTargetSummaries: Array<{
+		id: string;
+		name: string;
+		imageUrl: string;
+		centerEnuText: string;
+		cornersEnuText: string;
+		yawDegText: string;
+		sizeMetersText: string;
+		trackingWidthMetersText: string;
+		planeText: string;
+	}>;
 }
 
 export interface SavedMarkerLocalizationState {
@@ -105,24 +136,6 @@ export interface SavedMarkerLocalizationState {
 	headingDeg?: number;
 	siteOriginArPosition?: { x: number; y: number; z: number };
 	stable?: boolean;
-}
-
-export interface GpsBiasCorrectionState {
-	available: boolean;
-	siteId?: string;
-	source?: string;
-	statusText: string;
-	originText: string;
-	deltaEnuText: string;
-	accuracyText: string;
-	yawCorrectionText: string;
-	updatedAtText: string;
-	usingInSession: boolean;
-	sessionSolutionAvailable: boolean;
-	sessionId?: string;
-	rawGpsEnuText: string;
-	correctedDeviceEnuText: string;
-	headingDegText: string;
 }
 
 export interface MarkerCalibrationCornerState {
@@ -215,15 +228,14 @@ export interface RegistrationStoreState {
 	modelScaleSummary: ModelScaleSummaryState;
 	registrationChainDebug: RegistrationChainDebugState;
 	siteCalibrationBaseline: SiteCalibrationBaselineState;
+	engineeringConfigStatus: EngineeringConfigStatusState;
 	savedMarkerLocalization: SavedMarkerLocalizationState;
-	gpsBiasCorrection: GpsBiasCorrectionState;
 	markerCalibration: MarkerCalibrationState;
 	placementSummary: PlacementSummaryState;
 	targetGuidance: TargetGuidanceState;
 	annotationDetail: AnnotationDetailState;
 	registrationStatusDetail: string;
 	runtimeStatus: string;
-	coarseLocationDebugText: string;
 	logMessages: string[];
 }
 
@@ -369,8 +381,31 @@ export function createDefaultSiteCalibrationBaselineState(): SiteCalibrationBase
 		available: false,
 		statusText: '未加载现场基准',
 		controlTargetCount: 0,
-		gpsBiasAvailable: false,
 		updatedAtText: '-'
+	};
+
+}
+
+export function createDefaultEngineeringConfigStatusState(): EngineeringConfigStatusState {
+
+	return {
+		hasSiteOrigin: false,
+		hasModelLocalToEnu: false,
+		hasRtkSurveyDataset: false,
+		hasControlTargets: false,
+		hasPlacementAnchor: false,
+		controlTargetCount: 0,
+		controlTargetSource: 'none',
+		controlTargetSourceText: '未加载控制标志',
+		baselineMismatch: false,
+		rtkPointCount: 0,
+		undergroundObjectCount: 0,
+		sensorCount: 0,
+		riskPointCount: 0,
+		markerImageReady: false,
+		siteOriginText: '-',
+		placementAnchorText: '-',
+		controlTargetSummaries: []
 	};
 
 }
@@ -389,25 +424,6 @@ export function createDefaultSavedMarkerLocalizationState(): SavedMarkerLocaliza
 
 	return {
 		available: false
-	};
-
-}
-
-export function createDefaultGpsBiasCorrectionState(): GpsBiasCorrectionState {
-
-	return {
-		available: false,
-		statusText: '未记录 GPS 偏差补偿',
-		originText: '-',
-		deltaEnuText: '-',
-		accuracyText: '-',
-		yawCorrectionText: '-',
-		updatedAtText: '-',
-		usingInSession: false,
-		sessionSolutionAvailable: false,
-		rawGpsEnuText: '-',
-		correctedDeviceEnuText: '-',
-		headingDegText: '-'
 	};
 
 }

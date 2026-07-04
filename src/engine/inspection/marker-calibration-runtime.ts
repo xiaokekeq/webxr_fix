@@ -8,8 +8,7 @@ import {
 } from '@/localization/core/registration-store.js';
 import {
 	createMarkerPoseInEnuFromControlTarget,
-	resolveMarkerCornersInEnu,
-	resolveMarkerPoseInEnu,
+	resolveMarkerCornersInEnuFromControlTarget,
 	solveMarkerLocalization,
 	type MarkerLocalizationSolution,
 	type MarkerPoseInEnu
@@ -22,10 +21,10 @@ import type {
 } from '@/features/ar/types/workflow.js';
 
 export const MARKER_CORNER_SEQUENCE = [
-	{ id: 'top-left', label: '左上角' },
-	{ id: 'top-right', label: '右上角' },
-	{ id: 'bottom-right', label: '右下角' },
-	{ id: 'bottom-left', label: '左下角' }
+	{ id: 'top-left', label: 'leftTop 左上角' },
+	{ id: 'top-right', label: 'rightTop 右上角' },
+	{ id: 'bottom-right', label: 'rightBottom 右下角' },
+	{ id: 'bottom-left', label: 'leftBottom 左下角' }
 ] as const;
 
 export type MarkerCornerSequenceId = ( typeof MARKER_CORNER_SEQUENCE )[ number ][ 'id' ];
@@ -132,7 +131,7 @@ export class MarkerCalibrationRuntime {
 
 		const markerPose = this.options.getPrimaryConfiguredMarkerPose();
 		if ( markerPose === null ) {
-			this.options.setStatus( '当前模型没有可用于 Marker 校正的配置。' );
+			this.options.setStatus( '当前模型没有可用于 Marker 校正的控制标志配置。' );
 			return;
 		}
 
@@ -163,9 +162,17 @@ export class MarkerCalibrationRuntime {
 			lastUpdatedAt: Date.now()
 		} );
 
-		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
-			this.options.setStatus( '请按顺序对准控制标志四个角点：左上 -> 右上 -> 右下 -> 左下。' );
-			console.info( '[ArInspectionMarkerManualStarted]', {
+		const message = this.options.getWorkflowMode() === 'ar-inspection'
+			? '请按顺序采集控制标志四个角点：leftTop 左上角 -> rightTop 右上角 -> rightBottom 右下角 -> leftBottom 左下角。'
+			: `Marker 校正已开始，请依次采集 ${MARKER_CORNER_SEQUENCE.map( ( item ) => item.label ).join( '、' )}。`;
+		this.options.setStatus( message );
+		this.logManualCornerStep( 'manual-corners-started', markerPose.markerId, message );
+
+		console.info(
+			this.options.getWorkflowMode() === 'ar-inspection'
+				? '[ArInspectionMarkerManualStarted]'
+				: '[SiteBaselineConfigTargetObserved]',
+			{
 				mode: this.options.getWorkflowMode(),
 				siteId: this.options.getSiteId(),
 				sessionId: currentSessionId,
@@ -174,20 +181,8 @@ export class MarkerCalibrationRuntime {
 				createdAt: Date.now(),
 				trackingState: 'manual-corners-started',
 				stableFrameCount: 0
-			} );
-		} else {
-			this.options.setStatus( `Marker 校正已开始，请依次采集 ${MARKER_CORNER_SEQUENCE.map( ( item ) => item.label ).join( '、' )}。` );
-			console.info( '[SiteBaselineConfigTargetObserved]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: currentSessionId,
-				source: 'marker',
-				targetId: markerPose.markerId,
-				createdAt: Date.now(),
-				trackingState: 'manual-corners-started',
-				stableFrameCount: 0
-			} );
-		}
+			}
+		);
 
 		console.info( '[MarkerSessionCalibrationStarted]', {
 			sessionId: currentSessionId,
@@ -217,18 +212,18 @@ export class MarkerCalibrationRuntime {
 		}
 
 		if ( this.currentSessionMarkerCornerCaptures.length >= MARKER_CORNER_SEQUENCE.length ) {
-			this.options.setStatus( '4 个角点已经采集完成，可以直接求解并应用。' );
+			this.options.setStatus( '四个角点已经采集完成，可以直接完成空间校正。' );
 			return;
 		}
 
 		if ( this.options.hasGroundHit() === false ) {
-			this.options.setStatus( '请先缓慢移动手机扫描地面或控制标志所在平面。' );
+			this.options.setStatus( '当前未检测到平面，请先扫描地面或控制标志所在平面。' );
 			return;
 		}
 
 		const arPosition = this.options.getHitPosition( tempMarkerCapturePosition );
 		if ( arPosition === null ) {
-			this.options.setStatus( '当前没有可用的 hit-test 位置，请保持 marker 平面处于视野中。' );
+			this.options.setStatus( '当前没有可用的 hit-test 位置，请保持控制标志平面处于视野中。' );
 			return;
 		}
 
@@ -248,6 +243,17 @@ export class MarkerCalibrationRuntime {
 			cornerLabel: cornerMeta.label,
 			arPosition: vector3ToObject( arPosition )
 		} );
+		console.info( '[MarkerCornersArCaptured]', {
+			mode: this.options.getWorkflowMode(),
+			siteId: this.options.getSiteId(),
+			sessionId: currentSessionId,
+			targetId: markerState.markerId,
+			cornerId: cornerMeta.id,
+			capturedCornerCount: this.currentSessionMarkerCornerCaptures.length,
+			expectedCornerCount: MARKER_CORNER_SEQUENCE.length,
+			arPosition: vector3ToObject( arPosition ),
+			createdAt: Date.now()
+		} );
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
 			console.info( '[ArInspectionMarkerCornerCaptured]', {
 				mode: this.options.getWorkflowMode(),
@@ -262,11 +268,12 @@ export class MarkerCalibrationRuntime {
 			} );
 		}
 
-		this.options.setStatus(
-			this.currentSessionMarkerCornerCaptures.length < MARKER_CORNER_SEQUENCE.length
-				? `已采集 ${cornerMeta.label}，下一点：${MARKER_CORNER_SEQUENCE[ this.currentSessionMarkerCornerCaptures.length ].label}。`
-				: '4 个角点已采集完成，请求解并应用 Marker 校正。'
-		);
+		const nextCorner = MARKER_CORNER_SEQUENCE[ this.currentSessionMarkerCornerCaptures.length ];
+		const message = nextCorner !== undefined
+			? `已采集 ${cornerMeta.label}，请采集控制标志 ${nextCorner.label}。`
+			: '四角点已采集完成，请点击完成空间校正。';
+		this.options.setStatus( message );
+		this.logManualCornerStep( cornerMeta.id, markerState.markerId, message );
 
 	}
 
@@ -299,7 +306,7 @@ export class MarkerCalibrationRuntime {
 		const markerState = this.options.store.getState().markerCalibration;
 		const markerId = markerState.markerId ?? this.options.getPrimaryConfiguredMarkerPose()?.markerId ?? null;
 		if ( markerId === null ) {
-			this.options.setStatus( '当前模型没有可用于 Marker 校正的 marker 配置。' );
+			this.options.setStatus( '当前模型没有可用于 Marker 校正的控制标志配置。' );
 			return false;
 		}
 
@@ -310,17 +317,37 @@ export class MarkerCalibrationRuntime {
 		}
 
 		if ( this.currentSessionMarkerCornerCaptures.length !== MARKER_CORNER_SEQUENCE.length ) {
-			this.options.setStatus( '请先采集 4 个 marker 角点，再执行求解。' );
+			this.options.setStatus( '四角点数量不足，无法求解空间校正。' );
 			return false;
 		}
 
 		try {
-			const expectedCorners = resolveMarkerCornersInEnu( demoModelConfig, markerId );
+			const controlTarget = this.options.getControlTargets()
+				.find( ( target ) => target.id === markerId || target.markerId === markerId );
+			if ( controlTarget === undefined ) {
+				throw new Error( '未找到控制标志配置。' );
+			}
+
+			const expectedCorners = resolveMarkerCornersInEnuFromControlTarget( controlTarget );
+			console.info( '[MarkerCornersEnuResolved]', {
+				mode: this.options.getWorkflowMode(),
+				siteId: this.options.getSiteId(),
+				modelId: demoModelConfig.modelId,
+				sessionId: currentSessionId,
+				targetId: markerId,
+				cornerCount: expectedCorners.length,
+				corners: expectedCorners.map( ( item ) => ( {
+					id: item.id,
+					position: vector3ToObject( item.position )
+				} ) ),
+				createdAt: Date.now()
+			} );
+
 			const correspondences = MARKER_CORNER_SEQUENCE.map( ( cornerMeta ) => {
 				const expected = expectedCorners.find( ( item ) => item.id === cornerMeta.id );
 				const captured = this.currentSessionMarkerCornerCaptures.find( ( item ) => item.id === cornerMeta.id );
 				if ( expected === undefined || captured === undefined ) {
-					throw new Error( `Marker corner ${cornerMeta.id} is incomplete.` );
+					throw new Error( `控制标志角点 ${cornerMeta.label} 不完整。` );
 				}
 
 				return {
@@ -374,6 +401,16 @@ export class MarkerCalibrationRuntime {
 				markerConfigId: markerId
 			} );
 			if ( applied ) {
+				console.info( '[MarkerLocalizationApplied]', {
+					mode: this.options.getWorkflowMode(),
+					siteId: this.options.getSiteId(),
+					sessionId: currentSessionId,
+					targetId: markerId,
+					source: solution.arFromEnuSolution.source,
+					rmsErrorMeters: solution.rmsErrorMeters,
+					headingDeg: solution.headingDeg,
+					createdAt: Date.now()
+				} );
 				this.syncState( {
 					active: false,
 					solved: true,
@@ -392,7 +429,7 @@ export class MarkerCalibrationRuntime {
 			this.options.setStatus(
 				error instanceof Error
 					? error.message
-					: '当前会话 Marker 校正求解失败。'
+					: '空间校正失败，请重新采集控制标志四角。'
 			);
 			return false;
 		}
@@ -418,11 +455,7 @@ export class MarkerCalibrationRuntime {
 			return false;
 		}
 
-		const demoModelConfig = this.options.getDemoModelConfig();
-		const markerPoseInEnu = demoModelConfig !== null
-			&& demoModelConfig.markers.some( ( marker ) => marker.id === targetId )
-			? resolveMarkerPoseInEnu( demoModelConfig, targetId )
-			: createMarkerPoseInEnuFromControlTarget( controlTarget );
+		const markerPoseInEnu = createMarkerPoseInEnuFromControlTarget( controlTarget );
 
 		const markerPoseInAr = {
 			markerId: targetId,
@@ -478,6 +511,16 @@ export class MarkerCalibrationRuntime {
 			source: 'marker-auto-image'
 		} );
 		if ( applied ) {
+			console.info( '[MarkerLocalizationApplied]', {
+				mode: this.options.getWorkflowMode(),
+				siteId: this.options.getSiteId(),
+				sessionId: currentSessionId,
+				targetId,
+				source: solution.arFromEnuSolution.source,
+				rmsErrorMeters: solution.rmsErrorMeters,
+				headingDeg: solution.headingDeg,
+				createdAt: Date.now()
+			} );
 			this.syncState( {
 				active: false,
 				solved: true,
@@ -506,6 +549,22 @@ export class MarkerCalibrationRuntime {
 				markerId: this.options.getPrimaryConfiguredMarkerPose()?.markerId ?? null,
 				markerConfigId: this.options.getPrimaryConfiguredMarkerPose()?.markerId ?? null
 			}
+		} );
+
+	}
+
+	private logManualCornerStep(currentStep: string, targetId: string | null, message: string): void {
+
+		console.info( '[ArUiManualCornerStepChanged]', {
+			mode: this.options.getWorkflowMode(),
+			siteId: this.options.getSiteId(),
+			modelId: this.options.getDemoModelConfig()?.modelId ?? null,
+			sessionId: this.options.getCurrentSessionId(),
+			currentStep,
+			localizationSource: 'marker',
+			targetId,
+			message,
+			createdAt: Date.now()
 		} );
 
 	}

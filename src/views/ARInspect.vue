@@ -1,60 +1,67 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
-	SECTION_CUT_PLANE_MODE_OPTIONS,
-	getDisplayModeSliderValueText
+	SECTION_CUT_PLANE_MODE_OPTIONS
 } from '@/features/ar/types/display-modes.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
-const PLACEMENT_STATUS_TITLE = '放置方式';
+type InspectPanelView = 'display' | 'localization' | 'record';
 
 const TEXT = {
 	title: '堤防 AR 巡查',
 	enterArTitle: '进入 AR 巡查',
-	enterArSub: '进入后先扫描平面，再对准现场控制标志完成空间校正。',
+	enterArSub: '读取工程真值配置，进入 AR 后先扫描平面，再对准现场控制标志完成空间校正。Marker 识别成功或手动四角点校正后，模型才会按工程坐标正式显示。',
 	enterAr: '进入 AR',
-	selectModel: '选择模型',
+	selectModel: '选择站点',
 	status: '状态',
 	waiting: '待进入 AR',
-	scanning: '正在识别平面',
-	ready: '平面已就绪',
+	scanning: '正在扫描平面',
+	ready: '平面已检测',
 	placing: '正在应用空间校正',
 	placed: '巡查中',
-	viewMode: '模型显示',
-	calibrationPanel: '空间校正',
-	inspectionRecord: '巡查记录',
-	collapsePanel: '收起面板',
-	browseMode: '显示控制',
-	inspectionMode: '巡查记录',
+	panelTool: '控制面板',
+	exit: '退出 AR',
+	takeSnapshot: '截图',
+	closePanel: '收起',
+	display: '显示控制',
+	localization: '空间校准',
+	record: '巡查记录',
+	configStatus: '工程配置状态',
+	localizationStatus: '定位状态',
+	displayMode: '模型显示',
 	sectionPlane: '剖切方向',
-	calibrationHint: '请先扫描平面，然后对准现场控制标志；若自动识别不可用，可切换到手动四角点校正。',
-	startCalibration: '开始控制标志校正',
-	captureCorner: '记录当前角点',
-	applyCalibration: '应用空间校正',
-	resetCalibration: '重置角点',
+	placementSource: '放置方式',
+	calibrationPanel: '控制标志校正',
 	cornerProgress: '角点进度',
-	nextCorner: '待记录角点',
+	nextCorner: '当前要采集',
+	targetMarker: '目标 Marker',
+	startCalibration: '切换手动四角点',
+	captureCorner: '采集当前角点',
+	applyCalibration: '完成空间校正',
+	resetCalibration: '重置角点',
 	inspectionResult: '结果',
 	inspectionType: '类型',
 	inspectionSeverity: '等级',
 	inspectionNote: '备注',
 	saveInspection: '保存巡查记录',
 	exportRecords: '导出巡查记录',
-	takeSnapshot: '截取画面',
-	exit: '退出 AR',
-	panelTool: '控制面板',
-	unknownModel: '未选择模型'
+	unknownModel: '未选择站点'
 } as const;
+
+const PANEL_OPTIONS: Array<{ value: InspectPanelView; label: string }> = [
+	{ value: 'display', label: TEXT.display },
+	{ value: 'localization', label: TEXT.localization },
+	{ value: 'record', label: TEXT.record }
+];
 
 const INSPECTION_PLACEMENT_SOURCE_OPTIONS = [
 	{ value: 'marker-auto', label: 'Marker 自动识别' },
-	{ value: 'gps-bias', label: 'GPS / 粗配准' },
-	{ value: 'plane-hit-test', label: '当前平面临放' }
+	{ value: 'plane-hit-test', label: '临时演示放置' }
 ] as const;
 
 const route = useRoute();
@@ -63,10 +70,22 @@ const store = useArShellStore();
 
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
+const activePanelView = ref<InspectPanelView>( 'display' );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
+const currentModelName = computed(
+	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
+);
+const currentConfigUrl = computed(
+	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.configUrl ?? '-'
+);
+const configStatus = computed( () => engine.value.engineeringConfigStatus );
+const activeTarget = computed( () => configStatus.value.controlTargetSummaries[ 0 ] );
+const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
+const modelPlaced = computed( () => engine.value.placementSummary.positionText !== '-' );
+
 const sliderVisible = computed(
 	() => hasArSession.value
 		&& (
@@ -92,9 +111,6 @@ const sliderValue = computed<number>( {
 		store.actions.setStructureRevealValue( value );
 	}
 } );
-const sliderText = computed( () =>
-	getDisplayModeSliderValueText( engine.value.displayMode, sliderValue.value )
-);
 const sessionStatusText = computed( () => {
 	if ( hasArSession.value === false ) {
 		return TEXT.waiting;
@@ -113,46 +129,116 @@ const sessionStatusText = computed( () => {
 			return engine.value.runtimeStatus;
 	}
 } );
-const calibrationProgressText = computed(
-	() => `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}`
-);
-const calibrationStatusCards = computed( () => [
-	{ label: TEXT.cornerProgress, value: calibrationProgressText.value },
-	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' }
+
+const configCards = computed( () => [
+	{ label: '配置 JSON', value: currentConfigUrl.value, wide: true },
+	{ label: 'RTK 工程真值', value: configStatus.value.hasRtkSurveyDataset ? `已加载 ${configStatus.value.rtkPointCount} 点` : '未加载' },
+	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
+	{ label: 'modelLocalToEnu', value: configStatus.value.hasModelLocalToEnu ? '已配置' : '未配置' },
+	{ label: 'controlTargets', value: configStatus.value.hasControlTargets ? `已配置 ${configStatus.value.controlTargetCount} 个` : '未配置' },
+	{ label: '控制标志来源', value: configStatus.value.controlTargetSourceText },
+	{ label: '当前控制标志', value: configStatus.value.activeControlTargetId ?? '未选择' },
+	{ label: 'Marker 图片', value: configStatus.value.markerImageReady ? '可用于 WebXR Image Tracking' : configStatus.value.markerImageIssue ?? '未配置' },
+	{ label: 'placementAnchorEnu', value: configStatus.value.hasPlacementAnchor ? configStatus.value.placementAnchorText : '未配置', wide: true },
+	{ label: 'undergroundObjects', value: `${configStatus.value.undergroundObjectCount} 个` },
+	{ label: 'sensors', value: `${configStatus.value.sensorCount} 个` },
+	{ label: 'riskPoints', value: `${configStatus.value.riskPointCount} 个` }
 ] );
-const calibrationActionHint = computed( () => {
-	if ( hasArSession.value === false ) {
-		return '进入 AR 后先扫描平面，再开始控制标志校正。';
-	}
 
-	if ( engine.value.markerCalibration.active ) {
-		return engine.value.runtimeStatus;
+const configWarnings = computed( () => {
+	const warnings: string[] = [];
+	if ( configStatus.value.hasControlTargets === false ) {
+		warnings.push( '当前模型未配置控制标志，无法进行正式 AR 空间校正。' );
 	}
-
-	if ( engine.value.arSessionPhase === 'scanning' ) {
-		return '请先缓慢移动手机扫描地面或控制标志所在平面。';
+	if ( configStatus.value.hasRtkSurveyDataset === false ) {
+		warnings.push( '当前模型未配置 RTK 测量数据，请先补充工程真值配置。' );
 	}
-
-	return engine.value.runtimeStatus;
+	if ( configStatus.value.hasPlacementAnchor === false ) {
+		warnings.push( '当前模型未配置地面参考点，手动场景定位可能不可用。' );
+	}
+	if ( configStatus.value.baselineMismatch ) {
+		warnings.push( '当前已保存现场基准与模型配置可能不一致，请确认是否更新基准配置。' );
+	}
+	return warnings;
 } );
-const isMarkerPlacementSelected = computed( () => engine.value.inspectionPlacementSource === 'marker-auto' );
+
+const localizationCards = computed( () => [
+	{ label: 'hit-test ready', value: engine.value.arSessionPhase === 'ready-to-place' || engine.value.arSessionPhase === 'placing' || engine.value.arSessionPhase === 'placed' ? '平面已检测' : '等待平面' },
+	{ label: 'localizationReady', value: localizationReady.value ? '空间校正已完成' : '未完成空间校正' },
+	{ label: 'modelPlaced', value: modelPlaced.value ? '模型已显示' : '模型未放置' },
+	{ label: '定位 source', value: engine.value.registrationChainDebug.arSessionLocalization.source || 'unknown' },
+	{ label: '校正误差', value: engine.value.markerCalibration.rmsErrorMeters === undefined ? '-' : `${engine.value.markerCalibration.rmsErrorMeters.toFixed( 3 )}m` },
+	{ label: '航向', value: engine.value.markerCalibration.headingDeg === undefined ? '-' : `${engine.value.markerCalibration.headingDeg.toFixed( 2 )}deg` }
+] );
+
+const calibrationStatusCards = computed( () => [
+	{ label: TEXT.targetMarker, value: activeTarget.value?.name ?? engine.value.markerCalibration.markerId ?? '未选择' },
+	{ label: 'Marker id', value: engine.value.markerCalibration.markerId ?? configStatus.value.activeControlTargetId ?? '-' },
+	{ label: TEXT.cornerProgress, value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
+	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' },
+	{ label: '失败原因', value: engine.value.runtimeStatus || '-' , wide: true }
+] );
+
 const showManualMarkerControls = computed(
-	() => isMarkerPlacementSelected.value && engine.value.markerCalibration.active
+	() => engine.value.inspectionPlacementSource === 'marker-auto' && engine.value.markerCalibration.active
 );
 const inspectionPlacementHint = computed( () => {
-	switch ( engine.value.inspectionPlacementSource ) {
-		case 'marker-auto':
-			return showManualMarkerControls.value
-				? '当前已切到手动四角点校正，请按顺序记录四个角点后应用。'
-				: '当前使用隐藏式 Marker 自动识别。请先扫描平面，再让控制标志进入视野，识别稳定后会自动放置模型。';
-		case 'gps-bias':
-			return '当前使用 GPS / 粗配准固定放置。扫描到平面后会自动尝试放置模型。';
-		case 'plane-hit-test':
-			return '当前使用平面临时放置。扫描到平面后会按当前识别平面自动临放模型。';
-		default:
-			return engine.value.runtimeStatus;
+	if ( engine.value.inspectionPlacementSource === 'marker-auto' ) {
+		return showManualMarkerControls.value
+			? '自动识别不可用或已切换为手动四角点校正，请按左上、右上、右下、左下顺序采集。'
+			: '当前使用隐藏式 Marker 自动识别。请先扫描平面，再让控制标志进入视野，识别稳定后会自动放置模型。';
 	}
+
+	return '当前为临时演示放置，仅用于调试展示，不代表工程真实位置，不能作为正式巡查定位结果。';
 } );
+const workflowHint = computed( () => {
+	if ( engine.value.placementMode === 'hit-test-temporary' ) {
+		return '当前为临时演示放置，不代表正式定位。';
+	}
+	if ( localizationReady.value && modelPlaced.value ) {
+		return '控制标志校正完成，模型已按工程坐标显示。';
+	}
+	if ( engine.value.arSessionPhase === 'ready-to-place' ) {
+		return '已检测到平面，请继续对准现场控制标志完成空间校正。';
+	}
+	return '当前未完成空间校正，不能作为正式巡查定位结果。';
+} );
+
+watch(
+	workflowHint,
+	(message) => {
+		console.info( '[ArUiLocalizationStepChanged]', {
+			mode: engine.value.workflowMode,
+			siteId: engine.value.selectedModelId || null,
+			modelId: engine.value.selectedModelId || null,
+			sessionId: engine.value.markerCalibration.currentSessionId,
+			currentStep: resolveCurrentStep(),
+			localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
+			targetId: configStatus.value.activeControlTargetId ?? engine.value.markerCalibration.markerId,
+			message
+		} );
+	},
+	{ immediate: true }
+);
+
+function resolveCurrentStep(): string {
+	if ( hasArSession.value === false ) {
+		return 'enter-ar';
+	}
+	if ( engine.value.arSessionPhase === 'scanning' ) {
+		return 'scan-plane';
+	}
+	if ( engine.value.markerCalibration.active ) {
+		return 'capture-marker-corner';
+	}
+	if ( localizationReady.value === false ) {
+		return 'align-marker';
+	}
+	if ( modelPlaced.value === false ) {
+		return 'place-model';
+	}
+	return 'inspect';
+}
 
 async function mountEngineHosts(): Promise<void> {
 	await store.initialize();
@@ -183,8 +269,8 @@ function handleModelChange(event: Event): void {
 	store.actions.selectModel( target.value );
 }
 
-function activateWorkspace(mode: 'browse' | 'inspection'): void {
-	store.actions.activatePanel( mode );
+function activatePanelView(view: InspectPanelView): void {
+	activePanelView.value = view;
 }
 
 function openWorkspacePanel(): void {
@@ -193,29 +279,25 @@ function openWorkspacePanel(): void {
 		return;
 	}
 
-	store.actions.activatePanel( engine.value.workspaceMode === 'inspection' ? 'inspection' : 'browse' );
-}
-
-function startMarkerCalibration(): void {
-	store.actions.startCurrentSessionMarkerCalibration();
-}
-
-function captureMarkerCorner(): void {
-	store.actions.captureCurrentSessionMarkerCorner();
-}
-
-function applyMarkerCalibration(): void {
-	store.actions.solveAndApplyCurrentSessionMarkerCalibration();
-}
-
-function resetMarkerCalibration(): void {
-	store.actions.resetCurrentSessionMarkerCalibration();
+	store.actions.activatePanel( 'registration' );
 }
 
 function handleInspectionPlacementSourceChange(
-	source: 'marker-auto' | 'gps-bias' | 'plane-hit-test'
+	source: 'marker-auto' | 'plane-hit-test'
 ): void {
 	store.actions.setInspectionPlacementSource( source );
+	if ( source === 'plane-hit-test' ) {
+		console.info( '[ArUiTemporaryPlacementWarningShown]', {
+			mode: engine.value.workflowMode,
+			siteId: engine.value.selectedModelId || null,
+			modelId: engine.value.selectedModelId || null,
+			sessionId: engine.value.markerCalibration.currentSessionId,
+			currentStep: 'debug-temporary-placement',
+			localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
+			targetId: configStatus.value.activeControlTargetId ?? null,
+			message: '当前为临时演示放置，不代表正式定位'
+		} );
+	}
 }
 
 function exitPage(): void {
@@ -235,7 +317,10 @@ onMounted( () => {
 	<div class="inspect-page" :class="{ 'ar-active': hasArSession }" @click="store.actions.handleArUiInteraction()">
 		<div class="page-scroll">
 			<header class="page-header" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
-				<div class="page-title">{{ TEXT.title }}</div>
+				<div>
+					<div class="page-title">{{ TEXT.title }}</div>
+					<div class="page-subtitle">{{ currentModelName }}</div>
+				</div>
 				<div class="status-chip">{{ TEXT.status }}：{{ sessionStatusText }}</div>
 			</header>
 
@@ -267,7 +352,6 @@ onMounted( () => {
 			</section>
 
 			<div v-if="sliderVisible" class="side-slider">
-				<div class="side-slider-text">{{ sliderText }}</div>
 				<input
 					v-model="sliderValue"
 					class="side-slider-range"
@@ -275,9 +359,10 @@ onMounted( () => {
 					min="0"
 					max="100"
 					step="1"
+					aria-label="模型显示强度"
 					@pointerdown.stop="store.actions.handleArUiInteraction()"
 					@click.stop
-				/>
+				>
 			</div>
 		</div>
 
@@ -287,7 +372,7 @@ onMounted( () => {
 				<span class="dock-label">{{ TEXT.panelTool }}</span>
 			</button>
 			<button type="button" class="dock-item" @click.stop="store.actions.takeSnapshot()">
-				<span class="dock-icon">拍</span>
+				<span class="dock-icon">图</span>
 				<span class="dock-label">{{ TEXT.takeSnapshot }}</span>
 			</button>
 			<button type="button" class="dock-item" @click.stop="exitPage">
@@ -306,32 +391,24 @@ onMounted( () => {
 				<div class="sheet-header">
 					<div class="sheet-tabs">
 						<button
+							v-for="item in PANEL_OPTIONS"
+							:key="item.value"
 							type="button"
 							class="sheet-tab"
-							:class="{ active: engine.workspaceMode === 'browse' }"
-							@click="activateWorkspace('browse')"
+							:class="{ active: activePanelView === item.value }"
+							@click="activatePanelView(item.value)"
 						>
-							{{ TEXT.browseMode }}
-						</button>
-						<button
-							type="button"
-							class="sheet-tab"
-							:class="{ active: engine.workspaceMode === 'inspection' }"
-							@click="activateWorkspace('inspection')"
-						>
-							{{ TEXT.inspectionMode }}
+							{{ item.label }}
 						</button>
 					</div>
 					<button type="button" class="sheet-close" @click="store.actions.toggleDrawer()">
-						{{ TEXT.collapsePanel }}
+						{{ TEXT.closePanel }}
 					</button>
 				</div>
 
-				<ArPlacementStatusSection :state="engine" :title="PLACEMENT_STATUS_TITLE" first />
-
-				<template v-if="engine.workspaceMode === 'browse'">
+				<template v-if="activePanelView === 'display'">
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.viewMode }}</div>
+						<div class="section-label">{{ TEXT.displayMode }}</div>
 						<div class="chip-grid">
 							<button
 								v-for="item in DISPLAY_MODE_OPTIONS"
@@ -363,9 +440,26 @@ onMounted( () => {
 					</div>
 				</template>
 
-				<template v-else>
+				<template v-else-if="activePanelView === 'localization'">
+					<ArPanelSection :title="TEXT.configStatus" first>
+						<ArInfoGrid :items="configCards" />
+						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
+							{{ warning }}
+						</div>
+						<div class="runtime-banner">
+							一个带方向 Marker 可以完成当前会话配准；普通无方向控制点只能确定位置，不能稳定确定朝向，建议至少两个点或一个点 + 手动 yaw 校正。
+						</div>
+					</ArPanelSection>
+
+					<ArPanelSection :title="TEXT.localizationStatus">
+						<ArInfoGrid :items="localizationCards" />
+						<div class="runtime-banner">{{ workflowHint }}</div>
+					</ArPanelSection>
+
+					<ArPlacementStatusSection :state="engine" title="定位与放置诊断" />
+
 					<div class="sheet-section">
-						<div class="section-label">放置来源</div>
+						<div class="section-label">{{ TEXT.placementSource }}</div>
 						<div class="chip-grid">
 							<button
 								v-for="item in INSPECTION_PLACEMENT_SOURCE_OPTIONS"
@@ -383,38 +477,29 @@ onMounted( () => {
 
 					<ArPanelSection :title="TEXT.calibrationPanel">
 						<ArInfoGrid :items="calibrationStatusCards" class="compact-info-grid" />
-						<div class="runtime-banner">{{ calibrationActionHint }}</div>
-						<div v-if="showManualMarkerControls" class="action-row">
-							<button type="button" class="action-button" @click="startMarkerCalibration()">
+						<div class="runtime-banner">
+							请按 leftTop 左上角、rightTop 右上角、rightBottom 右下角、leftBottom 左下角的顺序采集控制标志四角。
+						</div>
+						<div class="action-row">
+							<button type="button" class="action-button" @click="store.actions.startCurrentSessionMarkerCalibration()">
 								{{ TEXT.startCalibration }}
 							</button>
-							<button type="button" class="action-button" @click="captureMarkerCorner()">
+							<button v-if="showManualMarkerControls" type="button" class="action-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
 								{{ TEXT.captureCorner }}
 							</button>
-							<button type="button" class="action-button primary" @click="applyMarkerCalibration()">
+							<button v-if="showManualMarkerControls" type="button" class="action-button primary" @click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()">
 								{{ TEXT.applyCalibration }}
 							</button>
-							<button type="button" class="action-button" @click="resetMarkerCalibration()">
+							<button type="button" class="action-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
 								{{ TEXT.resetCalibration }}
 							</button>
 						</div>
-						<div v-else-if="isMarkerPlacementSelected" class="action-row">
-							<button type="button" class="action-button" @click="startMarkerCalibration()">
-								切换为手动四角点
-							</button>
-							<button
-								v-if="engine.markerCalibration.capturedCornerCount > 0 || engine.markerCalibration.active"
-								type="button"
-								class="action-button"
-								@click="resetMarkerCalibration()"
-							>
-								重置手动角点
-							</button>
-						</div>
 					</ArPanelSection>
+				</template>
 
+				<template v-else>
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.inspectionRecord }}</div>
+						<div class="section-label">{{ TEXT.record }}</div>
 						<div class="form-grid">
 							<label class="field">
 								<span>{{ TEXT.inspectionResult }}</span>
@@ -471,399 +556,252 @@ onMounted( () => {
 	color: #eff6ff;
 }
 
-.inspect-page.ar-active {
-	background: transparent;
-}
-
 .page-scroll {
 	position: relative;
-	padding: max(16px, env(safe-area-inset-top)) 16px calc(110px + env(safe-area-inset-bottom));
-}
-
-.inspect-page.ar-active .page-scroll {
-	padding: max(12px, env(safe-area-inset-top)) 12px calc(108px + env(safe-area-inset-bottom));
+	min-height: 100vh;
+	overflow: hidden;
 }
 
 .page-header {
-	position: relative;
-	z-index: 22;
+	position: fixed;
+	z-index: 5;
+	top: 26px;
+	left: 24px;
+	right: 24px;
 	display: flex;
-	align-items: center;
 	justify-content: space-between;
-	gap: 12px;
+	gap: 16px;
+	align-items: flex-start;
+	pointer-events: auto;
 }
 
 .page-title {
-	font-size: 24px;
-	font-weight: 700;
+	font-size: 30px;
+	font-weight: 800;
+	letter-spacing: 0.04em;
+	text-shadow: 0 2px 14px rgba(0, 0, 0, 0.32);
+}
+
+.page-subtitle {
+	margin-top: 6px;
+	font-size: 14px;
+	color: rgba(239, 246, 255, 0.76);
 }
 
 .status-chip {
-	display: inline-flex;
-	align-items: center;
-	padding: 8px 12px;
+	padding: 10px 16px;
 	border-radius: 999px;
-	border: 1px solid rgba(69, 208, 255, 0.24);
-	background: rgba(0, 212, 255, 0.08);
-	font-size: 12px;
-	color: #bff3ff;
-	backdrop-filter: blur(10px);
+	background: rgba(15, 23, 42, 0.58);
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	backdrop-filter: blur(18px);
+	color: #dffaff;
+	font-weight: 700;
 }
 
-.scene-shell {
-	position: relative;
-	height: min(52vh, 500px);
-	margin-top: 18px;
-	border-radius: 24px;
-	overflow: hidden;
-	border: 1px solid rgba(69, 208, 255, 0.18);
-	background: rgba(8, 14, 24, 0.86);
-}
-
-.inspect-page.ar-active .scene-shell {
+.scene-shell,
+.scene-layer {
 	position: fixed;
 	inset: 0;
-	height: 100dvh;
-	margin-top: 0;
-	border: 0;
-	border-radius: 0;
-	background: transparent;
-	z-index: 1;
 }
 
-.scene-layer,
-.scene-ar {
-	position: absolute;
-	inset: 0;
+.scene-layer :deep(canvas) {
+	width: 100% !important;
+	height: 100% !important;
+	display: block;
 }
 
 .scene-hidden {
 	position: absolute;
-	width: 0;
-	height: 0;
+	inset: auto 0 0 auto;
+	width: 1px;
+	height: 1px;
 	overflow: hidden;
+	opacity: 0;
 	pointer-events: none;
 }
 
 .launch-overlay {
-	position: absolute;
-	inset: 0;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	padding: 24px;
-	background: linear-gradient(180deg, rgba(8, 13, 24, 0.78), rgba(8, 13, 24, 0.56));
-	backdrop-filter: blur(10px);
-	text-align: center;
-	z-index: 5;
+	position: fixed;
+	left: 24px;
+	right: 24px;
+	bottom: 96px;
+	z-index: 6;
+	padding: 22px;
+	border-radius: 28px;
+	background: rgba(8, 15, 27, 0.78);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	box-shadow: 0 26px 72px rgba(0, 0, 0, 0.38);
+	backdrop-filter: blur(24px);
 }
 
 .launch-badge {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 72px;
-	height: 72px;
-	border-radius: 22px;
-	background: linear-gradient(180deg, #17c8ff, #1594ff);
-	font-size: 32px;
-	font-weight: 800;
+	width: 44px;
+	height: 44px;
+	display: grid;
+	place-items: center;
+	border-radius: 16px;
+	background: #00d4ff;
+	color: #00131a;
+	font-weight: 900;
 }
 
 .launch-title {
-	margin-top: 16px;
-	font-size: 28px;
-	font-weight: 700;
+	margin-top: 14px;
+	font-size: 24px;
+	font-weight: 800;
 }
 
 .launch-subtitle {
-	margin: 10px 0 0;
-	max-width: 360px;
-	font-size: 13px;
-	line-height: 1.6;
-	color: rgba(220, 234, 255, 0.76);
+	margin: 8px 0 16px;
+	color: rgba(226, 232, 240, 0.78);
+	line-height: 1.7;
 }
 
-.model-field {
+.model-field,
+.field {
 	display: grid;
 	gap: 8px;
-	width: min(320px, 100%);
-	margin-top: 18px;
-	text-align: left;
+	color: rgba(226, 232, 240, 0.82);
+	font-size: 13px;
 }
 
-.model-field span {
-	font-size: 12px;
-	color: rgba(210, 225, 255, 0.72);
-}
-
-.select-field {
+.select-field,
+.field input,
+.field textarea {
 	width: 100%;
-	padding: 12px 14px;
-	border-radius: 14px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(148, 163, 184, 0.25);
+	border-radius: 16px;
+	background: rgba(15, 23, 42, 0.74);
 	color: #eff6ff;
+	padding: 12px 14px;
+	outline: none;
 }
 
 .launch-button,
-.dock-item,
-.sheet-tab,
-.sheet-close,
+.action-button,
 .chip-button,
-.action-button {
+.sheet-close {
 	border: 0;
+	color: #eff6ff;
+	background: rgba(15, 23, 42, 0.82);
+	border: 1px solid rgba(148, 163, 184, 0.22);
+	border-radius: 16px;
+	padding: 12px 14px;
+	font-weight: 800;
+}
+
+.launch-button,
+.action-button.primary,
+.chip-button.active {
+	background: linear-gradient(135deg, rgba(0, 212, 255, 0.34), rgba(20, 184, 166, 0.24));
+	border-color: rgba(0, 212, 255, 0.44);
 }
 
 .launch-button {
-	margin-top: 18px;
-	padding: 12px 22px;
-	border-radius: 999px;
-	background: #11c9ff;
-	color: #031019;
-	font-size: 14px;
-	font-weight: 700;
-}
-
-.side-slider {
-	position: fixed;
-	right: max(2px, calc(env(safe-area-inset-right) + 2px));
-	top: 50%;
-	transform: translateY(-50%);
-	z-index: 34;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 14px;
-	width: 54px;
-	padding: 14px 8px 16px;
-	border-radius: 24px 0 0 24px;
-	background: linear-gradient(180deg, rgba(8, 15, 27, 0.76), rgba(8, 15, 27, 0.58));
-	backdrop-filter: blur(18px) saturate(140%);
-	-webkit-backdrop-filter: blur(18px) saturate(140%);
-	border: 1px solid rgba(173, 232, 255, 0.14);
-	border-right: 0;
-	box-shadow:
-		0 18px 36px rgba(0, 0, 0, 0.24),
-		0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-		0 0 22px rgba(82, 208, 255, 0.14);
-	pointer-events: none;
-	overflow: hidden;
-}
-
-.side-slider-text {
 	width: 100%;
-	padding: 7px 8px;
-	border-radius: 12px;
-	background: rgba(0, 212, 255, 0.1);
-	border: 1px solid rgba(173, 232, 255, 0.12);
-	color: #d8f8ff;
-	font-size: 11px;
-	font-weight: 600;
-	line-height: 1.2;
-	text-align: center;
-	word-break: break-word;
-}
-
-.side-slider-range {
-	width: 188px;
-	height: 22px;
-	margin: 0;
-	transform: rotate(-90deg);
-	transform-origin: center;
-	accent-color: #00d4ff;
-	pointer-events: auto;
-	filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.2));
+	margin-top: 14px;
 }
 
 .action-dock {
 	position: fixed;
-	left: 12px;
-	right: 12px;
-	bottom: calc(12px + env(safe-area-inset-bottom));
-	z-index: 36;
+	z-index: 7;
+	left: 18px;
+	right: 18px;
+	bottom: 18px;
 	display: grid;
-	grid-template-columns: repeat(4, minmax(0, 1fr));
+	grid-template-columns: 1.2fr 1fr 1fr;
 	gap: 10px;
 	padding: 10px;
-	border-radius: 22px;
-	background: rgba(7, 12, 21, 0.88);
-	backdrop-filter: blur(18px);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
-}
-
-.action-dock-compact {
-	grid-template-columns: repeat(3, minmax(0, 1fr));
+	border-radius: 26px;
+	background: rgba(8, 15, 27, 0.78);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	backdrop-filter: blur(24px);
 }
 
 .dock-item {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	min-height: 54px;
-	border-radius: 16px;
-	background: rgba(255, 255, 255, 0.04);
-	color: rgba(225, 236, 255, 0.78);
-	border: 1px solid rgba(255, 255, 255, 0.06);
+	min-height: 58px;
+	border: 1px solid rgba(148, 163, 184, 0.18);
+	border-radius: 18px;
+	background: rgba(15, 23, 42, 0.82);
+	color: #eff6ff;
+	font-weight: 800;
 }
 
 .dock-item-primary {
-	background: rgba(0, 212, 255, 0.16);
-	border-color: rgba(0, 212, 255, 0.32);
-	color: #fff;
+	background: rgba(0, 212, 255, 0.18);
+	border-color: rgba(0, 212, 255, 0.36);
+}
+
+.dock-icon,
+.dock-label {
+	display: block;
 }
 
 .dock-icon {
-	font-size: 15px;
-	font-weight: 700;
-	line-height: 1;
+	font-size: 20px;
 }
 
 .dock-label {
-	font-size: 11px;
-	line-height: 1;
+	font-size: 12px;
+	margin-top: 2px;
 }
 
 .bottom-sheet {
 	position: fixed;
-	left: 12px;
-	right: 12px;
-	bottom: calc(96px + env(safe-area-inset-bottom));
-	z-index: 38;
-	max-height: 52vh;
-	padding: 14px;
-	overflow-y: auto;
-	border-radius: 24px;
-	background: rgba(10, 16, 28, 0.94);
-	backdrop-filter: blur(22px);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
+	z-index: 8;
+	left: 18px;
+	right: 18px;
+	bottom: 96px;
+	max-height: 70vh;
+	overflow: auto;
+	padding: 16px;
+	border-radius: 28px;
+	background: rgba(8, 15, 27, 0.9);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+	backdrop-filter: blur(24px);
 }
 
 .sheet-header {
 	display: flex;
+	gap: 10px;
 	align-items: center;
 	justify-content: space-between;
-	gap: 12px;
-	margin-bottom: 10px;
+	margin-bottom: 14px;
 }
 
-.sheet-tabs {
+.sheet-tabs,
+.chip-grid,
+.action-row {
 	display: flex;
-	gap: 8px;
+	gap: 10px;
+	flex-wrap: wrap;
 }
 
-.sheet-tab,
-.sheet-close,
-.chip-button,
-.action-button {
-	padding: 10px 14px;
-	border-radius: 14px;
-	background: rgba(255, 255, 255, 0.04);
-	color: rgba(225, 236, 255, 0.74);
-	font-size: 12px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
+.sheet-tab {
+	border: 1px solid rgba(148, 163, 184, 0.2);
+	border-radius: 16px;
+	background: rgba(15, 23, 42, 0.74);
+	color: #dbeafe;
+	padding: 10px 12px;
+	font-weight: 800;
 }
 
-.sheet-tab.active,
-.chip-button.active,
-.action-button.primary {
-	background: rgba(0, 212, 255, 0.16);
-	border-color: rgba(0, 212, 255, 0.34);
+.sheet-tab.active {
+	background: rgba(0, 212, 255, 0.2);
+	border-color: rgba(0, 212, 255, 0.42);
 	color: #fff;
 }
 
-.sheet-section + .sheet-section {
+.sheet-section {
 	margin-top: 14px;
-	padding-top: 14px;
-	border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .section-label {
-	font-size: 12px;
-	font-weight: 600;
-	color: rgba(226, 236, 255, 0.88);
-}
-
-.chip-grid {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-	margin-top: 10px;
-}
-
-.info-grid {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 10px;
-}
-
-.info-card {
-	padding: 12px;
-	border-radius: 16px;
-	background: rgba(255, 255, 255, 0.04);
-	border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.info-card span {
-	display: block;
-	font-size: 11px;
-	color: rgba(210, 225, 255, 0.64);
-}
-
-.info-card strong {
-	display: block;
-	margin-top: 6px;
-	font-size: 13px;
-	font-weight: 600;
-	word-break: break-word;
-}
-
-.form-grid {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 10px;
-	margin-top: 10px;
-}
-
-.compact-info-grid {
-	margin-top: 10px;
-}
-
-.field {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-}
-
-.field.full {
-	grid-column: 1 / -1;
-}
-
-.field span {
-	font-size: 11px;
-	color: rgba(210, 225, 255, 0.66);
-}
-
-.field input,
-.field textarea {
-	width: 100%;
-	padding: 11px 12px;
-	border-radius: 14px;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	background: rgba(255, 255, 255, 0.04);
-	color: #eff6ff;
-}
-
-.action-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 10px;
-	margin-top: 14px;
+	margin-bottom: 10px;
+	font-size: 14px;
+	font-weight: 900;
+	color: #e0f2fe;
 }
 
 .runtime-banner {
@@ -873,50 +811,71 @@ onMounted( () => {
 	background: rgba(0, 212, 255, 0.08);
 	border: 1px solid rgba(0, 212, 255, 0.18);
 	font-size: 12px;
+	line-height: 1.6;
 	color: #d5f7ff;
+}
+
+.runtime-banner.warning {
+	background: rgba(245, 158, 11, 0.12);
+	border-color: rgba(245, 158, 11, 0.28);
+	color: #ffe8b6;
+}
+
+.form-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.field.full {
+	grid-column: 1 / -1;
+}
+
+.side-slider {
+	position: fixed;
+	z-index: 7;
+	right: 16px;
+	top: 50%;
+	transform: translateY(-50%);
+	padding: 18px 10px;
+	border-radius: 999px;
+	background: rgba(15, 23, 42, 0.52);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	box-shadow: 0 18px 54px rgba(0, 0, 0, 0.32);
+	backdrop-filter: blur(20px);
+}
+
+.side-slider-range {
+	writing-mode: vertical-lr;
+	direction: rtl;
+	width: 28px;
+	height: 180px;
+	accent-color: #00d4ff;
 }
 
 .sheet-fade-enter-active,
 .sheet-fade-leave-active {
-	transition: opacity 0.22s ease, transform 0.22s ease;
+	transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .sheet-fade-enter-from,
 .sheet-fade-leave-to {
 	opacity: 0;
-	transform: translateY(10px);
+	transform: translateY(12px);
 }
 
-@media (max-width: 420px) {
-	.page-title {
-		font-size: 21px;
+@media (max-width: 720px) {
+	.page-header {
+		left: 16px;
+		right: 16px;
 	}
 
-	.launch-title {
-		font-size: 22px;
+	.page-title {
+		font-size: 26px;
 	}
 
 	.form-grid {
 		grid-template-columns: 1fr;
-	}
-
-	.side-slider-range {
-		width: 164px;
-	}
-
-	.side-slider {
-		right: max(0px, env(safe-area-inset-right));
-		width: 50px;
-		padding: 12px 6px 14px;
-	}
-
-	.action-dock {
-		gap: 8px;
-		padding: 8px;
-	}
-
-	.bottom-sheet {
-		bottom: calc(92px + env(safe-area-inset-bottom));
 	}
 }
 </style>
