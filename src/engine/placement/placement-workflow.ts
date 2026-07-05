@@ -181,12 +181,16 @@ export class PlacementWorkflow {
 	}): Record<string, unknown> {
 
 		return {
+			mode: 'marker-corners-4',
+			workflowMode: this.options.getWorkflowMode(),
 			siteId: this.options.getSiteId(),
 			modelId: this.options.getSiteId(),
 			sessionId: this.options.getCurrentSessionId(),
 			targetId: this.options.getInspectionTargetId(),
 			currentCorner: null,
 			capturedPointCount: null,
+			arLocalPosition: null,
+			cornersEnu: null,
 			source: args.source,
 			hasSiteOrigin: this.options.getRegistrationSolution() !== null,
 			hasModelLocalToEnu: this.options.getRegistrationSolution() !== null,

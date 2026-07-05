@@ -19,13 +19,17 @@ import type {
 } from '@/features/ar/types/workflow.js';
 
 export const MARKER_CORNER_SEQUENCE = [
-	{ id: 'top-left', label: 'leftTop 左上角' },
-	{ id: 'top-right', label: 'rightTop 右上角' },
-	{ id: 'bottom-right', label: 'rightBottom 右下角' },
-	{ id: 'bottom-left', label: 'leftBottom 左下角' }
+	{ id: 'top-left', cornerOrderValue: 'leftTop', label: 'leftTop 左上角', pointLabel: 'LT' },
+	{ id: 'top-right', cornerOrderValue: 'rightTop', label: 'rightTop 右上角', pointLabel: 'RT' },
+	{ id: 'bottom-right', cornerOrderValue: 'rightBottom', label: 'rightBottom 右下角', pointLabel: 'RB' },
+	{ id: 'bottom-left', cornerOrderValue: 'leftBottom', label: 'leftBottom 左下角', pointLabel: 'LB' }
 ] as const;
 
 export type MarkerCornerSequenceId = ( typeof MARKER_CORNER_SEQUENCE )[ number ][ 'id' ];
+type MarkerCornerOrderValue = ( typeof MARKER_CORNER_SEQUENCE )[ number ][ 'cornerOrderValue' ];
+
+const MARKER_CALIBRATION_MODE = 'marker-corners-4';
+const EXPECTED_MARKER_CORNER_ORDER = MARKER_CORNER_SEQUENCE.map( ( item ) => item.cornerOrderValue );
 
 interface MarkerCalibrationRuntimeOptions {
 	store: RegistrationStore;
@@ -137,8 +141,9 @@ export class MarkerCalibrationRuntime {
 		}
 		const controlTarget = this.options.getControlTargets()
 			.find( ( target ) => target.id === markerPose.markerId || target.markerId === markerPose.markerId );
-		if ( controlTarget?.cornersEnu === undefined ) {
-			this.options.setStatus( '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。' );
+		const targetValidationError = validateMarkerCornersTarget( controlTarget );
+		if ( targetValidationError !== null ) {
+			this.options.setStatus( targetValidationError );
 			return;
 		}
 
@@ -186,18 +191,26 @@ export class MarkerCalibrationRuntime {
 		);
 
 		console.info( '[MarkerSessionCalibrationStarted]', {
+			mode: MARKER_CALIBRATION_MODE,
 			sessionId: currentSessionId,
 			markerId: markerPose.markerId
 		} );
-		console.info( '[CurrentSessionMarkerCalibrationStarted]', this.createLogPayload( {
+		console.info( '[ManualMarkerCalibrationStarted]', this.createLogPayload( {
 			targetId: markerPose.markerId,
 			currentCorner: MARKER_CORNER_SEQUENCE[ 0 ].label,
 			capturedPointCount: 0
 		} ) );
+		console.info( '[CurrentSessionMarkerCalibrationStarted]', this.createLogPayload( {
+			targetId: markerPose.markerId,
+			currentCorner: MARKER_CORNER_SEQUENCE[ 0 ].label,
+			capturedPointCount: 0,
+			pointLabel: MARKER_CORNER_SEQUENCE[ 0 ].pointLabel
+		} ) );
 		console.info( '[ManualMarkerCornerCaptureStarted]', this.createLogPayload( {
 			targetId: markerPose.markerId,
 			currentCorner: MARKER_CORNER_SEQUENCE[ 0 ].label,
-			capturedPointCount: 0
+			capturedPointCount: 0,
+			pointLabel: MARKER_CORNER_SEQUENCE[ 0 ].pointLabel
 		} ) );
 
 	}
@@ -228,13 +241,13 @@ export class MarkerCalibrationRuntime {
 		}
 
 		if ( this.options.hasGroundHit() === false ) {
-			this.options.setStatus( '当前未检测到平面，请先扫描地面或控制标志所在平面。' );
+			this.options.setStatus( '请缓慢移动设备，扫描地面。' );
 			return;
 		}
 
 		const arPosition = this.options.getHitPosition( tempMarkerCapturePosition );
 		if ( arPosition === null ) {
-			this.options.setStatus( '当前没有可用的 hit-test 位置，请保持控制标志平面处于视野中。' );
+			this.options.setStatus( '未获取到角点 3D 坐标，请重新对准控制标志角点。' );
 			return;
 		}
 
@@ -248,27 +261,37 @@ export class MarkerCalibrationRuntime {
 		this.syncState();
 
 		console.info( '[MarkerSessionCornerCaptured]', {
+			mode: MARKER_CALIBRATION_MODE,
 			sessionId: currentSessionId,
 			markerId: markerState.markerId,
 			cornerId: cornerMeta.id,
 			cornerLabel: cornerMeta.label,
-			arPosition: vector3ToObject( arPosition )
+			pointLabel: cornerMeta.pointLabel,
+			arLocalPosition: vector3ToObject( arPosition ),
+			arPosition: vector3ToObject( arPosition ),
+			hitTestReady: this.options.hasGroundHit()
 		} );
 		console.info( '[MarkerCornersArCaptured]', {
-			mode: this.options.getWorkflowMode(),
+			mode: MARKER_CALIBRATION_MODE,
+			workflowMode: this.options.getWorkflowMode(),
 			siteId: this.options.getSiteId(),
 			sessionId: currentSessionId,
 			targetId: markerState.markerId,
 			cornerId: cornerMeta.id,
+			pointLabel: cornerMeta.pointLabel,
 			capturedCornerCount: this.currentSessionMarkerCornerCaptures.length,
 			expectedCornerCount: MARKER_CORNER_SEQUENCE.length,
+			arLocalPosition: vector3ToObject( arPosition ),
 			arPosition: vector3ToObject( arPosition ),
+			hitTestReady: this.options.hasGroundHit(),
 			createdAt: Date.now()
 		} );
 		console.info( '[ManualMarkerCornerCaptured]', this.createLogPayload( {
 			targetId: markerState.markerId,
 			currentCorner: cornerMeta.label,
-			capturedPointCount: this.currentSessionMarkerCornerCaptures.length
+			capturedPointCount: this.currentSessionMarkerCornerCaptures.length,
+			pointLabel: cornerMeta.pointLabel,
+			arLocalPosition: arPosition
 		} ) );
 
 		const nextCorner = MARKER_CORNER_SEQUENCE[ this.currentSessionMarkerCornerCaptures.length ];
@@ -279,7 +302,9 @@ export class MarkerCalibrationRuntime {
 			console.info( '[ManualMarkerCornersReady]', this.createLogPayload( {
 				targetId: markerState.markerId,
 				currentCorner: cornerMeta.label,
-				capturedPointCount: this.currentSessionMarkerCornerCaptures.length
+				capturedPointCount: this.currentSessionMarkerCornerCaptures.length,
+				pointLabel: cornerMeta.pointLabel,
+				arLocalPosition: arPosition
 			} ) );
 		}
 		this.options.setStatus( message );
@@ -334,21 +359,28 @@ export class MarkerCalibrationRuntime {
 		try {
 			const controlTarget = this.options.getControlTargets()
 				.find( ( target ) => target.id === markerId || target.markerId === markerId );
-			if ( controlTarget === undefined ) {
+			const targetValidationError = validateMarkerCornersTarget( controlTarget );
+			if ( targetValidationError !== null ) {
+				throw new Error( targetValidationError );
+			}
+			const markerControlTarget = controlTarget;
+			if ( markerControlTarget === undefined ) {
 				throw new Error( '未找到控制标志配置。' );
 			}
-			if ( controlTarget.cornersEnu === undefined ) {
-				throw new Error( '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。' );
-			}
 
-			const expectedCorners = resolveMarkerCornersInEnuFromControlTarget( controlTarget );
+			const expectedCorners = resolveMarkerCornersInEnuFromControlTarget( markerControlTarget );
+			if ( expectedCorners.length !== MARKER_CORNER_SEQUENCE.length ) {
+				throw new Error( '当前控制标志四角点工程坐标数量不是 4，无法完成四角点校正。' );
+			}
 			console.info( '[MarkerCornersEnuResolved]', {
-				mode: this.options.getWorkflowMode(),
+				mode: MARKER_CALIBRATION_MODE,
+				workflowMode: this.options.getWorkflowMode(),
 				siteId: this.options.getSiteId(),
 				modelId: demoModelConfig.modelId,
 				sessionId: currentSessionId,
 				targetId: markerId,
 				cornerCount: expectedCorners.length,
+				cornersEnu: markerControlTarget.cornersEnu,
 				corners: expectedCorners.map( ( item ) => ( {
 					id: item.id,
 					position: vector3ToObject( item.position )
@@ -372,7 +404,8 @@ export class MarkerCalibrationRuntime {
 			console.info( '[ManualMarkerLocalizationSolving]', this.createLogPayload( {
 				targetId: markerId,
 				currentCorner: MARKER_CORNER_SEQUENCE[ MARKER_CORNER_SEQUENCE.length - 1 ].label,
-				capturedPointCount: correspondences.length
+				capturedPointCount: correspondences.length,
+				cornersEnu: markerControlTarget.cornersEnu
 			} ) );
 
 			const solution = solveMarkerLocalization( {
@@ -383,11 +416,16 @@ export class MarkerCalibrationRuntime {
 			this.currentSessionMarkerSolution = solution;
 
 			console.info( '[MarkerSessionCalibrationSolved]', {
+				mode: MARKER_CALIBRATION_MODE,
+				workflowMode: this.options.getWorkflowMode(),
 				sessionId: currentSessionId,
 				markerId,
 				correspondenceCount: solution.correspondenceCount,
 				rmsErrorMeters: solution.rmsErrorMeters,
+				maxErrorMeters: null,
+				scale: 1,
 				headingDeg: solution.headingDeg,
+				rotation: solution.orientation.toArray(),
 				siteOriginArPosition: vector3ToObject( solution.siteOriginArPosition ),
 				matrix: solution.matrix.toArray()
 			} );
@@ -407,6 +445,7 @@ export class MarkerCalibrationRuntime {
 			if ( applied ) {
 				console.info( '[MarkerLocalizationApplied]', {
 					mode: this.options.getWorkflowMode(),
+					calibrationMode: MARKER_CALIBRATION_MODE,
 					siteId: this.options.getSiteId(),
 					sessionId: currentSessionId,
 					targetId: markerId,
@@ -419,7 +458,8 @@ export class MarkerCalibrationRuntime {
 					targetId: markerId,
 					currentCorner: null,
 					capturedPointCount: this.currentSessionMarkerCornerCaptures.length,
-					localizationReady: true
+					localizationReady: true,
+					cornersEnu: markerControlTarget.cornersEnu
 				} ) );
 				this.syncState( {
 					active: false,
@@ -483,18 +523,28 @@ export class MarkerCalibrationRuntime {
 		currentCorner: string | null;
 		capturedPointCount: number;
 		localizationReady?: boolean;
+		pointLabel?: string | null;
+		arLocalPosition?: THREE.Vector3 | null;
+		cornersEnu?: VisualControlTarget['cornersEnu'] | null;
 	}): Record<string, unknown> {
 
 		const config = this.options.getDemoModelConfig();
 		const target = this.options.getControlTargets()
 			.find( ( item ) => item.id === args.targetId || item.markerId === args.targetId );
 		return {
+			mode: MARKER_CALIBRATION_MODE,
+			workflowMode: this.options.getWorkflowMode(),
 			siteId: this.options.getSiteId(),
 			modelId: config?.modelId ?? null,
 			sessionId: this.options.getCurrentSessionId(),
 			targetId: args.targetId,
 			currentCorner: args.currentCorner,
+			pointLabel: args.pointLabel ?? null,
 			capturedPointCount: args.capturedPointCount,
+			arLocalPosition: args.arLocalPosition === undefined || args.arLocalPosition === null
+				? null
+				: vector3ToObject( args.arLocalPosition ),
+			cornersEnu: args.cornersEnu ?? target?.cornersEnu ?? null,
 			source: 'marker',
 			hasSiteOrigin: config !== null,
 			hasModelLocalToEnu: config !== null,
@@ -509,6 +559,51 @@ export class MarkerCalibrationRuntime {
 			createdAt: Date.now()
 		};
 
+	}
+
+}
+
+function validateMarkerCornersTarget(target: VisualControlTarget | undefined): string | null {
+
+	if ( target === undefined ) {
+		return '未找到控制标志配置。';
+	}
+
+	if ( target.cornersEnu === undefined || target.cornersEnu.length !== MARKER_CORNER_SEQUENCE.length ) {
+		return '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。';
+	}
+
+	if ( target.cornerOrder !== undefined ) {
+		const normalizedOrder = target.cornerOrder.map( normalizeMarkerCornerOrderValue );
+		if (
+			normalizedOrder.length !== EXPECTED_MARKER_CORNER_ORDER.length
+			|| normalizedOrder.some( ( value, index ) => value !== EXPECTED_MARKER_CORNER_ORDER[ index ] )
+		) {
+			return '控制标志 cornerOrder 必须为 leftTop、rightTop、rightBottom、leftBottom，且与采集顺序一致。';
+		}
+	}
+
+	return null;
+
+}
+
+function normalizeMarkerCornerOrderValue(value: string): MarkerCornerOrderValue | null {
+
+	switch ( value ) {
+		case 'top-left':
+		case 'leftTop':
+			return 'leftTop';
+		case 'top-right':
+		case 'rightTop':
+			return 'rightTop';
+		case 'bottom-right':
+		case 'rightBottom':
+			return 'rightBottom';
+		case 'bottom-left':
+		case 'leftBottom':
+			return 'leftBottom';
+		default:
+			return null;
 	}
 
 }

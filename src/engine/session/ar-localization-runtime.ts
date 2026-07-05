@@ -43,9 +43,20 @@ export class ArLocalizationRuntime {
 		) {
 			if ( activeMarkerSolution !== null ) {
 				console.warn( '[CurrentSessionLocalizationRejectedSessionMismatch]', {
+					mode: 'marker-corners-4',
+					workflowMode: null,
+					siteId: null,
+					modelId: null,
+					targetId: null,
+					currentCorner: null,
+					capturedPointCount: null,
+					arLocalPosition: null,
+					cornersEnu: null,
 					source: activeMarkerSolution.source,
 					solutionSessionId: activeMarkerSolution.sessionId ?? null,
 					currentSessionId: this.options.getCurrentSessionId(),
+					hitTestReady: null,
+					localizationReady: false,
 					createdAt: Date.now()
 				} );
 			}

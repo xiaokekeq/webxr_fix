@@ -11,7 +11,10 @@ import {
 	exportSceneSnapshot
 } from '@/engine/session/export-runtime.js';
 import { ArLocalizationRuntime } from '@/engine/session/ar-localization-runtime.js';
-import { RegistrationStateRuntime } from '@/engine/session/registration-state-runtime.js';
+import {
+	RegistrationStateRuntime,
+	hasMockEngineeringDataInConfig
+} from '@/engine/session/registration-state-runtime.js';
 import { SessionLifecycleRuntime } from '@/engine/session/session-lifecycle-runtime.js';
 import { createSceneHostRuntime, type SceneHostRuntimeHosts } from '@/engine/session/scene-host-runtime.js';
 import { createStatusRuntime } from '@/engine/session/status-runtime.js';
@@ -1746,6 +1749,30 @@ export class ThreeEngine {
 			return false;
 		}
 
+		const currentControlTargets = this.getCurrentControlTargets();
+		if (
+			this.demoModelConfig !== null
+			&& hasMockEngineeringDataInConfig( this.demoModelConfig, currentControlTargets )
+		) {
+			console.warn( '[MockEngineeringMarkerLocalizationRejected]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig.modelId,
+				modelId: this.demoModelConfig.modelId,
+				sessionId: this.currentArSessionId,
+				source: solution.arFromEnuSolution.source,
+				targetId: metadata.markerId,
+				capturedPointCount: solution.correspondenceCount,
+				hasCornersEnu: currentControlTargets.some(
+					(target) => (
+						target.id === metadata.markerId || target.markerId === metadata.markerId
+					) && target.cornersEnu !== undefined
+				),
+				createdAt: Date.now()
+			} );
+			this.setStatus( '当前为示例工程坐标，请替换为 RTK 实测数据后再完成正式空间校正。' );
+			return false;
+		}
+
 		const fallbackSolution = this.activeMarkerArFromEnuSolution === null
 			? this.getCurrentNonMarkerArFromEnuSolution()
 			: this.markerCorrectionFallbackArFromEnuSolution;
@@ -1764,15 +1791,19 @@ export class ThreeEngine {
 			rmsErrorMeters: solution.rmsErrorMeters,
 			sampleCount: solution.correspondenceCount
 		};
-		const currentTarget = this.getCurrentControlTargets()
+		const currentTarget = currentControlTargets
 			.find( ( target ) => target.id === metadata.markerId || target.markerId === metadata.markerId );
 		console.info( '[CurrentSessionLocalizationCached]', {
+			mode: 'marker-corners-4',
+			workflowMode: this.workflowMode,
 			siteId: this.demoModelConfig?.modelId ?? null,
 			modelId: this.demoModelConfig?.modelId ?? null,
 			sessionId: this.currentArSessionId,
 			targetId: metadata.markerId,
 			currentCorner: null,
 			capturedPointCount: solution.correspondenceCount,
+			arLocalPosition: null,
+			cornersEnu: currentTarget?.cornersEnu ?? null,
 			source: solution.arFromEnuSolution.source,
 			hasSiteOrigin: this.demoModelConfig !== null,
 			hasModelLocalToEnu: this.registrationSolution !== null,

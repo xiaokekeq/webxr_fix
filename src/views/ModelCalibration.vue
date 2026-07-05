@@ -235,8 +235,14 @@ const canCaptureMarkerCorner = computed(
 );
 const canApplyMarkerCalibration = computed(
 	() => canCaptureMarkerCorner.value
+		&& configStatus.value.hasMockEngineeringData === false
 		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
 );
+const markerApplyBlockedText = computed( () => (
+	configStatus.value.hasMockEngineeringData
+		? configStatus.value.mockWarningText || '当前为示例工程坐标，请替换为 RTK 实测数据。'
+		: ''
+) );
 const markerCornerPrompt = computed( () => {
 	if ( canUseMarkerCorners.value === false ) {
 		return '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。';
@@ -244,16 +250,16 @@ const markerCornerPrompt = computed( () => {
 
 	const label = engine.value.markerCalibration.nextCornerLabel;
 	if ( label.includes( '左上' ) || label.includes( 'leftTop' ) ) {
-		return '请将准星对准控制标志左上角并采集。';
+		return '请将准星对准控制标志左上角 LT，并点击采集。';
 	}
 	if ( label.includes( '右上' ) || label.includes( 'rightTop' ) ) {
-		return '请将准星对准控制标志右上角并采集。';
+		return '请将准星对准控制标志右上角 RT，并点击采集。';
 	}
 	if ( label.includes( '右下' ) || label.includes( 'rightBottom' ) ) {
-		return '请将准星对准控制标志右下角并采集。';
+		return '请将准星对准控制标志右下角 RB，并点击采集。';
 	}
 	if ( label.includes( '左下' ) || label.includes( 'leftBottom' ) ) {
-		return '请将准星对准控制标志左下角并采集。';
+		return '请将准星对准控制标志左下角 LB，并点击采集。';
 	}
 	return '请按左上角、右上角、右下角、左下角顺序采集控制标志四角。';
 } );
@@ -335,6 +341,18 @@ function handleCapturePrecisionCalibrationCorner(): void {
 	store.actions.captureCurrentSessionMarkerCorner();
 }
 
+async function handleResetPrecisionCalibration(): Promise<void> {
+	activePanelView.value = 'ar-check';
+	if ( engine.value.markerCalibration.active ) {
+		store.actions.cancelCurrentSessionMarkerCalibration();
+		await nextTick();
+	}
+	store.actions.startCurrentSessionMarkerCalibration();
+	await nextTick();
+	markerCalibrationOverlayOpen.value = engine.value.markerCalibration.active;
+	closeDrawerIfOpen();
+}
+
 async function handleSolvePrecisionCalibration(): Promise<void> {
 	activePanelView.value = 'ar-check';
 	store.actions.solveAndApplyCurrentSessionMarkerCalibration();
@@ -345,7 +363,7 @@ async function handleSolvePrecisionCalibration(): Promise<void> {
 
 async function handleExitPrecisionCalibration(): Promise<void> {
 	if ( engine.value.markerCalibration.active ) {
-		store.actions.resetCurrentSessionMarkerCalibration();
+		store.actions.cancelCurrentSessionMarkerCalibration();
 	}
 	markerCalibrationOverlayOpen.value = false;
 	await nextTick();
@@ -508,6 +526,12 @@ function setArOverlayClass(active: boolean): void {
 						<div class="runtime-banner">
 							当前 ENU 数组顺序为 [east, north, up]。
 						</div>
+						<div class="runtime-banner">
+							请将控制标志固定在地面，四角清晰可见，并按 LT / RT / RB / LB 顺序采集。
+						</div>
+						<div v-if="configStatus.activeControlTargetHasCornersEnu === false" class="runtime-banner warning">
+							当前控制标志缺少四角点工程坐标，无法进行四角点校正。
+						</div>
 					</ArPanelSection>
 				</template>
 
@@ -554,6 +578,7 @@ function setArOverlayClass(active: boolean): void {
 		<section
 			v-if="showMarkerCalibrationOverlay"
 			class="marker-calibration-overlay"
+			data-ar-ui="true"
 			@pointerdown.stop="store.actions.handleArUiInteraction()"
 			@click.stop
 		>
@@ -563,6 +588,9 @@ function setArOverlayClass(active: boolean): void {
 				<span>{{ engine.markerCalibration.nextCornerLabel || '-' }}</span>
 			</div>
 			<div class="marker-calibration-hint">{{ markerCornerPrompt }}</div>
+			<div v-if="markerApplyBlockedText" class="marker-calibration-warning">
+				{{ markerApplyBlockedText }}
+			</div>
 			<div class="marker-calibration-actions">
 				<button
 					type="button"
@@ -579,6 +607,9 @@ function setArOverlayClass(active: boolean): void {
 					@click="handleSolvePrecisionCalibration()"
 				>
 					完成校正
+				</button>
+				<button type="button" class="marker-action" @click="handleResetPrecisionCalibration()">
+					重置采集
 				</button>
 				<button type="button" class="marker-action" @click="handleExitPrecisionCalibration()">
 					退出
@@ -873,9 +904,19 @@ function setArOverlayClass(active: boolean): void {
 	color: rgba(226, 232, 240, 0.86);
 }
 
+.marker-calibration-warning {
+	padding: 7px 9px;
+	border-radius: 11px;
+	background: rgba(245, 158, 11, 0.14);
+	border: 1px solid rgba(245, 158, 11, 0.3);
+	color: #ffe8b6;
+	font-size: 11px;
+	line-height: 1.4;
+}
+
 .marker-calibration-actions {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 8px;
 }
 

@@ -204,6 +204,16 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 	}
 
+	function handleCancelCurrentSessionMarkerCalibration(): void {
+
+		ensureController().actions.resetCurrentSessionMarkerCalibration();
+		patchUiState( {
+			drawerOpen: false,
+			registrationView: 'overview'
+		} );
+
+	}
+
 	function handleSolveAndApplyCurrentSessionMarkerCalibration(): void {
 
 		const applied = ensureController().actions.solveAndApplyCurrentSessionMarkerCalibration();
@@ -329,6 +339,12 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		resetCurrentSessionMarkerCalibration(): void {
 
 			handleResetCurrentSessionMarkerCalibration();
+
+		},
+
+		cancelCurrentSessionMarkerCalibration(): void {
+
+			handleCancelCurrentSessionMarkerCalibration();
 
 		},
 

@@ -578,7 +578,7 @@ function formatModelLocalToEnuSource(
 
 }
 
-function hasMockEngineeringDataInConfig(
+export function hasMockEngineeringDataInConfig(
 	config: DemoModelConfig,
 	controlTargets: VisualControlTarget[]
 ): boolean {
