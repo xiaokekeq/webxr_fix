@@ -25,7 +25,7 @@ const TEXT = {
 	status: '状态',
 	waiting: '待进入 AR',
 	scanning: '正在扫描平面',
-	ready: '平面已检测',
+	ready: '平面已识别，等待空间校正',
 	placing: '正在应用校验放置',
 	placed: '校验中',
 	panelTool: '校验面板',

@@ -32,6 +32,7 @@ export interface XrImageTrackingObservation {
 	trackingState: string;
 	position: [ number, number, number ];
 	rotation: [ number, number, number, number ];
+	measuredWidthInMeters?: number;
 	timestamp: number;
 }
 

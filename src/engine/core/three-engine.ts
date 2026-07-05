@@ -31,6 +31,7 @@ import {
 	createDefaultSavedMarkerLocalizationState,
 	createDefaultSiteCalibrationBaselineState,
 	createDefaultEngineeringConfigStatusState,
+	createDefaultMarkerAutoImageState,
 	createDefaultTargetGuidanceState,
 	createRegistrationStore,
 	type AnnotationDetailState,
@@ -164,6 +165,7 @@ function createInitialState(): RegistrationStoreState {
 		engineeringConfigStatus: createDefaultEngineeringConfigStatusState(),
 		savedMarkerLocalization: createDefaultSavedMarkerLocalizationState(),
 		markerCalibration: createDefaultMarkerCalibrationState(),
+		markerAutoImage: createDefaultMarkerAutoImageState(),
 		placementSummary: {
 			positionText: '-',
 			quaternionText: '-',
@@ -249,6 +251,7 @@ export class ThreeEngine {
 	private currentArSessionContext: ArSessionContext | null = null;
 	private currentArSessionId: string | null = null;
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
+	private arSessionEndPending = false;
 	private lastAnnotationLabelsSignature = '';
 	private lastArSessionContextLogSignature = '';
 	private siteBaselineLoadRequestId = 0;
@@ -380,6 +383,19 @@ export class ThreeEngine {
 			startManualCalibration: ( message ) => {
 				this.markerCalibrationRuntime.startCurrentSessionCalibration();
 				this.setStatus( message );
+			},
+			updateAutoImageState: ( patch ) => {
+				const current = this.store.getState().markerAutoImage;
+				this.store.patch( {
+					markerAutoImage: {
+						...current,
+						...patch
+					}
+				} );
+				if ( typeof patch.message === 'string' && patch.message.length > 0 ) {
+					statusRuntime.setStatus( patch.message );
+				}
+				this.emit();
 			},
 			onStableObservation: ( targetId, observation, stableFrameCount ) => {
 				return this.markerCalibrationRuntime.solveAndApplyAutoImageCalibration( targetId, observation, stableFrameCount );
@@ -708,6 +724,7 @@ export class ThreeEngine {
 				this.displayModeController.updateDepthState( frame );
 				this.inspectionMarkerWorkflow.syncHints();
 				this.placementSession.updateArPlacementAnchor( frame );
+				this.syncArSessionPhase();
 				this.annotationLabelsController.update( this.sceneBundle.renderer.xr.getCamera() );
 				this.updateTargetGuidance();
 				this.placementSession.verifyWorldLockedPlacement( 'xr-frame' );
@@ -1401,13 +1418,28 @@ export class ThreeEngine {
 
 	exitAr(): void {
 
+		if ( this.arSessionEndPending ) {
+			this.setStatus( '正在退出 AR，请稍候。' );
+			return;
+		}
+
 		const session = this.sceneBundle.renderer.xr.getSession();
 		if ( session === null ) {
 			this.setStatus( '当前没有活动中的 AR 会话。' );
 			return;
 		}
 
-		void session.end();
+		this.arSessionEndPending = true;
+		this.setStatus( '正在退出 AR 会话...' );
+		void session.end().catch( ( error: unknown ) => {
+			console.warn( '[ArSessionEndFailed]', error );
+			this.arSessionEndPending = false;
+			this.setStatus(
+				error instanceof Error
+					? `AR 会话退出失败：${error.message}`
+					: 'AR 会话退出失败，请稍后重试。'
+			);
+		} );
 
 	}
 
@@ -2054,6 +2086,7 @@ export class ThreeEngine {
 
 	private handleXRSessionEnd(): void {
 
+		this.arSessionEndPending = false;
 		this.sessionLifecycleRuntime.handleXRSessionEnd();
 
 	}

@@ -475,6 +475,25 @@ export class MarkerCalibrationRuntime {
 			),
 			timestamp: observation.timestamp
 		};
+		console.info( '[MarkerAutoImagePoseResolved]', {
+			mode: this.options.getWorkflowMode(),
+			siteId: this.options.getSiteId(),
+			modelId: this.options.getDemoModelConfig()?.modelId ?? null,
+			sessionId: currentSessionId,
+			targetId,
+			imageUrl: controlTarget.imageUrl ?? controlTarget.patternUrl ?? null,
+			trackingWidthMeters: controlTarget.trackingWidthMeters ?? controlTarget.sizeMeters ?? null,
+			measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+			trackingState: observation.trackingState,
+			stableFrameCount,
+			reason: 'webxr-image-space-pose',
+			position: {
+				x: observation.position[ 0 ],
+				y: observation.position[ 1 ],
+				z: observation.position[ 2 ]
+			},
+			createdAt: observation.timestamp
+		} );
 		const solution = solveMarkerLocalization( {
 			markerId: targetId,
 			markerPoseInEnu,
@@ -517,6 +536,22 @@ export class MarkerCalibrationRuntime {
 				sessionId: currentSessionId,
 				targetId,
 				source: solution.arFromEnuSolution.source,
+				rmsErrorMeters: solution.rmsErrorMeters,
+				headingDeg: solution.headingDeg,
+				createdAt: Date.now()
+			} );
+			console.info( '[MarkerAutoImageLocalizationApplied]', {
+				mode: this.options.getWorkflowMode(),
+				siteId: this.options.getSiteId(),
+				modelId: this.options.getDemoModelConfig()?.modelId ?? null,
+				sessionId: currentSessionId,
+				targetId,
+				imageUrl: controlTarget.imageUrl ?? controlTarget.patternUrl ?? null,
+				trackingWidthMeters: controlTarget.trackingWidthMeters ?? controlTarget.sizeMeters ?? null,
+				measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+				trackingState: observation.trackingState,
+				stableFrameCount,
+				reason: 'localization-applied',
 				rmsErrorMeters: solution.rmsErrorMeters,
 				headingDeg: solution.headingDeg,
 				createdAt: Date.now()

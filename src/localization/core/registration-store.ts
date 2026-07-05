@@ -9,6 +9,21 @@ export type ArSupportState = 'checking' | 'supported' | 'unsupported';
 export type ArSessionPhase = 'scanning' | 'ready-to-place' | 'placing' | 'placed';
 export type ArPlacementMode = 'localized' | 'hit-test-temporary';
 export type InspectionPlacementSource = 'marker-auto' | 'plane-hit-test';
+export type MarkerAutoImageUiState =
+	| 'idle'
+	| 'preparing-tracked-images'
+	| 'tracked-images-ready'
+	| 'image-tracking-requested'
+	| 'image-tracking-unsupported'
+	| 'image-tracking-api-missing'
+	| 'tracked-images-empty'
+	| 'image-load-failed'
+	| 'waiting-for-marker'
+	| 'marker-observed'
+	| 'marker-stabilizing'
+	| 'width-mismatch-warning'
+	| 'localization-applied'
+	| 'fallback-manual';
 export type ArDisplayMode =
 	| 'solid-overlay'
 	| 'transparent-xray'
@@ -163,6 +178,31 @@ export interface MarkerCalibrationState {
 	lastUpdatedAt?: number;
 }
 
+export interface MarkerAutoImageState {
+	state: MarkerAutoImageUiState;
+	message: string;
+	modeText: string;
+	targetId: string | null;
+	targetName: string;
+	imageUrl: string;
+	imageLoadStatus: 'success' | 'failed' | 'missing' | 'pending' | 'unknown';
+	imageFormatText: string;
+	trackingWidthMeters: number | null;
+	trackingWidthMetersText: string;
+	measuredWidthInMeters: number | null;
+	measuredWidthInMetersText: string;
+	browserSupportText: string;
+	recentObservationText: string;
+	stableFrameCount: number;
+	requiredStableFrameCount: number;
+	stableFrameText: string;
+	trackingState: string;
+	fallbackText: string;
+	canFallbackManual: boolean;
+	reason: string;
+	lastUpdatedAt: number | null;
+}
+
 export interface PlacementSummaryState {
 	positionText: string;
 	quaternionText: string;
@@ -231,6 +271,7 @@ export interface RegistrationStoreState {
 	engineeringConfigStatus: EngineeringConfigStatusState;
 	savedMarkerLocalization: SavedMarkerLocalizationState;
 	markerCalibration: MarkerCalibrationState;
+	markerAutoImage: MarkerAutoImageState;
 	placementSummary: PlacementSummaryState;
 	targetGuidance: TargetGuidanceState;
 	annotationDetail: AnnotationDetailState;
@@ -444,6 +485,35 @@ export function createDefaultMarkerCalibrationState(): MarkerCalibrationState {
 		canSolve: false,
 		solved: false,
 		applied: false
+	};
+
+}
+
+export function createDefaultMarkerAutoImageState(): MarkerAutoImageState {
+
+	return {
+		state: 'idle',
+		message: '尚未开始自动控制标志识别。',
+		modeText: '未开始',
+		targetId: null,
+		targetName: '-',
+		imageUrl: '-',
+		imageLoadStatus: 'unknown',
+		imageFormatText: '-',
+		trackingWidthMeters: null,
+		trackingWidthMetersText: '-',
+		measuredWidthInMeters: null,
+		measuredWidthInMetersText: '-',
+		browserSupportText: '未知',
+		recentObservationText: '无',
+		stableFrameCount: 0,
+		requiredStableFrameCount: 3,
+		stableFrameText: '0 / 3',
+		trackingState: 'unknown',
+		fallbackText: '可用',
+		canFallbackManual: false,
+		reason: 'idle',
+		lastUpdatedAt: null
 	};
 
 }

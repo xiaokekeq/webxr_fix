@@ -169,7 +169,7 @@ export class SessionLifecycleRuntime {
 				hasHitTest: this.options.hasGroundHit(),
 				createdAt: Date.now()
 			} );
-			this.options.setStatus( '空间校正完成，模型已自动放置。' );
+			this.options.setStatus( '模型已按工程坐标显示，未强制贴地。' );
 			return;
 		}
 
@@ -224,7 +224,7 @@ export class SessionLifecycleRuntime {
 		this.options.applyModelLayerVisibility();
 		this.handlePlacementCompleted();
 		this.options.syncSceneHost();
-		this.options.setStatus( '已按当前 hit-test 平面临时放置模型，该结果不作为正式巡查定位。' );
+		this.options.setStatus( '当前为临时演示放置，模型底部已对齐地面，不代表工程真实位置。' );
 		this.options.emit();
 
 	}

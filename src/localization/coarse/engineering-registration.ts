@@ -39,6 +39,9 @@ export interface EngineeringRegistrationSolution {
 	rootHeadingDeg: number;
 	modelPivotOffset: THREE.Vector3;
 	modelUnitScale: number;
+	placementAnchorModelLocal?: THREE.Vector3;
+	placementAnchorMeaning?: string;
+	visualGroundOffsetMeters: number;
 }
 
 const tempRotated = new THREE.Vector3();
@@ -110,7 +113,10 @@ export function solveEngineeringRegistration(
 		rootWorldGeodetic,
 		rootHeadingDeg,
 		modelPivotOffset,
-		modelUnitScale
+		modelUnitScale,
+		placementAnchorModelLocal: tupleToVector3( config.placementAnchorModelLocal ),
+		placementAnchorMeaning: config.placementAnchorMeaning,
+		visualGroundOffsetMeters: config.visualGroundOffsetMeters
 	};
 
 }
@@ -332,6 +338,14 @@ function computeRmsError(
 	}
 
 	return Math.sqrt( sumSquaredError / sourcePoints.length );
+
+}
+
+function tupleToVector3(value: [ number, number, number ] | undefined): THREE.Vector3 | undefined {
+
+	return value === undefined
+		? undefined
+		: new THREE.Vector3( value[ 0 ], value[ 1 ], value[ 2 ] );
 
 }
 

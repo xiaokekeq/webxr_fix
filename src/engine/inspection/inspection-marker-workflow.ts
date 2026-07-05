@@ -8,13 +8,35 @@ import type {
 	ArWorkflowMode,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
-import type { InspectionPlacementSource } from '@/localization/core/registration-store.js';
+import type {
+	InspectionPlacementSource,
+	MarkerAutoImageState,
+	MarkerAutoImageUiState
+} from '@/localization/core/registration-store.js';
 import { getControlTargetImageUrl, isPattFileUrl } from '@/localization/baseline/site-calibration-baseline.js';
 
 const AUTO_MARKER_STABLE_FRAME_COUNT = 3;
 const AUTO_MARKER_MAX_POSITION_JITTER_METERS = 0.15;
 const AUTO_MARKER_MAX_ROTATION_JITTER_DEGREES = 5;
 const AUTO_MARKER_FALLBACK_TIMEOUT_MS = 8000;
+const AUTO_MARKER_WIDTH_WARNING_RATIO = 0.15;
+
+const MARKER_AUTO_IMAGE_MESSAGES: Record<MarkerAutoImageUiState, string> = {
+	idle: '尚未开始自动控制标志识别。',
+	'preparing-tracked-images': '正在准备控制标志图片。',
+	'tracked-images-ready': '控制标志图片已加载，请将现场 Marker 放入画面。',
+	'image-tracking-requested': '正在尝试自动识别控制标志。',
+	'image-tracking-unsupported': '当前浏览器不支持自动控制标志识别，请使用手动四角点校正。',
+	'image-tracking-api-missing': '当前 WebXR 会话不支持 getImageTrackingResults，请使用手动四角点校正。',
+	'tracked-images-empty': '当前模型未配置可识别控制标志图片，请使用手动四角点校正。',
+	'image-load-failed': '控制标志图片加载失败，请检查 imageUrl。',
+	'waiting-for-marker': '请将控制标志完整放入画面，并保持 1-2 秒。',
+	'marker-observed': '已检测到控制标志，正在确认稳定性。',
+	'marker-stabilizing': '控制标志识别中，请保持手机稳定。',
+	'width-mismatch-warning': '识别宽度与配置不一致，请检查打印尺寸或 trackingWidthMeters。',
+	'localization-applied': '自动控制标志校正完成，模型已按工程坐标显示。',
+	'fallback-manual': '自动识别不可用，请使用手动四角点校正。'
+};
 
 const STATUS_SCAN_PLANE_AND_ALIGN_MARKER = '请先扫描平面，等待 AR 跟踪稳定，然后对准现场控制标志完成空间校正。';
 const STATUS_AUTO_TRACKING_MARKER = '自动控制标志识别中，请让控制标志保持在视野中。';
@@ -41,11 +63,41 @@ interface InspectionMarkerWorkflowOptions {
 	setStatus(message: string): void;
 	requestPreferredPlacement(): void;
 	startManualCalibration(message: string): void;
+	updateAutoImageState(patch: Partial<MarkerAutoImageState>): void;
 	onStableObservation(
 		targetId: string,
 		observation: XrImageTrackingObservation,
 		stableFrameCount: number
 	): boolean;
+}
+
+function formatMeters(value: number | null | undefined): string {
+
+	return typeof value === 'number' && Number.isFinite( value )
+		? `${value.toFixed( 3 )}m`
+		: '-';
+
+}
+
+function getImageFormatText(url: string | null | undefined): string {
+
+	if ( typeof url !== 'string' || url.trim().length === 0 || url === '-' ) {
+		return '未配置';
+	}
+
+	if ( isPattFileUrl( url ) ) {
+		return '.patt 不支持';
+	}
+
+	const match = url.trim().toLowerCase().match( /\.(png|jpe?g|webp)(?:$|\?)/ );
+	if ( match === null ) {
+		return '不支持';
+	}
+
+	return match[ 1 ] === 'jpg' || match[ 1 ] === 'jpeg'
+		? 'JPG'
+		: match[ 1 ].toUpperCase();
+
 }
 
 export class InspectionMarkerWorkflow {
@@ -79,10 +131,18 @@ export class InspectionMarkerWorkflow {
 		}
 
 		const siteId = this.options.getSiteId();
+		this.patchAutoImageState( 'preparing-tracked-images', {
+			reason: 'preparing-tracked-images'
+		} );
 		const trackedImages = this.options.getControlTargets()
 			.flatMap( ( target ) => this.createTrackedImageDefinition( target, siteId ) );
 
 		if ( trackedImages.length === 0 ) {
+			this.patchAutoImageState( 'tracked-images-empty', {
+				imageLoadStatus: 'missing',
+				reason: 'no-trackable-image',
+				canFallbackManual: true
+			} );
 			console.info( '[ArInspectionTrackedImagesEmpty]', {
 				mode: this.options.getWorkflowMode(),
 				siteId: siteId ?? null,
@@ -95,6 +155,10 @@ export class InspectionMarkerWorkflow {
 			return [];
 		}
 
+		this.patchAutoImageState( 'tracked-images-ready', {
+			imageLoadStatus: 'pending',
+			reason: 'tracked-image-definitions-ready'
+		} );
 		for ( const trackedImage of trackedImages ) {
 			console.info( '[ArInspectionTrackedImagePrepared]', {
 				mode: this.options.getWorkflowMode(),
@@ -133,6 +197,17 @@ export class InspectionMarkerWorkflow {
 			active: false,
 			reason: trackedImages.length > 0 ? 'awaiting-session' : 'no-targets'
 		};
+		this.patchAutoImageState(
+			trackedImages.length > 0 ? 'image-tracking-requested' : 'tracked-images-empty',
+			{
+				stableFrameCount: 0,
+				trackingState: 'unknown',
+				recentObservationText: '无',
+				browserSupportText: '未知',
+				reason: trackedImages.length > 0 ? 'awaiting-session' : 'no-targets',
+				canFallbackManual: trackedImages.length === 0
+			}
+		);
 
 		if ( this.options.getWorkflowMode() !== 'ar-inspection' ) {
 			return;
@@ -185,6 +260,23 @@ export class InspectionMarkerWorkflow {
 		this.planeReadyLogged = false;
 		this.preferredPlacementRequested = false;
 		this.autoNotReadyLogged = false;
+		this.patchAutoImageState( 'idle', {
+			targetId: null,
+			targetName: '-',
+			imageUrl: '-',
+			imageLoadStatus: 'unknown',
+			imageFormatText: '-',
+			trackingWidthMeters: null,
+			trackingWidthMetersText: '-',
+			measuredWidthInMeters: null,
+			measuredWidthInMetersText: '-',
+			browserSupportText: '未知',
+			recentObservationText: '无',
+			stableFrameCount: 0,
+			trackingState: 'unknown',
+			canFallbackManual: false,
+			reason: 'stopped'
+		} );
 
 	}
 
@@ -196,6 +288,11 @@ export class InspectionMarkerWorkflow {
 			active: false,
 			reason: 'manual-corners'
 		};
+		this.patchAutoImageState( 'fallback-manual', {
+			modeText: '手动四角点',
+			canFallbackManual: false,
+			reason: 'manual-corners'
+		} );
 
 	}
 
@@ -208,6 +305,12 @@ export class InspectionMarkerWorkflow {
 			supported: true,
 			reason: 'applied'
 		};
+		this.patchAutoImageState( 'localization-applied', {
+			browserSupportText: '支持',
+			recentObservationText: '已观测',
+			canFallbackManual: false,
+			reason: 'applied'
+		} );
 
 	}
 
@@ -246,6 +349,12 @@ export class InspectionMarkerWorkflow {
 		}
 
 		if ( state.requested && state.supported && state.active ) {
+			this.patchAutoImageState( 'waiting-for-marker', {
+				imageLoadStatus: 'success',
+				browserSupportText: '支持',
+				trackingState: 'waiting',
+				reason: state.reason
+			} );
 			this.options.setStatus(
 				this.options.hasGroundHit()
 					? STATUS_AUTO_TRACKING_MARKER
@@ -255,8 +364,22 @@ export class InspectionMarkerWorkflow {
 		}
 
 		if ( state.reason === 'image-load-failed' && this.fallbackTriggered === false ) {
+			this.patchAutoImageState( 'image-load-failed', {
+				imageLoadStatus: 'failed',
+				browserSupportText: '未知',
+				reason: state.reason,
+				canFallbackManual: true
+			} );
 			this.fallbackToManual( STATUS_MANUAL_IMAGE_LOAD_FAILED );
 			return;
+		}
+
+		if ( state.reason === 'frame-api-missing' ) {
+			this.patchAutoImageState( 'image-tracking-api-missing', {
+				browserSupportText: '不支持',
+				reason: state.reason,
+				canFallbackManual: true
+			} );
 		}
 
 		if (
@@ -276,6 +399,14 @@ export class InspectionMarkerWorkflow {
 				hasHitTest: this.options.hasGroundHit(),
 				createdAt: Date.now()
 			} ) );
+			this.patchAutoImageState(
+				state.reason === 'frame-api-missing' ? 'image-tracking-api-missing' : 'image-tracking-unsupported',
+				{
+					browserSupportText: '不支持',
+					reason: state.reason,
+					canFallbackManual: true
+				}
+			);
 			this.fallbackToManual( STATUS_MANUAL_UNSUPPORTED );
 		}
 
@@ -303,10 +434,56 @@ export class InspectionMarkerWorkflow {
 		} ) );
 
 		if ( observation.trackingState !== 'tracked' ) {
+			this.patchAutoImageState( 'marker-observed', {
+				targetId: observation.targetId,
+				recentObservationText: '已观测',
+				trackingState: observation.trackingState,
+				measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+				measuredWidthInMetersText: formatMeters( observation.measuredWidthInMeters ),
+				reason: 'tracking-state-not-tracked'
+			} );
 			return;
 		}
 
 		this.lastObservationAt = observation.timestamp;
+		const widthWarning = this.getWidthMismatchWarning( observation.targetId, observation.measuredWidthInMeters );
+		if ( widthWarning !== null ) {
+			console.warn( '[MarkerAutoImageWidthMismatchWarning]', {
+				...this.buildLogPayload( {
+					targetId: observation.targetId,
+					source: 'marker-auto-image',
+					trackingState: observation.trackingState,
+					stableFrameCount: this.stableFrameCount,
+					hasHitTest: this.options.hasGroundHit(),
+					createdAt: observation.timestamp
+				} ),
+				imageUrl: widthWarning.imageUrl,
+				trackingWidthMeters: widthWarning.trackingWidthMeters,
+				measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+				reason: widthWarning.reason
+			} );
+			this.patchAutoImageState( 'width-mismatch-warning', {
+				targetId: observation.targetId,
+				imageUrl: widthWarning.imageUrl,
+				trackingWidthMeters: widthWarning.trackingWidthMeters,
+				trackingWidthMetersText: formatMeters( widthWarning.trackingWidthMeters ),
+				measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+				measuredWidthInMetersText: formatMeters( observation.measuredWidthInMeters ),
+				recentObservationText: '已观测',
+				trackingState: observation.trackingState,
+				reason: widthWarning.reason,
+				canFallbackManual: true
+			} );
+		} else {
+			this.patchAutoImageState( 'marker-observed', {
+				targetId: observation.targetId,
+				recentObservationText: '已观测',
+				trackingState: observation.trackingState,
+				measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+				measuredWidthInMetersText: formatMeters( observation.measuredWidthInMeters ),
+				reason: 'marker-observed'
+			} );
+		}
 		if ( this.stableTargetId !== observation.targetId ) {
 			this.stableTargetId = observation.targetId;
 			this.stableFrameCount = 0;
@@ -325,6 +502,33 @@ export class InspectionMarkerWorkflow {
 			hasHitTest: this.options.hasGroundHit(),
 			createdAt: observation.timestamp
 		} ) );
+		console.info( '[MarkerAutoImageStabilizing]', {
+			...this.buildLogPayload( {
+				targetId: observation.targetId,
+				source: 'marker-auto-image',
+				trackingState: 'stabilizing',
+				stableFrameCount: this.stableFrameCount,
+				hasHitTest: this.options.hasGroundHit(),
+				createdAt: observation.timestamp
+			} ),
+			measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+			reason: this.isStable() ? 'stable' : 'waiting-for-stable-samples'
+		} );
+		if ( widthWarning === null ) {
+			this.patchAutoImageState(
+				this.stableFrameCount >= AUTO_MARKER_STABLE_FRAME_COUNT ? 'marker-stabilizing' : 'marker-observed',
+				{
+					targetId: observation.targetId,
+					stableFrameCount: this.stableFrameCount,
+					stableFrameText: `${this.stableFrameCount} / ${AUTO_MARKER_STABLE_FRAME_COUNT}`,
+					recentObservationText: '已观测',
+					trackingState: observation.trackingState,
+					measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+					measuredWidthInMetersText: formatMeters( observation.measuredWidthInMeters ),
+					reason: 'stabilizing'
+				}
+			);
+		}
 		this.options.setStatus(
 			this.stableFrameCount >= AUTO_MARKER_STABLE_FRAME_COUNT
 				? STATUS_STABILIZING_MARKER
@@ -332,6 +536,19 @@ export class InspectionMarkerWorkflow {
 		);
 
 		if ( this.samples.length < AUTO_MARKER_STABLE_FRAME_COUNT || this.isStable() === false ) {
+			if ( this.samples.length >= AUTO_MARKER_STABLE_FRAME_COUNT ) {
+				this.patchAutoImageState( 'marker-stabilizing', {
+					targetId: observation.targetId,
+					stableFrameCount: this.stableFrameCount,
+					stableFrameText: `${this.stableFrameCount} / ${AUTO_MARKER_STABLE_FRAME_COUNT}`,
+					recentObservationText: '已观测',
+					trackingState: observation.trackingState,
+					measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
+					measuredWidthInMetersText: formatMeters( observation.measuredWidthInMeters ),
+					canFallbackManual: true,
+					reason: 'unstable-observation'
+				} );
+			}
 			return;
 		}
 
@@ -378,6 +595,10 @@ export class InspectionMarkerWorkflow {
 			&& this.autoNotReadyLogged === false
 		) {
 			this.autoNotReadyLogged = true;
+			this.patchAutoImageState( 'waiting-for-marker', {
+				reason: 'no-observation-timeout',
+				canFallbackManual: true
+			} );
 			this.options.setStatus( STATUS_AUTO_TRACKING_NOT_READY );
 			console.info( '[ArUiMarkerAlignmentPromptShown]', this.buildUiLogPayload( {
 				currentStep: 'marker-auto-image-not-yet-observed',
@@ -396,6 +617,17 @@ export class InspectionMarkerWorkflow {
 
 		const imageUrl = getControlTargetImageUrl( target );
 		if ( imageUrl === null ) {
+			this.patchAutoImageState( 'tracked-images-empty', {
+				targetId: target.id,
+				targetName: target.name ?? target.markerId ?? target.id,
+				imageUrl: target.imageUrl ?? target.patternUrl ?? '-',
+				imageLoadStatus: 'missing',
+				imageFormatText: getImageFormatText( target.imageUrl ?? target.patternUrl ),
+				trackingWidthMeters: target.trackingWidthMeters ?? target.sizeMeters ?? null,
+				trackingWidthMetersText: formatMeters( target.trackingWidthMeters ?? target.sizeMeters ),
+				canFallbackManual: true,
+				reason: 'invalid-image-url'
+			} );
 			console.warn(
 				typeof target.patternUrl === 'string' && isPattFileUrl( target.patternUrl )
 					? '[MarkerImageUrlInvalidPattFile]'
@@ -419,6 +651,17 @@ export class InspectionMarkerWorkflow {
 			|| Number.isFinite( widthInMeters ) === false
 			|| widthInMeters <= 0
 		) {
+			this.patchAutoImageState( 'tracked-images-empty', {
+				targetId: target.id,
+				targetName: target.name ?? target.markerId ?? target.id,
+				imageUrl,
+				imageLoadStatus: 'success',
+				imageFormatText: getImageFormatText( imageUrl ),
+				trackingWidthMeters: null,
+				trackingWidthMetersText: '-',
+				canFallbackManual: true,
+				reason: 'invalid-tracking-width'
+			} );
 			return [];
 		}
 
@@ -492,6 +735,14 @@ export class InspectionMarkerWorkflow {
 			active: false,
 			reason: 'fallback-manual'
 		};
+		const target = this.getTarget( this.stableTargetId ?? this.options.getPrimaryTargetId() );
+		this.patchAutoImageState( 'fallback-manual', {
+			targetId: this.stableTargetId ?? this.options.getPrimaryTargetId(),
+			targetName: target?.name ?? target?.markerId ?? target?.id ?? '-',
+			modeText: '手动四角点',
+			canFallbackManual: false,
+			reason: 'fallback-manual'
+		} );
 		console.info( '[AutoMarkerFallbackToManualCorners]', this.buildLogPayload( {
 			targetId: this.stableTargetId ?? this.options.getPrimaryTargetId(),
 			source: 'marker-auto-image',
@@ -500,6 +751,20 @@ export class InspectionMarkerWorkflow {
 			hasHitTest: this.options.hasGroundHit(),
 			createdAt: Date.now()
 		} ) );
+		console.info( '[MarkerAutoImageFallbackManual]', {
+			...this.buildLogPayload( {
+				targetId: this.stableTargetId ?? this.options.getPrimaryTargetId(),
+				source: 'marker-auto-image',
+				trackingState: 'fallback-manual',
+				stableFrameCount: this.stableFrameCount,
+				hasHitTest: this.options.hasGroundHit(),
+				createdAt: Date.now()
+			} ),
+			imageUrl: target?.imageUrl ?? target?.patternUrl ?? null,
+			trackingWidthMeters: target?.trackingWidthMeters ?? target?.sizeMeters ?? null,
+			measuredWidthInMeters: this.samples[ this.samples.length - 1 ]?.measuredWidthInMeters ?? null,
+			reason: 'fallback-manual'
+		} );
 		console.info( '[ArUiMarkerAutoImageUnavailableFallbackManual]', this.buildUiLogPayload( {
 			currentStep: 'fallback-manual-corners',
 			localizationSource: 'marker-auto-image',
@@ -578,6 +843,104 @@ export class InspectionMarkerWorkflow {
 		}
 
 		return true;
+
+	}
+
+	private patchAutoImageState(
+		state: MarkerAutoImageUiState,
+		patch: Partial<MarkerAutoImageState> = {}
+	): void {
+
+		const target = this.getTarget( patch.targetId ?? this.stableTargetId ?? this.options.getPrimaryTargetId() );
+		const imageUrl = patch.imageUrl ?? target?.imageUrl ?? target?.patternUrl ?? '-';
+		const trackingWidthMeters = patch.trackingWidthMeters
+			?? target?.trackingWidthMeters
+			?? target?.sizeMeters
+			?? null;
+		const stableFrameCount = patch.stableFrameCount ?? this.stableFrameCount;
+		const measuredWidthInMeters = patch.measuredWidthInMeters ?? null;
+
+		this.options.updateAutoImageState( {
+			state,
+			message: patch.message ?? MARKER_AUTO_IMAGE_MESSAGES[ state ],
+			modeText: patch.modeText ?? this.resolveModeText(),
+			targetId: patch.targetId ?? target?.id ?? null,
+			targetName: patch.targetName ?? target?.name ?? target?.markerId ?? target?.id ?? '-',
+			imageUrl,
+			imageLoadStatus: patch.imageLoadStatus ?? 'unknown',
+			imageFormatText: patch.imageFormatText ?? getImageFormatText( imageUrl ),
+			trackingWidthMeters,
+			trackingWidthMetersText: patch.trackingWidthMetersText ?? formatMeters( trackingWidthMeters ),
+			measuredWidthInMeters,
+			measuredWidthInMetersText: patch.measuredWidthInMetersText ?? formatMeters( measuredWidthInMeters ),
+			browserSupportText: patch.browserSupportText ?? '未知',
+			recentObservationText: patch.recentObservationText ?? '无',
+			stableFrameCount,
+			requiredStableFrameCount: AUTO_MARKER_STABLE_FRAME_COUNT,
+			stableFrameText: patch.stableFrameText ?? `${stableFrameCount} / ${AUTO_MARKER_STABLE_FRAME_COUNT}`,
+			trackingState: patch.trackingState ?? this.imageTrackingState.reason,
+			fallbackText: patch.fallbackText ?? '可用',
+			canFallbackManual: patch.canFallbackManual ?? false,
+			reason: patch.reason ?? state,
+			lastUpdatedAt: Date.now()
+		} );
+
+	}
+
+	private resolveModeText(): string {
+
+		if ( this.options.getInspectionPlacementSource() !== 'marker-auto' ) {
+			return '未开始';
+		}
+
+		return this.fallbackTriggered ? '手动四角点' : '自动识别';
+
+	}
+
+	private getTarget(targetId: string | null): VisualControlTarget | null {
+
+		const targets = this.options.getControlTargets();
+		if ( targetId !== null ) {
+			return targets.find( ( target ) => target.id === targetId || target.markerId === targetId ) ?? null;
+		}
+
+		return targets[ 0 ] ?? null;
+
+	}
+
+	private getWidthMismatchWarning(
+		targetId: string,
+		measuredWidthInMeters: number | undefined
+	): {
+		imageUrl: string;
+		trackingWidthMeters: number;
+		reason: string;
+	} | null {
+
+		if ( typeof measuredWidthInMeters !== 'number' || Number.isFinite( measuredWidthInMeters ) === false ) {
+			return null;
+		}
+
+		const target = this.getTarget( targetId );
+		const trackingWidthMeters = target?.trackingWidthMeters ?? target?.sizeMeters;
+		if (
+			typeof trackingWidthMeters !== 'number'
+			|| Number.isFinite( trackingWidthMeters ) === false
+			|| trackingWidthMeters <= 0
+		) {
+			return null;
+		}
+
+		const ratio = Math.abs( measuredWidthInMeters - trackingWidthMeters ) / trackingWidthMeters;
+		if ( ratio <= AUTO_MARKER_WIDTH_WARNING_RATIO ) {
+			return null;
+		}
+
+		return {
+			imageUrl: target?.imageUrl ?? target?.patternUrl ?? '-',
+			trackingWidthMeters,
+			reason: 'measured-width-mismatch'
+		};
 
 	}
 

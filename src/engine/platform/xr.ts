@@ -124,6 +124,7 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 				index: number;
 				trackingState?: string;
 				imageSpace: XRSpace;
+				measuredWidthInMeters?: number;
 			}>;
 		};
 		if ( typeof trackedFrame.getImageTrackingResults !== 'function' ) {
@@ -191,7 +192,8 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 					resultsLength: results.length,
 					trackingState,
 					targetId,
-					imageIndex: result.index
+					imageIndex: result.index,
+					measuredWidthInMeters: result.measuredWidthInMeters ?? null
 				} );
 			}
 
@@ -214,6 +216,9 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 					pose.transform.orientation.z,
 					pose.transform.orientation.w
 				],
+				measuredWidthInMeters: typeof result.measuredWidthInMeters === 'number'
+					? result.measuredWidthInMeters
+					: undefined,
 				timestamp: Date.now()
 			} );
 		}

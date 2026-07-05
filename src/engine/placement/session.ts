@@ -507,7 +507,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			updatePlacementSummary();
 
 			if ( usedMarkerOverride ) {
-				setStatus( '已使用 Marker 校正结果更新 AR 放置。' );
+				setStatus( '模型已按工程坐标显示，未强制贴地。' );
 				return;
 			}
 

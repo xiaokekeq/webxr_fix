@@ -73,7 +73,7 @@ function formatSessionPhase(phase: ArSessionPhase): string {
 		case 'scanning':
 			return '跟踪中，等待平面';
 		case 'ready-to-place':
-			return '平面已检测，仍需完成空间校正';
+			return '平面已识别，等待 Marker / 手动空间校正';
 		case 'placing':
 			return '正在根据空间校正放置模型';
 		case 'placed':
@@ -101,11 +101,11 @@ function formatLocalizationSource(source: string): string {
 
 	switch ( source ) {
 		case 'marker':
-			return '当前定位来源：控制标志校正';
+			return '控制标志校正';
 		case 'marker-auto-image':
-			return '当前定位来源：自动控制标志识别';
+			return '自动控制标志识别';
 		case 'manual-site-pose':
-			return '当前定位来源：手动场景定位';
+			return '手动场景定位';
 		case 'rtk':
 			return 'RTK 预留来源，未接入实时设备定位';
 		case 'fallback':
@@ -134,7 +134,7 @@ function formatMarkerCalibrationStatus(state: RegistrationStoreState): string {
 	}
 
 	if ( state.inspectionPlacementSource === 'marker-auto' ) {
-		return '自动识别中或等待控制标志进入视野';
+		return '自动识别中，等待控制标志进入视野';
 	}
 
 	return '未校正';
@@ -158,7 +158,7 @@ function formatModelPlacementStatus(state: RegistrationStoreState): string {
 function resolvePlacementHint(state: RegistrationStoreState): string {
 
 	if ( state.placementMode === 'hit-test-temporary' ) {
-		return '当前为临时演示放置，不代表正式定位。仅用于调试展示，不代表工程真实位置。';
+		return '当前为临时演示放置，模型底部已对齐地面，不代表工程真实位置。';
 	}
 
 	if ( state.engineeringConfigStatus.hasControlTargets === false ) {
@@ -181,7 +181,7 @@ function resolvePlacementHint(state: RegistrationStoreState): string {
 		case 'marker':
 		case 'marker-auto-image':
 		case 'manual-site-pose':
-			return '模型已按工程坐标显示，可用于正式巡查查看。';
+			return '模型已按工程坐标显示，未强制贴地。';
 		default:
 			return state.arSessionPhase === 'ready-to-place'
 				? '已检测到平面，请继续对准现场控制标志完成空间校正。'

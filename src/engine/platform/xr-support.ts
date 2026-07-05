@@ -107,6 +107,7 @@ export function createXRHitTestController(
 	let anchorSupportDetected = false;
 	let recentHitSamples: Array<{ position: THREE.Vector3; time: number }> = [];
 	let sessionRequestPending = false;
+	let activeSession: XRSession | null = null;
 	let trackedImageTargetIds: string[] = [];
 	let imageTrackingState: XrImageTrackingState = {
 		requested: false,
@@ -149,6 +150,7 @@ export function createXRHitTestController(
 			return;
 		}
 
+		activeSession = session;
 		session.addEventListener( 'select', handleSelect );
 
 		const viewerSpace = await session.requestReferenceSpace( 'viewer' );
@@ -171,7 +173,8 @@ export function createXRHitTestController(
 	function handleSessionEnd(): void {
 
 		sessionRequestPending = false;
-		renderer.xr.getSession()?.removeEventListener( 'select', handleSelect );
+		activeSession?.removeEventListener( 'select', handleSelect );
+		activeSession = null;
 		reticle.visible = false;
 		hitTestSource = null;
 		hitTestSourceRequested = false;

@@ -90,6 +90,8 @@ export interface DemoModelConfig {
 	controlTargets: VisualControlTarget[];
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
+	placementAnchorModelLocal?: [ number, number, number ];
+	visualGroundOffsetMeters: number;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
@@ -141,12 +143,14 @@ interface LocalDebugModelConfig {
 	controlTargets?: VisualControlTarget[];
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
+	placementAnchorModelLocal?: [ number, number, number ];
+	visualGroundOffsetMeters?: number;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	controlPoints: Record<string, {
@@ -160,6 +164,8 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	controlTargets?: VisualControlTarget[];
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
+	placementAnchorModelLocal?: [ number, number, number ];
+	visualGroundOffsetMeters?: number;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
@@ -280,6 +286,8 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		controlTargets,
 		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
+		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
+		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : []
@@ -317,6 +325,8 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		controlTargets,
 		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
+		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
+		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : []
@@ -676,6 +686,12 @@ function normalizeEnuTuple(value: [ number, number, number ] | number[] | undefi
 	}
 
 	return [ value[ 0 ], value[ 1 ], value[ 2 ] ];
+
+}
+
+function normalizeVisualGroundOffsetMeters(value: number | undefined): number {
+
+	return typeof value === 'number' && Number.isFinite( value ) ? value : 0;
 
 }
 

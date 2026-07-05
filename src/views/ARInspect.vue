@@ -22,7 +22,7 @@ const TEXT = {
 	status: '状态',
 	waiting: '待进入 AR',
 	scanning: '正在扫描平面',
-	ready: '平面已检测',
+	ready: '平面已识别，等待空间校正',
 	placing: '正在应用空间校正',
 	placed: '巡查中',
 	panelTool: '控制面板',
@@ -86,6 +86,7 @@ const configStatus = computed( () => engine.value.engineeringConfigStatus );
 const activeTarget = computed( () => configStatus.value.controlTargetSummaries[ 0 ] );
 const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
 const modelPlaced = computed( () => engine.value.placementSummary.positionText !== '-' );
+const markerAutoImage = computed( () => engine.value.markerAutoImage );
 
 const sliderVisible = computed(
 	() => hasArSession.value
@@ -117,18 +118,35 @@ const sessionStatusText = computed( () => {
 		return TEXT.waiting;
 	}
 
-	switch ( engine.value.arSessionPhase ) {
-		case 'scanning':
-			return TEXT.scanning;
-		case 'ready-to-place':
-			return TEXT.ready;
-		case 'placing':
-			return TEXT.placing;
-		case 'placed':
-			return TEXT.placed;
-		default:
-			return engine.value.runtimeStatus;
+	if (
+		engine.value.inspectionPlacementSource === 'marker-auto'
+		&& markerAutoImage.value.state !== 'idle'
+		&& markerAutoImage.value.message.length > 0
+	) {
+		return markerAutoImage.value.message;
 	}
+
+	if ( engine.value.markerCalibration.active ) {
+		return `手动四角点：${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}，请采集 ${engine.value.markerCalibration.nextCornerLabel || '下一个角点'}`;
+	}
+
+	if ( localizationReady.value ) {
+		return '空间校正完成';
+	}
+
+	if ( modelPlaced.value ) {
+		return '巡查中';
+	}
+
+	if (
+		engine.value.arSessionPhase === 'ready-to-place'
+		|| engine.value.arSessionPhase === 'placing'
+		|| engine.value.arSessionPhase === 'placed'
+	) {
+		return '已检测到平面，请继续完成控制标志校正';
+	}
+
+	return engine.value.runtimeStatus || TEXT.scanning;
 } );
 
 const configCards = computed( () => [
@@ -178,6 +196,33 @@ const calibrationStatusCards = computed( () => [
 	{ label: TEXT.cornerProgress, value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
 	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' },
 	{ label: '失败原因', value: engine.value.runtimeStatus || '-' , wide: true }
+] );
+
+const autoMarkerTargetText = computed( () => {
+	const targetName = markerAutoImage.value.targetName;
+	const targetId = markerAutoImage.value.targetId;
+	if ( targetId === null || targetId.length === 0 ) {
+		return targetName && targetName !== '-' ? targetName : '-';
+	}
+	if ( targetName && targetName !== '-' && targetName !== targetId ) {
+		return `${targetName} / ${targetId}`;
+	}
+	return targetId;
+} );
+
+const autoMarkerCards = computed( () => [
+	{ label: '当前模式', value: markerAutoImage.value.modeText },
+	{ label: '当前目标', value: autoMarkerTargetText.value },
+	{ label: '图片地址', value: markerAutoImage.value.imageUrl, wide: true },
+	{ label: '图片加载', value: formatAutoMarkerImageLoadStatus( markerAutoImage.value.imageLoadStatus ) },
+	{ label: '图片格式', value: markerAutoImage.value.imageFormatText },
+	{ label: 'trackingWidthMeters', value: markerAutoImage.value.trackingWidthMetersText },
+	{ label: 'measuredWidthInMeters', value: markerAutoImage.value.measuredWidthInMetersText },
+	{ label: '浏览器支持', value: markerAutoImage.value.browserSupportText },
+	{ label: '最近观测', value: markerAutoImage.value.recentObservationText },
+	{ label: '稳定帧', value: markerAutoImage.value.stableFrameText },
+	{ label: 'trackingState', value: markerAutoImage.value.trackingState },
+	{ label: 'fallback', value: markerAutoImage.value.fallbackText }
 ] );
 
 const showManualMarkerControls = computed(
@@ -306,8 +351,24 @@ function handleInspectionPlacementSourceChange(
 function exitPage(): void {
 	if ( hasArSession.value ) {
 		store.actions.exitAr();
+		return;
 	}
 	void router.push( '/' );
+}
+
+function formatAutoMarkerImageLoadStatus(status: string): string {
+	switch ( status ) {
+		case 'success':
+			return '成功';
+		case 'failed':
+			return '失败';
+		case 'missing':
+			return '未配置';
+		case 'pending':
+			return '加载中';
+		default:
+			return '未知';
+	}
 }
 
 onMounted( () => {
@@ -479,6 +540,25 @@ function setArOverlayClass(active: boolean): void {
 					</ArPanelSection>
 
 					<ArPlacementStatusSection :state="engine" title="定位与放置诊断" />
+
+					<ArPanelSection title="控制标志自动识别">
+						<ArInfoGrid :items="autoMarkerCards" class="compact-info-grid" />
+						<div class="runtime-banner">
+							{{ markerAutoImage.message }}
+						</div>
+						<div class="runtime-banner warning">
+							请确认现场打印图案与配置图片一致；.patt 不能用于 WebXR Image Tracking，请配置 PNG/JPG/WebP 图片。
+						</div>
+						<div v-if="markerAutoImage.canFallbackManual" class="action-row">
+							<button
+								type="button"
+								class="action-button primary"
+								@click="store.actions.startCurrentSessionMarkerCalibration()"
+							>
+								使用手动四角点校正
+							</button>
+						</div>
+					</ArPanelSection>
 
 					<div class="sheet-section">
 						<div class="section-label">{{ TEXT.placementSource }}</div>

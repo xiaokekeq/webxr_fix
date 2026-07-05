@@ -92,6 +92,7 @@
   ],
   "placementAnchorEnu": [0, 0, 0],
   "placementAnchorMeaning": "site-origin-ground-reference",
+  "visualGroundOffsetMeters": 0,
   "undergroundObjects": [],
   "sensors": [],
   "riskPoints": []
