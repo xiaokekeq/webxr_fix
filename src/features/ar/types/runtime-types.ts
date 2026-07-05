@@ -16,37 +16,6 @@ export interface XRAnchorHandle {
 	delete?(): void;
 }
 
-export interface XrTrackedImageDefinition {
-	targetId: string;
-	siteId?: string;
-	markerId?: string;
-	imageUrl: string;
-	patternUrl?: string;
-	widthInMeters: number;
-	trackingWidthMeters?: number;
-	sizeMeters?: number;
-}
-
-export interface XrImageTrackingObservation {
-	targetId: string;
-	trackingState: string;
-	position: [ number, number, number ];
-	rotation: [ number, number, number, number ];
-	measuredWidthInMeters?: number;
-	timestamp: number;
-}
-
-export interface XrImageTrackingState {
-	requested: boolean;
-	supported: boolean;
-	active: boolean;
-	reason: string;
-}
-
-export interface XrSessionRequestOptions {
-	trackedImages?: XrTrackedImageDefinition[];
-}
-
 export interface XRHitTestController {
 	setup(): void;
 	update(frame: XRFrame): void;
@@ -56,9 +25,7 @@ export interface XRHitTestController {
 	getHitTestQuality(): XRHitTestQuality | null;
 	supportsAnchors(): boolean;
 	createAnchorFromLatestHit(): Promise<XRAnchorHandle | null>;
-	requestSession(options?: XrSessionRequestOptions): void;
-	getImageTrackingState(): XrImageTrackingState;
-	getTrackedImageTargetId(index: number): string | null;
+	requestSession(): void;
 }
 
 export interface XRHitTestQuality {

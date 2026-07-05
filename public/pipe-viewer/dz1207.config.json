@@ -79,9 +79,7 @@
       "id": "dike-marker-001",
       "bindControlPointId": "CP_01",
       "sizeMeters": 0.2,
-      "trackingWidthMeters": 0.2,
-      "yawDeg": 0,
-      "patternUrl": "/pipe-viewer/markers/dz1207-control-marker.png"
+      "yawDeg": 0
     }
   ],
   "rtkSurveyDataset": {
@@ -118,8 +116,6 @@
       "id": "dike-marker-001",
       "name": "CP_01 control marker",
       "markerId": "dike-marker-001",
-      "imageUrl": "/pipe-viewer/markers/dz1207-control-marker.png",
-      "patternUrl": "/pipe-viewer/markers/dz1207-control-marker.png",
       "centerEnu": [0, 0, 0],
       "cornersEnu": [
         [-0.15, 0.15, 0],
@@ -129,7 +125,6 @@
       ],
       "yawDeg": 0,
       "sizeMeters": 0.3,
-      "trackingWidthMeters": 0.3,
       "plane": "horizontal",
       "cornerOrder": ["leftTop", "rightTop", "rightBottom", "leftBottom"],
       "note": "MOCK/DEMO control marker ENU corners; replace with real RTK surveyed marker corners later."

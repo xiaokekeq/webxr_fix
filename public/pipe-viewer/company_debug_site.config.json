@@ -42,9 +42,7 @@
       "id": "local-debug-marker-001",
       "bindControlPointId": "LOCAL_CP_01",
       "sizeMeters": 0.2,
-      "trackingWidthMeters": 0.2,
-      "yawDeg": 0,
-      "patternUrl": "/pipe-viewer/markers/company-debug-control-marker.png"
+      "yawDeg": 0
     }
   ],
   "rtkSurveyDataset": {
@@ -73,8 +71,6 @@
       "id": "local-debug-marker-001",
       "name": "LOCAL_CP_01 control marker",
       "markerId": "local-debug-marker-001",
-      "imageUrl": "/pipe-viewer/markers/company-debug-control-marker.png",
-      "patternUrl": "/pipe-viewer/markers/company-debug-control-marker.png",
       "centerEnu": [0, 0, 0],
       "cornersEnu": [
         [-0.15, 0.15, 0],
@@ -84,7 +80,6 @@
       ],
       "yawDeg": 0,
       "sizeMeters": 0.3,
-      "trackingWidthMeters": 0.3,
       "plane": "horizontal",
       "cornerOrder": ["leftTop", "rightTop", "rightBottom", "leftBottom"],
       "note": "MOCK/DEMO control marker ENU corners; replace with real RTK surveyed marker corners later."

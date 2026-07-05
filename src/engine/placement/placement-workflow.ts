@@ -62,7 +62,7 @@ export class PlacementWorkflow {
 				reason: 'formal placement requires marker/manual/rtk localization',
 				createdAt: Date.now()
 			} );
-			this.options.setStatus( '请先完成 Marker 自动识别或手动四角点校正，再应用正式放置。' );
+			this.options.setStatus( '请先完成控制标志四角点校正，再让模型按工程坐标显示。' );
 			return;
 		}
 
@@ -114,6 +114,12 @@ export class PlacementWorkflow {
 		const hadPlacedModel = this.options.placementSession.getPlacedModel() !== null;
 		const localizationOverride = this.options.getPreferredLocalizationOverride();
 		if ( localizationOverride === null ) {
+			if ( this.options.getHitTestController().hasGroundHit() ) {
+				console.warn( '[HitTestReadyButLocalizationMissing]', this.createPlacementLogPayload( {
+					source: 'unknown',
+					localizationReady: false
+				} ) );
+			}
 			console.info( '[FormalLocalizationRequired]', {
 				mode: this.options.getWorkflowMode(),
 				siteId: this.options.getSiteId(),
@@ -123,6 +129,19 @@ export class PlacementWorkflow {
 			} );
 			return;
 		}
+
+		if ( this.options.getHitTestController().hasGroundHit() === false ) {
+			console.info( '[AutoPlacementWaitingForHitTest]', this.createPlacementLogPayload( {
+				source: localizationOverride.source,
+				localizationReady: true
+			} ) );
+			return;
+		}
+
+		console.info( '[AutoPlacementTriggeredAfterHitTestReady]', this.createPlacementLogPayload( {
+			source: localizationOverride.source,
+			localizationReady: true
+		} ) );
 
 		this.options.placementSession.attemptLocalizedPlacement( {
 			xrHitTest: this.options.getHitTestController(),
@@ -144,11 +163,41 @@ export class PlacementWorkflow {
 
 		const placedModel = this.options.placementSession.getPlacedModel();
 		if ( hadPlacedModel === false && placedModel !== null ) {
+			console.info( '[EngineeringModelAutoPlaced]', this.createPlacementLogPayload( {
+				source: localizationOverride.source,
+				localizationReady: true
+			} ) );
 			this.options.onPlacementCompleted();
 		}
 
 		this.options.syncArSessionPhase();
 		this.options.emit();
+
+	}
+
+	private createPlacementLogPayload(args: {
+		source: string;
+		localizationReady: boolean;
+	}): Record<string, unknown> {
+
+		return {
+			siteId: this.options.getSiteId(),
+			modelId: this.options.getSiteId(),
+			sessionId: this.options.getCurrentSessionId(),
+			targetId: this.options.getInspectionTargetId(),
+			currentCorner: null,
+			capturedPointCount: null,
+			source: args.source,
+			hasSiteOrigin: this.options.getRegistrationSolution() !== null,
+			hasModelLocalToEnu: this.options.getRegistrationSolution() !== null,
+			modelLocalToEnuSource: this.options.getRegistrationSolution() === null ? 'missing' : 'control-points',
+			hasCornersEnu: null,
+			hasRtkSurveyDataset: null,
+			hitTestReady: this.options.getHitTestController().hasGroundHit(),
+			localizationReady: args.localizationReady,
+			modelPlaced: this.options.placementSession.getPlacedModel() !== null,
+			createdAt: Date.now()
+		};
 
 	}
 

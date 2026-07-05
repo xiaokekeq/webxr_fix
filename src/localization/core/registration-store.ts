@@ -8,28 +8,30 @@ export type AppMode = 'pre-ar' | 'ar-session';
 export type ArSupportState = 'checking' | 'supported' | 'unsupported';
 export type ArSessionPhase = 'scanning' | 'ready-to-place' | 'placing' | 'placed';
 export type ArPlacementMode = 'localized' | 'hit-test-temporary';
-export type InspectionPlacementSource = 'marker-auto' | 'plane-hit-test';
-export type MarkerAutoImageUiState =
-	| 'idle'
-	| 'preparing-tracked-images'
-	| 'tracked-images-ready'
-	| 'image-tracking-requested'
-	| 'image-tracking-unsupported'
-	| 'image-tracking-api-missing'
-	| 'tracked-images-empty'
-	| 'image-load-failed'
-	| 'waiting-for-marker'
-	| 'marker-observed'
-	| 'marker-stabilizing'
-	| 'width-mismatch-warning'
-	| 'localization-applied'
-	| 'fallback-manual';
+export type InspectionPlacementSource = 'manual-marker';
 export type ArDisplayMode =
 	| 'solid-overlay'
 	| 'transparent-xray'
 	| 'layer-peeling'
 	| 'section-cut';
 export type SectionCutPlaneMode = 'cross-section' | 'longitudinal-section' | 'horizontal-section';
+
+export interface ManualMarker {
+	markerId: string;
+	name: string;
+	modelUrl: string;
+	controlPoint?: {
+		x: number;
+		y: number;
+		z: number;
+		coordinateSystem?: string;
+	};
+	defaultTransform?: {
+		position: [ number, number, number ];
+		rotation: [ number, number, number ];
+		scale: [ number, number, number ];
+	};
+}
 
 export interface PropertyPanelState {
 	name: string;
@@ -79,11 +81,6 @@ export interface RegistrationChainDebugState {
 		siteOriginArPositionText: string;
 		headingDegText: string;
 	};
-	manualArSitePose: {
-		exists: boolean;
-		rootSiteEnuText: string;
-		restored: boolean;
-	};
 	heightPolicy: {
 		hitTestGroundYEnabled: boolean;
 		enuGpsVerticalOffsetEnabled: boolean;
@@ -114,28 +111,37 @@ export interface EngineeringConfigStatusState {
 	hasRtkSurveyDataset: boolean;
 	hasControlTargets: boolean;
 	hasPlacementAnchor: boolean;
+	activeControlTargetHasCornersEnu: boolean;
+	hasMockEngineeringData: boolean;
+	modelLocalToEnuSource: 'explicit' | 'control-points' | 'missing';
+	modelLocalToEnuText: string;
 	controlTargetCount: number;
 	activeControlTargetId?: string;
+	activeControlTargetName?: string;
 	controlTargetSource: 'site-config' | 'baseline' | 'none';
 	controlTargetSourceText: string;
+	engineeringDataSourceText: string;
+	mockWarningText: string;
+	rtkCoordinateSystemText: string;
+	mockRtkPointIds: string[];
+	recommendedFieldHints: string[];
+	registrationModeText: string;
+	modelToSiteScaleText: string;
 	baselineMismatch: boolean;
 	rtkPointCount: number;
 	undergroundObjectCount: number;
 	sensorCount: number;
 	riskPointCount: number;
-	markerImageReady: boolean;
-	markerImageIssue?: string;
 	siteOriginText: string;
 	placementAnchorText: string;
 	controlTargetSummaries: Array<{
 		id: string;
 		name: string;
-		imageUrl: string;
 		centerEnuText: string;
 		cornersEnuText: string;
+		cornerOrderText: string;
 		yawDegText: string;
 		sizeMetersText: string;
-		trackingWidthMetersText: string;
 		planeText: string;
 	}>;
 }
@@ -176,31 +182,6 @@ export interface MarkerCalibrationState {
 	rmsErrorMeters?: number;
 	headingDeg?: number;
 	lastUpdatedAt?: number;
-}
-
-export interface MarkerAutoImageState {
-	state: MarkerAutoImageUiState;
-	message: string;
-	modeText: string;
-	targetId: string | null;
-	targetName: string;
-	imageUrl: string;
-	imageLoadStatus: 'success' | 'failed' | 'missing' | 'pending' | 'unknown';
-	imageFormatText: string;
-	trackingWidthMeters: number | null;
-	trackingWidthMetersText: string;
-	measuredWidthInMeters: number | null;
-	measuredWidthInMetersText: string;
-	browserSupportText: string;
-	recentObservationText: string;
-	stableFrameCount: number;
-	requiredStableFrameCount: number;
-	stableFrameText: string;
-	trackingState: string;
-	fallbackText: string;
-	canFallbackManual: boolean;
-	reason: string;
-	lastUpdatedAt: number | null;
 }
 
 export interface PlacementSummaryState {
@@ -271,7 +252,6 @@ export interface RegistrationStoreState {
 	engineeringConfigStatus: EngineeringConfigStatusState;
 	savedMarkerLocalization: SavedMarkerLocalizationState;
 	markerCalibration: MarkerCalibrationState;
-	markerAutoImage: MarkerAutoImageState;
 	placementSummary: PlacementSummaryState;
 	targetGuidance: TargetGuidanceState;
 	annotationDetail: AnnotationDetailState;
@@ -399,11 +379,6 @@ export function createDefaultRegistrationChainDebugState(): RegistrationChainDeb
 			siteOriginArPositionText: '-',
 			headingDegText: '-'
 		},
-		manualArSitePose: {
-			exists: false,
-			rootSiteEnuText: '-',
-			restored: false
-		},
 		heightPolicy: {
 			hitTestGroundYEnabled: true,
 			enuGpsVerticalOffsetEnabled: false
@@ -435,15 +410,25 @@ export function createDefaultEngineeringConfigStatusState(): EngineeringConfigSt
 		hasRtkSurveyDataset: false,
 		hasControlTargets: false,
 		hasPlacementAnchor: false,
+		activeControlTargetHasCornersEnu: false,
+		hasMockEngineeringData: false,
+		modelLocalToEnuSource: 'missing',
+		modelLocalToEnuText: '缺失',
 		controlTargetCount: 0,
 		controlTargetSource: 'none',
 		controlTargetSourceText: '未加载控制标志',
+		engineeringDataSourceText: 'none',
+		mockWarningText: '',
+		rtkCoordinateSystemText: '-',
+		mockRtkPointIds: [],
+		recommendedFieldHints: [],
+		registrationModeText: '-',
+		modelToSiteScaleText: '-',
 		baselineMismatch: false,
 		rtkPointCount: 0,
 		undergroundObjectCount: 0,
 		sensorCount: 0,
 		riskPointCount: 0,
-		markerImageReady: false,
 		siteOriginText: '-',
 		placementAnchorText: '-',
 		controlTargetSummaries: []
@@ -485,35 +470,6 @@ export function createDefaultMarkerCalibrationState(): MarkerCalibrationState {
 		canSolve: false,
 		solved: false,
 		applied: false
-	};
-
-}
-
-export function createDefaultMarkerAutoImageState(): MarkerAutoImageState {
-
-	return {
-		state: 'idle',
-		message: '尚未开始自动控制标志识别。',
-		modeText: '未开始',
-		targetId: null,
-		targetName: '-',
-		imageUrl: '-',
-		imageLoadStatus: 'unknown',
-		imageFormatText: '-',
-		trackingWidthMeters: null,
-		trackingWidthMetersText: '-',
-		measuredWidthInMeters: null,
-		measuredWidthInMetersText: '-',
-		browserSupportText: '未知',
-		recentObservationText: '无',
-		stableFrameCount: 0,
-		requiredStableFrameCount: 3,
-		stableFrameText: '0 / 3',
-		trackingState: 'unknown',
-		fallbackText: '可用',
-		canFallbackManual: false,
-		reason: 'idle',
-		lastUpdatedAt: null
 	};
 
 }

@@ -16,7 +16,7 @@ type InspectPanelView = 'display' | 'localization' | 'record';
 const TEXT = {
 	title: '堤防 AR 巡查',
 	enterArTitle: '进入 AR 巡查',
-	enterArSub: '读取工程真值配置后进入 AR。先扫描平面，再对准现场控制标志完成空间校正；Marker 自动识别成功或手动四角点校正后，模型才会按工程坐标正式显示。',
+	enterArSub: '读取工程真值配置后进入 AR。hit-test 只用于确认平面就绪；请手动采集现场 Marker 四角点，校正成功后模型才会按工程坐标正式显示。',
 	enterAr: '进入 AR',
 	selectModel: '选择站点',
 	status: '状态',
@@ -30,20 +30,20 @@ const TEXT = {
 	takeSnapshot: '截图',
 	closePanel: '收起',
 	display: '显示控制',
-	localization: '空间校准',
+	localization: '巡查流程',
 	record: '巡查记录',
 	configStatus: '工程配置状态',
-	localizationStatus: '定位状态',
+	localizationStatus: '当前会话空间校正',
 	displayMode: '模型显示',
 	sectionPlane: '剖切方向',
-	placementSource: '放置方式',
-	calibrationPanel: '控制标志校正',
+	placementSource: '校正方式',
+	calibrationPanel: '手动 Marker 四角点校正',
 	cornerProgress: '角点进度',
 	nextCorner: '当前要采集',
 	targetMarker: '目标 Marker',
-	startCalibration: '切换手动四角点',
+	startCalibration: '手动 Marker 四角点校正',
 	captureCorner: '采集当前角点',
-	applyCalibration: '完成空间校正',
+	applyCalibration: '完成校正',
 	resetCalibration: '重置角点',
 	inspectionResult: '结果',
 	inspectionType: '类型',
@@ -61,8 +61,7 @@ const PANEL_OPTIONS: Array<{ value: InspectPanelView; label: string }> = [
 ];
 
 const INSPECTION_PLACEMENT_SOURCE_OPTIONS = [
-	{ value: 'marker-auto', label: 'Marker 自动识别' },
-	{ value: 'plane-hit-test', label: '临时演示放置' }
+	{ value: 'manual-marker', label: '手动 Marker 四角点校正' }
 ] as const;
 
 const route = useRoute();
@@ -71,7 +70,7 @@ const store = useArShellStore();
 
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
-const activePanelView = ref<InspectPanelView>( 'display' );
+const activePanelView = ref<InspectPanelView>( 'localization' );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
@@ -86,7 +85,12 @@ const configStatus = computed( () => engine.value.engineeringConfigStatus );
 const activeTarget = computed( () => configStatus.value.controlTargetSummaries[ 0 ] );
 const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
 const modelPlaced = computed( () => engine.value.placementSummary.positionText !== '-' );
-const markerAutoImage = computed( () => engine.value.markerAutoImage );
+const hitTestReady = computed(
+	() => engine.value.arSessionPhase === 'ready-to-place'
+		|| engine.value.arSessionPhase === 'placing'
+		|| engine.value.arSessionPhase === 'placed'
+);
+const canUseMarkerCorners = computed( () => configStatus.value.activeControlTargetHasCornersEnu );
 
 const sliderVisible = computed(
 	() => hasArSession.value
@@ -115,53 +119,53 @@ const sliderValue = computed<number>( {
 } );
 const sessionStatusText = computed( () => {
 	if ( hasArSession.value === false ) {
-		return TEXT.waiting;
-	}
-
-	if (
-		engine.value.inspectionPlacementSource === 'marker-auto'
-		&& markerAutoImage.value.state !== 'idle'
-		&& markerAutoImage.value.message.length > 0
-	) {
-		return markerAutoImage.value.message;
+		return '请进入 AR 巡查';
 	}
 
 	if ( engine.value.markerCalibration.active ) {
 		return `手动四角点：${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}，请采集 ${engine.value.markerCalibration.nextCornerLabel || '下一个角点'}`;
 	}
 
-	if ( localizationReady.value ) {
-		return '空间校正完成';
-	}
-
 	if ( modelPlaced.value ) {
-		return '巡查中';
+		return '模型已按工程坐标显示';
 	}
 
-	if (
-		engine.value.arSessionPhase === 'ready-to-place'
-		|| engine.value.arSessionPhase === 'placing'
-		|| engine.value.arSessionPhase === 'placed'
-	) {
-		return '已检测到平面，请继续完成控制标志校正';
+	if ( localizationReady.value ) {
+		return hitTestReady.value
+			? '当前会话空间校正完成，等待模型自动放置'
+			: '当前会话空间校正完成，等待地面检测';
+	}
+
+	if ( hitTestReady.value ) {
+		return '地面检测完成，等待当前会话空间校正';
 	}
 
 	return engine.value.runtimeStatus || TEXT.scanning;
 } );
 
 const configCards = computed( () => [
+	{ label: '当前站点 / 模型', value: currentModelName.value, wide: true },
 	{ label: '配置 JSON', value: currentConfigUrl.value, wide: true },
-	{ label: 'RTK 工程真值', value: configStatus.value.hasRtkSurveyDataset ? `已加载 ${configStatus.value.rtkPointCount} 点` : '未加载' },
+	{ label: '数据来源', value: configStatus.value.hasMockEngineeringData ? 'mock' : configStatus.value.engineeringDataSourceText },
+	{ label: '数据状态', value: configStatus.value.hasMockEngineeringData ? '示例数据' : configStatus.value.hasRtkSurveyDataset ? 'RTK 实测数据' : '未知' },
+	{ label: 'RTK 数据', value: formatRtkDatasetStatus() },
 	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
-	{ label: 'modelLocalToEnu', value: configStatus.value.hasModelLocalToEnu ? '已配置' : '未配置' },
+	{ label: 'modelLocalToEnu', value: configStatus.value.modelLocalToEnuText },
 	{ label: 'controlTargets', value: configStatus.value.hasControlTargets ? `已配置 ${configStatus.value.controlTargetCount} 个` : '未配置' },
 	{ label: '控制标志来源', value: configStatus.value.controlTargetSourceText },
-	{ label: '当前控制标志', value: configStatus.value.activeControlTargetId ?? '未选择' },
-	{ label: 'Marker 图片', value: configStatus.value.markerImageReady ? '可用于 WebXR Image Tracking' : configStatus.value.markerImageIssue ?? '未配置' },
+	{ label: '当前 Marker', value: formatActiveMarkerText(), wide: true },
+	{ label: 'cornersEnu', value: configStatus.value.activeControlTargetHasCornersEnu ? '已配置' : '缺失' },
 	{ label: 'placementAnchorEnu', value: configStatus.value.hasPlacementAnchor ? configStatus.value.placementAnchorText : '未配置', wide: true },
 	{ label: 'undergroundObjects', value: `${configStatus.value.undergroundObjectCount} 个` },
 	{ label: 'sensors', value: `${configStatus.value.sensorCount} 个` },
 	{ label: 'riskPoints', value: `${configStatus.value.riskPointCount} 个` }
+] );
+
+const arGroundCards = computed( () => [
+	{ label: 'AR 会话', value: hasArSession.value ? '已进入 AR 巡查' : '请进入 AR 巡查' },
+	{ label: '地面检测', value: hitTestReady.value ? '地面检测完成' : hasArSession.value ? '请缓慢移动设备，扫描地面' : '未进入 AR' },
+	{ label: '当前会话空间校正', value: localizationReady.value ? '当前会话空间校正完成' : '尚未完成' },
+	{ label: '模型自动放置', value: modelPlaced.value ? '模型已按工程坐标显示' : '等待当前会话空间校正' }
 ] );
 
 const configWarnings = computed( () => {
@@ -172,6 +176,12 @@ const configWarnings = computed( () => {
 	if ( configStatus.value.hasRtkSurveyDataset === false ) {
 		warnings.push( '当前模型未配置 RTK 测量数据，请先补充工程真值配置。' );
 	}
+	if ( configStatus.value.hasModelLocalToEnu === false || configStatus.value.activeControlTargetHasCornersEnu === false ) {
+		warnings.push( '工程配准数据不完整，请先完善模型到工程坐标和控制标志工程坐标。' );
+	}
+	for ( const hint of configStatus.value.recommendedFieldHints ) {
+		warnings.push( hint );
+	}
 	if ( configStatus.value.hasPlacementAnchor === false ) {
 		warnings.push( '当前模型未配置地面参考点，手动场景定位可能不可用。' );
 	}
@@ -181,73 +191,81 @@ const configWarnings = computed( () => {
 	return warnings;
 } );
 
+function formatRtkDatasetStatus(): string {
+	if ( configStatus.value.hasRtkSurveyDataset === false ) {
+		return '未加载';
+	}
+
+	return configStatus.value.hasMockEngineeringData
+		? `示例数据 ${configStatus.value.rtkPointCount} 点`
+		: `已加载 ${configStatus.value.rtkPointCount} 点`;
+}
+
+function formatActiveMarkerText(): string {
+	const id = configStatus.value.activeControlTargetId ?? '-';
+	const name = configStatus.value.activeControlTargetName ?? '-';
+	return `${id} / ${name}`;
+}
+
 const localizationCards = computed( () => [
-	{ label: 'hit-test ready', value: engine.value.arSessionPhase === 'ready-to-place' || engine.value.arSessionPhase === 'placing' || engine.value.arSessionPhase === 'placed' ? '平面已检测' : '等待平面' },
-	{ label: 'localizationReady', value: localizationReady.value ? '空间校正已完成' : '未完成空间校正' },
-	{ label: 'modelPlaced', value: modelPlaced.value ? '模型已显示' : '模型未放置' },
-	{ label: '定位 source', value: engine.value.registrationChainDebug.arSessionLocalization.source || 'unknown' },
+	{ label: '地面检测', value: hitTestReady.value ? '地面检测完成' : '等待地面检测' },
+	{ label: '当前会话空间校正', value: localizationReady.value ? '已完成' : '未完成' },
+	{ label: '模型自动放置', value: modelPlaced.value ? '模型已按工程坐标显示' : '未显示' },
+	{ label: '校正 source', value: engine.value.registrationChainDebug.arSessionLocalization.source || 'unknown' },
 	{ label: '校正误差', value: engine.value.markerCalibration.rmsErrorMeters === undefined ? '-' : `${engine.value.markerCalibration.rmsErrorMeters.toFixed( 3 )}m` },
 	{ label: '航向', value: engine.value.markerCalibration.headingDeg === undefined ? '-' : `${engine.value.markerCalibration.headingDeg.toFixed( 2 )}deg` }
 ] );
 
 const calibrationStatusCards = computed( () => [
-	{ label: TEXT.targetMarker, value: activeTarget.value?.name ?? engine.value.markerCalibration.markerId ?? '未选择' },
+	{ label: TEXT.targetMarker, value: formatActiveMarkerText(), wide: true },
 	{ label: 'Marker id', value: engine.value.markerCalibration.markerId ?? configStatus.value.activeControlTargetId ?? '-' },
 	{ label: TEXT.cornerProgress, value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
 	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' },
+	{ label: 'cornersEnu', value: canUseMarkerCorners.value ? '已配置' : '缺失' },
 	{ label: '失败原因', value: engine.value.runtimeStatus || '-' , wide: true }
 ] );
 
-const autoMarkerTargetText = computed( () => {
-	const targetName = markerAutoImage.value.targetName;
-	const targetId = markerAutoImage.value.targetId;
-	if ( targetId === null || targetId.length === 0 ) {
-		return targetName && targetName !== '-' ? targetName : '-';
-	}
-	if ( targetName && targetName !== '-' && targetName !== targetId ) {
-		return `${targetName} / ${targetId}`;
-	}
-	return targetId;
-} );
-
-const autoMarkerCards = computed( () => [
-	{ label: '当前模式', value: markerAutoImage.value.modeText },
-	{ label: '当前目标', value: autoMarkerTargetText.value },
-	{ label: '图片地址', value: markerAutoImage.value.imageUrl, wide: true },
-	{ label: '图片加载', value: formatAutoMarkerImageLoadStatus( markerAutoImage.value.imageLoadStatus ) },
-	{ label: '图片格式', value: markerAutoImage.value.imageFormatText },
-	{ label: 'trackingWidthMeters', value: markerAutoImage.value.trackingWidthMetersText },
-	{ label: 'measuredWidthInMeters', value: markerAutoImage.value.measuredWidthInMetersText },
-	{ label: '浏览器支持', value: markerAutoImage.value.browserSupportText },
-	{ label: '最近观测', value: markerAutoImage.value.recentObservationText },
-	{ label: '稳定帧', value: markerAutoImage.value.stableFrameText },
-	{ label: 'trackingState', value: markerAutoImage.value.trackingState },
-	{ label: 'fallback', value: markerAutoImage.value.fallbackText }
-] );
-
 const showManualMarkerControls = computed(
-	() => engine.value.inspectionPlacementSource === 'marker-auto' && engine.value.markerCalibration.active
+	() => engine.value.inspectionPlacementSource === 'manual-marker' && engine.value.markerCalibration.active && canUseMarkerCorners.value
 );
 const inspectionPlacementHint = computed( () => {
-	if ( engine.value.inspectionPlacementSource === 'marker-auto' ) {
-		return showManualMarkerControls.value
-			? '自动识别不可用或已切换为手动四角点校正，请按左上、右上、右下、左下顺序采集。'
-			: '当前使用隐藏式 Marker 自动识别。请先扫描平面，再让控制标志进入视野，识别稳定后会自动放置模型。';
-	}
-
-	return '当前为临时演示放置，仅用于调试展示，不代表工程真实位置，不能作为正式巡查定位结果。';
+	return '当前正式流程为手动 Marker 四角点校正：采集控制标志四角点后生成当前会话空间校正，模型会按工程坐标自动显示。';
 } );
 const workflowHint = computed( () => {
-	if ( engine.value.placementMode === 'hit-test-temporary' ) {
-		return '当前为临时演示放置，不代表正式定位。';
-	}
 	if ( localizationReady.value && modelPlaced.value ) {
-		return '控制标志校正完成，模型已按工程坐标显示。';
+		return '空间校正完成，模型已按工程坐标自动放置。';
 	}
-	if ( engine.value.arSessionPhase === 'ready-to-place' ) {
-		return '已检测到平面，请继续对准现场控制标志完成空间校正。';
+	if ( localizationReady.value && hitTestReady.value === false ) {
+		return '空间校正完成，等待地面检测后自动放置模型。';
 	}
-	return '当前未完成空间校正，不能作为正式巡查定位结果。';
+	if ( hitTestReady.value ) {
+		return '已检测到地面，但尚未完成空间校正，不能自动放置工程模型。';
+	}
+	if ( hasArSession.value ) {
+		return '请缓慢移动设备，扫描地面。';
+	}
+	return '请进入 AR 巡查。';
+} );
+
+const markerCornerPrompt = computed( () => {
+	if ( canUseMarkerCorners.value === false ) {
+		return '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。';
+	}
+
+	const label = engine.value.markerCalibration.nextCornerLabel;
+	if ( label.includes( '左上' ) || label.includes( 'leftTop' ) ) {
+		return '请将准星对准控制标志左上角并采集。';
+	}
+	if ( label.includes( '右上' ) || label.includes( 'rightTop' ) ) {
+		return '请将准星对准控制标志右上角并采集。';
+	}
+	if ( label.includes( '右下' ) || label.includes( 'rightBottom' ) ) {
+		return '请将准星对准控制标志右下角并采集。';
+	}
+	if ( label.includes( '左下' ) || label.includes( 'leftBottom' ) ) {
+		return '请将准星对准控制标志左下角并采集。';
+	}
+	return '请按左上角、右上角、右下角、左下角顺序采集控制标志四角。';
 } );
 
 watch(
@@ -331,21 +349,9 @@ function openWorkspacePanel(): void {
 }
 
 function handleInspectionPlacementSourceChange(
-	source: 'marker-auto' | 'plane-hit-test'
+	source: 'manual-marker'
 ): void {
 	store.actions.setInspectionPlacementSource( source );
-	if ( source === 'plane-hit-test' ) {
-		console.info( '[ArUiTemporaryPlacementWarningShown]', {
-			mode: engine.value.workflowMode,
-			siteId: engine.value.selectedModelId || null,
-			modelId: engine.value.selectedModelId || null,
-			sessionId: engine.value.markerCalibration.currentSessionId,
-			currentStep: 'debug-temporary-placement',
-			localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
-			targetId: configStatus.value.activeControlTargetId ?? null,
-			message: '当前为临时演示放置，不代表正式定位'
-		} );
-	}
 }
 
 function exitPage(): void {
@@ -354,21 +360,6 @@ function exitPage(): void {
 		return;
 	}
 	void router.push( '/' );
-}
-
-function formatAutoMarkerImageLoadStatus(status: string): string {
-	switch ( status ) {
-		case 'success':
-			return '成功';
-		case 'failed':
-			return '失败';
-		case 'missing':
-			return '未配置';
-		case 'pending':
-			return '加载中';
-		default:
-			return '未知';
-	}
 }
 
 onMounted( () => {
@@ -524,40 +515,65 @@ function setArOverlayClass(active: boolean): void {
 				</template>
 
 				<template v-else-if="activePanelView === 'localization'">
-					<ArPanelSection :title="TEXT.configStatus" first>
+					<ArPanelSection title="阶段 1：工程配置加载" first>
 						<ArInfoGrid :items="configCards" />
 						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
 							{{ warning }}
 						</div>
-						<div class="runtime-banner">
-							一个带方向 Marker 可以完成当前会话配准；普通无方向控制点只能确定位置，不能稳定确定朝向，建议至少两个点或一个点 + 手动 yaw 校正。
+						<div v-if="configStatus.hasMockEngineeringData" class="runtime-banner warning">
+							{{ configStatus.mockWarningText }}
 						</div>
 					</ArPanelSection>
 
-					<ArPanelSection :title="TEXT.localizationStatus">
-						<ArInfoGrid :items="localizationCards" />
-						<div class="runtime-banner">{{ workflowHint }}</div>
+					<ArPanelSection title="阶段 2：进入 AR 与地面检测">
+						<ArInfoGrid :items="arGroundCards" />
+						<div class="runtime-banner" :class="{ warning: localizationReady === false }">
+							{{ workflowHint }}
+						</div>
 					</ArPanelSection>
 
-					<ArPlacementStatusSection :state="engine" title="定位与放置诊断" />
-
-					<ArPanelSection title="控制标志自动识别">
-						<ArInfoGrid :items="autoMarkerCards" class="compact-info-grid" />
+					<ArPanelSection title="阶段 3：手动 Marker 四角点校正">
+						<ArInfoGrid :items="calibrationStatusCards" class="compact-info-grid" />
+						<div class="runtime-banner" :class="{ warning: canUseMarkerCorners === false }">
+							{{ markerCornerPrompt }}
+						</div>
 						<div class="runtime-banner">
-							{{ markerAutoImage.message }}
+							角点顺序：1. 左上角；2. 右上角；3. 右下角；4. 左下角。
 						</div>
-						<div class="runtime-banner warning">
-							请确认现场打印图案与配置图片一致；.patt 不能用于 WebXR Image Tracking，请配置 PNG/JPG/WebP 图片。
-						</div>
-						<div v-if="markerAutoImage.canFallbackManual" class="action-row">
+						<div class="action-row">
 							<button
 								type="button"
-								class="action-button primary"
+								class="action-button"
+								:disabled="canUseMarkerCorners === false"
 								@click="store.actions.startCurrentSessionMarkerCalibration()"
 							>
-								使用手动四角点校正
+								{{ TEXT.startCalibration }}
+							</button>
+							<button
+								v-if="showManualMarkerControls"
+								type="button"
+								class="action-button"
+								@click="store.actions.captureCurrentSessionMarkerCorner()"
+							>
+								{{ TEXT.captureCorner }}
+							</button>
+							<button
+								v-if="showManualMarkerControls"
+								type="button"
+								class="action-button primary"
+								@click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()"
+							>
+								{{ TEXT.applyCalibration }}
+							</button>
+							<button type="button" class="action-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
+								{{ TEXT.resetCalibration }}
 							</button>
 						</div>
+					</ArPanelSection>
+
+					<ArPanelSection title="阶段 4：模型自动放置与巡查">
+						<ArInfoGrid :items="localizationCards" />
+						<div class="runtime-banner">{{ workflowHint }}</div>
 					</ArPanelSection>
 
 					<div class="sheet-section">
@@ -577,26 +593,7 @@ function setArOverlayClass(active: boolean): void {
 						<div class="runtime-banner">{{ inspectionPlacementHint }}</div>
 					</div>
 
-					<ArPanelSection :title="TEXT.calibrationPanel">
-						<ArInfoGrid :items="calibrationStatusCards" class="compact-info-grid" />
-						<div class="runtime-banner">
-							请按 leftTop 左上角、rightTop 右上角、rightBottom 右下角、leftBottom 左下角的顺序采集控制标志四角。
-						</div>
-						<div class="action-row">
-							<button type="button" class="action-button" @click="store.actions.startCurrentSessionMarkerCalibration()">
-								{{ TEXT.startCalibration }}
-							</button>
-							<button v-if="showManualMarkerControls" type="button" class="action-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
-								{{ TEXT.captureCorner }}
-							</button>
-							<button v-if="showManualMarkerControls" type="button" class="action-button primary" @click="store.actions.solveAndApplyCurrentSessionMarkerCalibration()">
-								{{ TEXT.applyCalibration }}
-							</button>
-							<button type="button" class="action-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
-								{{ TEXT.resetCalibration }}
-							</button>
-						</div>
-					</ArPanelSection>
+					<ArPlacementStatusSection :state="engine" title="折叠诊断：工程配置与当前会话状态" />
 				</template>
 
 				<template v-else>

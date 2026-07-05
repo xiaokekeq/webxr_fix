@@ -7,14 +7,12 @@ import {
 	createDefaultMarkerCalibrationState
 } from '@/localization/core/registration-store.js';
 import {
-	createMarkerPoseInEnuFromControlTarget,
 	resolveMarkerCornersInEnuFromControlTarget,
 	solveMarkerLocalization,
 	type MarkerLocalizationSolution,
 	type MarkerPoseInEnu
 } from '@/localization/marker/marker-localization.js';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
-import type { XrImageTrackingObservation } from '@/features/ar/types/runtime-types.js';
 import type {
 	ArWorkflowMode,
 	VisualControlTarget
@@ -47,16 +45,13 @@ interface MarkerCalibrationRuntimeOptions {
 		metadata: {
 			markerId: string;
 			markerConfigId: string;
-			source?: 'marker' | 'marker-auto-image';
+			source?: 'marker';
 		}
 	): boolean;
 	setStatus(message: string): void;
 }
 
 const tempMarkerCapturePosition = new THREE.Vector3();
-const tempAutoMarkerArPosition = new THREE.Vector3();
-const tempAutoMarkerArQuaternion = new THREE.Quaternion();
-const tempAutoMarkerArScale = new THREE.Vector3();
 
 export class MarkerCalibrationRuntime {
 
@@ -140,6 +135,12 @@ export class MarkerCalibrationRuntime {
 			this.options.setStatus( '当前 AR Session 尚未准备完成，请稍后重试。' );
 			return;
 		}
+		const controlTarget = this.options.getControlTargets()
+			.find( ( target ) => target.id === markerPose.markerId || target.markerId === markerPose.markerId );
+		if ( controlTarget?.cornersEnu === undefined ) {
+			this.options.setStatus( '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。' );
+			return;
+		}
 
 		this.options.markManualCalibrationStarted();
 		this.currentSessionMarkerCornerCaptures = [];
@@ -188,6 +189,16 @@ export class MarkerCalibrationRuntime {
 			sessionId: currentSessionId,
 			markerId: markerPose.markerId
 		} );
+		console.info( '[CurrentSessionMarkerCalibrationStarted]', this.createLogPayload( {
+			targetId: markerPose.markerId,
+			currentCorner: MARKER_CORNER_SEQUENCE[ 0 ].label,
+			capturedPointCount: 0
+		} ) );
+		console.info( '[ManualMarkerCornerCaptureStarted]', this.createLogPayload( {
+			targetId: markerPose.markerId,
+			currentCorner: MARKER_CORNER_SEQUENCE[ 0 ].label,
+			capturedPointCount: 0
+		} ) );
 
 	}
 
@@ -254,24 +265,23 @@ export class MarkerCalibrationRuntime {
 			arPosition: vector3ToObject( arPosition ),
 			createdAt: Date.now()
 		} );
-		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
-			console.info( '[ArInspectionMarkerCornerCaptured]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: currentSessionId,
-				targetId: markerState.markerId,
-				source: 'marker',
-				trackingState: cornerMeta.id,
-				stableFrameCount: this.currentSessionMarkerCornerCaptures.length,
-				hasHitTest: true,
-				createdAt: Date.now()
-			} );
-		}
+		console.info( '[ManualMarkerCornerCaptured]', this.createLogPayload( {
+			targetId: markerState.markerId,
+			currentCorner: cornerMeta.label,
+			capturedPointCount: this.currentSessionMarkerCornerCaptures.length
+		} ) );
 
 		const nextCorner = MARKER_CORNER_SEQUENCE[ this.currentSessionMarkerCornerCaptures.length ];
 		const message = nextCorner !== undefined
 			? `已采集 ${cornerMeta.label}，请采集控制标志 ${nextCorner.label}。`
 			: '四角点已采集完成，请点击完成空间校正。';
+		if ( nextCorner === undefined ) {
+			console.info( '[ManualMarkerCornersReady]', this.createLogPayload( {
+				targetId: markerState.markerId,
+				currentCorner: cornerMeta.label,
+				capturedPointCount: this.currentSessionMarkerCornerCaptures.length
+			} ) );
+		}
 		this.options.setStatus( message );
 		this.logManualCornerStep( cornerMeta.id, markerState.markerId, message );
 
@@ -327,6 +337,9 @@ export class MarkerCalibrationRuntime {
 			if ( controlTarget === undefined ) {
 				throw new Error( '未找到控制标志配置。' );
 			}
+			if ( controlTarget.cornersEnu === undefined ) {
+				throw new Error( '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。' );
+			}
 
 			const expectedCorners = resolveMarkerCornersInEnuFromControlTarget( controlTarget );
 			console.info( '[MarkerCornersEnuResolved]', {
@@ -356,6 +369,11 @@ export class MarkerCalibrationRuntime {
 					arPosition: captured.arPosition.clone()
 				};
 			} );
+			console.info( '[ManualMarkerLocalizationSolving]', this.createLogPayload( {
+				targetId: markerId,
+				currentCorner: MARKER_CORNER_SEQUENCE[ MARKER_CORNER_SEQUENCE.length - 1 ].label,
+				capturedPointCount: correspondences.length
+			} ) );
 
 			const solution = solveMarkerLocalization( {
 				correspondences,
@@ -363,20 +381,6 @@ export class MarkerCalibrationRuntime {
 				timestamp: Date.now()
 			} );
 			this.currentSessionMarkerSolution = solution;
-
-			if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
-				console.info( '[ArInspectionMarkerSolved]', {
-					mode: this.options.getWorkflowMode(),
-					siteId: this.options.getSiteId(),
-					sessionId: currentSessionId,
-					targetId: markerId,
-					source: 'marker',
-					trackingState: 'solved',
-					stableFrameCount: MARKER_CORNER_SEQUENCE.length,
-					hasHitTest: this.options.hasGroundHit(),
-					createdAt: Date.now()
-				} );
-			}
 
 			console.info( '[MarkerSessionCalibrationSolved]', {
 				sessionId: currentSessionId,
@@ -411,6 +415,12 @@ export class MarkerCalibrationRuntime {
 					headingDeg: solution.headingDeg,
 					createdAt: Date.now()
 				} );
+				console.info( '[ManualMarkerLocalizationApplied]', this.createLogPayload( {
+					targetId: markerId,
+					currentCorner: null,
+					capturedPointCount: this.currentSessionMarkerCornerCaptures.length,
+					localizationReady: true
+				} ) );
 				this.syncState( {
 					active: false,
 					solved: true,
@@ -433,142 +443,6 @@ export class MarkerCalibrationRuntime {
 			);
 			return false;
 		}
-
-	}
-
-	solveAndApplyAutoImageCalibration(
-		targetId: string,
-		observation: XrImageTrackingObservation,
-		stableFrameCount: number
-	): boolean {
-
-		const currentSessionId = this.options.getCurrentSessionId();
-		if ( currentSessionId === null ) {
-			return false;
-		}
-
-		const controlTarget = this.options.getControlTargets()
-			.find( ( item ) => item.id === targetId );
-		if ( controlTarget === undefined ) {
-			this.startCurrentSessionCalibration();
-			this.options.setStatus( '未找到控制标志配置，已切换为手动四角点校正。' );
-			return false;
-		}
-
-		const markerPoseInEnu = createMarkerPoseInEnuFromControlTarget( controlTarget );
-
-		const markerPoseInAr = {
-			markerId: targetId,
-			matrix: new THREE.Matrix4().compose(
-				tempAutoMarkerArPosition.set(
-					observation.position[ 0 ],
-					observation.position[ 1 ],
-					observation.position[ 2 ]
-				),
-				tempAutoMarkerArQuaternion.set(
-					observation.rotation[ 0 ],
-					observation.rotation[ 1 ],
-					observation.rotation[ 2 ],
-					observation.rotation[ 3 ]
-				),
-				tempAutoMarkerArScale.set( 1, 1, 1 )
-			),
-			timestamp: observation.timestamp
-		};
-		console.info( '[MarkerAutoImagePoseResolved]', {
-			mode: this.options.getWorkflowMode(),
-			siteId: this.options.getSiteId(),
-			modelId: this.options.getDemoModelConfig()?.modelId ?? null,
-			sessionId: currentSessionId,
-			targetId,
-			imageUrl: controlTarget.imageUrl ?? controlTarget.patternUrl ?? null,
-			trackingWidthMeters: controlTarget.trackingWidthMeters ?? controlTarget.sizeMeters ?? null,
-			measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
-			trackingState: observation.trackingState,
-			stableFrameCount,
-			reason: 'webxr-image-space-pose',
-			position: {
-				x: observation.position[ 0 ],
-				y: observation.position[ 1 ],
-				z: observation.position[ 2 ]
-			},
-			createdAt: observation.timestamp
-		} );
-		const solution = solveMarkerLocalization( {
-			markerId: targetId,
-			markerPoseInEnu,
-			markerPoseInAr,
-			source: 'marker-auto-image',
-			sessionId: currentSessionId,
-			timestamp: observation.timestamp
-		} );
-		this.currentSessionMarkerSolution = solution;
-
-		console.info( '[AutoMarkerSolved]', {
-			mode: this.options.getWorkflowMode(),
-			siteId: this.options.getSiteId(),
-			sessionId: currentSessionId,
-			targetId,
-			source: 'marker-auto-image',
-			trackingState: 'solved',
-			stableFrameCount,
-			hasHitTest: this.options.hasGroundHit(),
-			createdAt: observation.timestamp
-		} );
-
-		this.syncState( {
-			solved: true,
-			applied: false,
-			rmsErrorMeters: solution.rmsErrorMeters,
-			headingDeg: solution.headingDeg,
-			lastUpdatedAt: Date.now()
-		} );
-
-		const applied = this.options.applyCurrentSessionMarkerSolution( solution, {
-			markerId: targetId,
-			markerConfigId: targetId,
-			source: 'marker-auto-image'
-		} );
-		if ( applied ) {
-			console.info( '[MarkerLocalizationApplied]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: currentSessionId,
-				targetId,
-				source: solution.arFromEnuSolution.source,
-				rmsErrorMeters: solution.rmsErrorMeters,
-				headingDeg: solution.headingDeg,
-				createdAt: Date.now()
-			} );
-			console.info( '[MarkerAutoImageLocalizationApplied]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				modelId: this.options.getDemoModelConfig()?.modelId ?? null,
-				sessionId: currentSessionId,
-				targetId,
-				imageUrl: controlTarget.imageUrl ?? controlTarget.patternUrl ?? null,
-				trackingWidthMeters: controlTarget.trackingWidthMeters ?? controlTarget.sizeMeters ?? null,
-				measuredWidthInMeters: observation.measuredWidthInMeters ?? null,
-				trackingState: observation.trackingState,
-				stableFrameCount,
-				reason: 'localization-applied',
-				rmsErrorMeters: solution.rmsErrorMeters,
-				headingDeg: solution.headingDeg,
-				createdAt: Date.now()
-			} );
-			this.syncState( {
-				active: false,
-				solved: true,
-				applied: true,
-				canCapture: false,
-				canSolve: false,
-				rmsErrorMeters: solution.rmsErrorMeters,
-				headingDeg: solution.headingDeg,
-				lastUpdatedAt: Date.now()
-			} );
-		}
-
-		return applied;
 
 	}
 
@@ -601,6 +475,39 @@ export class MarkerCalibrationRuntime {
 			message,
 			createdAt: Date.now()
 		} );
+
+	}
+
+	private createLogPayload(args: {
+		targetId: string | null;
+		currentCorner: string | null;
+		capturedPointCount: number;
+		localizationReady?: boolean;
+	}): Record<string, unknown> {
+
+		const config = this.options.getDemoModelConfig();
+		const target = this.options.getControlTargets()
+			.find( ( item ) => item.id === args.targetId || item.markerId === args.targetId );
+		return {
+			siteId: this.options.getSiteId(),
+			modelId: config?.modelId ?? null,
+			sessionId: this.options.getCurrentSessionId(),
+			targetId: args.targetId,
+			currentCorner: args.currentCorner,
+			capturedPointCount: args.capturedPointCount,
+			source: 'marker',
+			hasSiteOrigin: config !== null,
+			hasModelLocalToEnu: config !== null,
+			modelLocalToEnuSource: config === null
+				? 'missing'
+				: config.configCompleteness.hasExplicitModelLocalToEnu ? 'explicit' : 'control-points',
+			hasCornersEnu: target?.cornersEnu !== undefined,
+			hasRtkSurveyDataset: ( config?.rtkSurveyDataset?.points.length ?? 0 ) > 0,
+			hitTestReady: this.options.hasGroundHit(),
+			localizationReady: args.localizationReady ?? this.options.hasAppliedMarkerSolutionForCurrentSession(),
+			modelPlaced: this.options.hasAppliedMarkerSolutionForCurrentSession(),
+			createdAt: Date.now()
+		};
 
 	}
 

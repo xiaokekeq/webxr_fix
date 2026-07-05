@@ -51,7 +51,6 @@ export class LocalJsonSiteConfigRepository implements SiteConfigRepository {
 				dataSource: 'local',
 				repository: 'siteConfig',
 				targetId: config.controlTargets[ 0 ]?.id ?? null,
-				imageUrl: config.controlTargets[ 0 ]?.imageUrl ?? config.controlTargets[ 0 ]?.patternUrl ?? null,
 				createdAt: Date.now()
 			} );
 			return config;

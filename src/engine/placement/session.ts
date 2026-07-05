@@ -178,10 +178,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		switch ( source ) {
 			case 'marker':
-			case 'marker-auto-image':
 				return 'marker';
-			case 'manual-site-pose':
-				return 'manual';
 			default:
 				return 'unknown';
 		}
@@ -475,7 +472,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 					createdAt: Date.now()
 				} );
 				updateRegistrationStatusDetail( '状态：等待 Marker 或手动四角点定位' );
-				setStatus( '请先完成 Marker 自动识别或手动四角点校正，再进行正式放置。' );
+				setStatus( '请先完成控制标志四角点校正，再让模型按工程坐标显示。' );
 				autoPlacementPending = false;
 				return;
 			}
@@ -662,9 +659,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 function requiresCurrentSession(source: ArFromEnuSolution['source'] | undefined): boolean {
 
-	return source === 'marker'
-		|| source === 'marker-auto-image'
-		|| source === 'manual-site-pose';
+	return source === 'marker';
 
 }
 

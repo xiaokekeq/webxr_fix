@@ -26,7 +26,7 @@ export interface MarkerLocalizationSolution {
 	headingDeg: number;
 	rmsErrorMeters: number;
 	correspondenceCount: number;
-	source: 'marker' | 'marker-auto-image';
+	source: 'marker';
 }
 
 export interface MarkerPoseInEnu {
@@ -48,7 +48,7 @@ export function solveMarkerLocalization(args: {
 	accuracyMeters?: number;
 	yawAccuracyDegrees?: number;
 	sessionId?: string | null;
-	source?: 'marker' | 'marker-auto-image';
+	source?: 'marker';
 	timestamp?: number;
 } | {
 	markerId: string;
@@ -56,7 +56,7 @@ export function solveMarkerLocalization(args: {
 	markerPoseInAr: MarkerPoseInAr;
 	accuracyMeters?: number;
 	yawAccuracyDegrees?: number;
-	source?: 'marker' | 'marker-auto-image';
+	source?: 'marker';
 	sessionId?: string | null;
 	timestamp?: number;
 }): MarkerLocalizationSolution {
@@ -127,7 +127,7 @@ export function solveMarkerLocalization(args: {
 		headingDeg: arFromEnuSolution.headingDeg,
 		rmsErrorMeters,
 		correspondenceCount: correspondences.length,
-		source: arFromEnuSolution.source === 'marker-auto-image' ? 'marker-auto-image' : 'marker'
+		source: 'marker'
 	};
 
 }
@@ -331,7 +331,7 @@ export function createMarkerPoseInEnuFromControlTarget(
 ): MarkerPoseInEnu {
 
 	const yawDeg = target.yawDeg ?? 0;
-	const sizeMeters = target.sizeMeters ?? target.trackingWidthMeters ?? 1;
+	const sizeMeters = target.sizeMeters ?? 1;
 	const matrix = new THREE.Matrix4().compose(
 		new THREE.Vector3(
 			target.centerEnu[ 0 ],
@@ -390,7 +390,7 @@ function solveMarkerLocalizationFromSingleMarkerPose(args: {
 	markerPoseInAr: MarkerPoseInAr;
 	accuracyMeters?: number;
 	yawAccuracyDegrees?: number;
-	source?: 'marker' | 'marker-auto-image';
+	source?: 'marker';
 	sessionId?: string | null;
 	timestamp?: number;
 }): MarkerLocalizationSolution {
@@ -496,7 +496,7 @@ function isSingleMarkerPoseLocalizationArgs(args: {
 	markerPoseInAr: MarkerPoseInAr;
 	accuracyMeters?: number;
 	yawAccuracyDegrees?: number;
-	source?: 'marker' | 'marker-auto-image';
+	source?: 'marker';
 	sessionId?: string | null;
 	timestamp?: number;
 } {

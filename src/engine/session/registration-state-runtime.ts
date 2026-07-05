@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import {
 	createDefaultEngineeringConfigStatusState,
 	createDefaultRegistrationMetricsState,
@@ -20,13 +20,13 @@ import type {
 	SiteCalibrationBaseline,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
-import { getControlTargetImageUrl, isPattFileUrl } from '@/localization/baseline/site-calibration-baseline.js';
 import { formatGeodetic } from '@/features/ar/utils/formatters.js';
 
 interface RegistrationStateRuntimeOptions {
 	store: RegistrationStore;
 	getWorkflowMode(): ArWorkflowMode;
 	getCurrentSessionId(): string | null;
+	getRepositoryDataSource(): 'local' | 'api';
 	getDemoModelConfig(): DemoModelConfig | null;
 	getRegistrationSolution(): EngineeringRegistrationSolution | null;
 	getResolvedMarkerPosesInEnu(): MarkerPoseInEnu[];
@@ -34,19 +34,14 @@ interface RegistrationStateRuntimeOptions {
 	getActiveMarkerArFromEnuSolutionForCurrentSession(): ArFromEnuSolution | null;
 	getActiveArFromEnuSolution(): ArFromEnuSolution | null;
 	getActiveSiteCalibrationBaseline(): SiteCalibrationBaseline | null;
-	getActiveManualSitePose():
-		| {
-			rootSiteEnu: THREE.Vector3;
-		}
-		| null;
-	hasActiveManualSitePose(): boolean;
-	hasRestoredManualSitePose(): boolean;
 	resolveBaselineControlTargets(): VisualControlTarget[];
 	syncMarkerCalibrationState(override?: Partial<MarkerCalibrationState>): void;
 	setStatus(message: string): void;
 }
 
 export class RegistrationStateRuntime {
+
+	private lastEngineeringConfigLogSignature = '';
 
 	constructor(private readonly options: RegistrationStateRuntimeOptions) {}
 
@@ -120,7 +115,6 @@ export class RegistrationStateRuntime {
 		const arFromEnuSolution = this.options.getActiveArFromEnuSolution();
 		const demoModelConfig = this.options.getDemoModelConfig();
 		const resolvedMarkerPosesInEnu = this.options.getResolvedMarkerPosesInEnu();
-		const activeManualSitePose = this.options.getActiveManualSitePose();
 
 		this.options.store.patch( {
 			registrationChainDebug: {
@@ -141,13 +135,6 @@ export class RegistrationStateRuntime {
 					headingDegText: arFromEnuSolution === null
 						? '-'
 						: `${arFromEnuSolution.headingDeg.toFixed( 3 )}deg`
-				},
-				manualArSitePose: {
-					exists: this.options.hasActiveManualSitePose(),
-					rootSiteEnuText: activeManualSitePose === null
-						? '-'
-						: formatVector3Text( activeManualSitePose.rootSiteEnu ),
-					restored: this.options.hasRestoredManualSitePose()
 				},
 				heightPolicy: {
 					hitTestGroundYEnabled: true,
@@ -185,7 +172,6 @@ export class RegistrationStateRuntime {
 			&& baseline.controlTargets.length > 0;
 		const activeTargets = useBaselineTargets ? baseline.controlTargets : siteConfigTargets;
 		const firstTarget = activeTargets[ 0 ];
-		const firstImageUrl = firstTarget === undefined ? null : getControlTargetImageUrl( firstTarget );
 		const baselineMismatch = baseline !== null
 			&& siteConfigTargets.length > 0
 			&& areControlTargetsEquivalent( baseline.controlTargets, siteConfigTargets ) === false;
@@ -193,10 +179,32 @@ export class RegistrationStateRuntime {
 			? 'none'
 			: useBaselineTargets ? 'baseline' : 'site-config';
 		const controlTargetSourceText = controlTargetSource === 'baseline'
-			? '已保存现场基准'
+			? 'saved site baseline'
 			: controlTargetSource === 'site-config'
-				? '模型配置 JSON / 后端配置'
-				: '未加载控制标志';
+				? 'model config JSON'
+				: 'no control target loaded';
+		const engineeringDataSourceText = resolveEngineeringDataSourceText(
+			controlTargetSource,
+			this.options.getRepositoryDataSource()
+		);
+		const hasMockEngineeringData = hasMockEngineeringDataInConfig(
+			demoModelConfig,
+			activeTargets
+		);
+		const activeControlTargetHasCornersEnu = firstTarget?.cornersEnu !== undefined;
+		const modelLocalToEnuSource = demoModelConfig.configCompleteness.hasExplicitModelLocalToEnu
+			? 'explicit'
+			: registrationSolution === null ? 'missing' : 'control-points';
+		const recommendedFieldHints = resolveRecommendedFieldHints( demoModelConfig );
+		const missingRequiredFields = resolveMissingFormalInspectionFields( {
+			hasSiteOrigin: true,
+			hasModelLocalToEnu: registrationSolution !== null,
+			hasRtkSurveyDataset: demoModelConfig.rtkSurveyDataset !== undefined
+				&& demoModelConfig.rtkSurveyDataset.points.length > 0,
+			hasControlTargets: activeTargets.length > 0,
+			hasPlacementAnchor: demoModelConfig.placementAnchorEnu !== undefined,
+			activeControlTargetHasCornersEnu
+		} );
 
 		this.options.store.patch( {
 			engineeringConfigStatus: {
@@ -206,17 +214,31 @@ export class RegistrationStateRuntime {
 					&& demoModelConfig.rtkSurveyDataset.points.length > 0,
 				hasControlTargets: activeTargets.length > 0,
 				hasPlacementAnchor: demoModelConfig.placementAnchorEnu !== undefined,
+				activeControlTargetHasCornersEnu,
+				hasMockEngineeringData,
+				modelLocalToEnuSource,
+				modelLocalToEnuText: formatModelLocalToEnuSource( modelLocalToEnuSource ),
 				controlTargetCount: activeTargets.length,
 				activeControlTargetId: firstTarget?.id,
+				activeControlTargetName: firstTarget?.name ?? firstTarget?.markerId ?? firstTarget?.id,
 				controlTargetSource,
 				controlTargetSourceText,
+				engineeringDataSourceText,
+				mockWarningText: hasMockEngineeringData
+					? '当前为示例工程坐标，请替换为 RTK 实测数据。'
+					: '',
+				rtkCoordinateSystemText: demoModelConfig.rtkSurveyDataset?.coordinateSystem ?? '-',
+				mockRtkPointIds: resolveMockRtkPointIds( demoModelConfig ),
+				recommendedFieldHints,
+				registrationModeText: demoModelConfig.registration.mode,
+				modelToSiteScaleText: registrationSolution === null
+					? '-'
+					: registrationSolution.modelToSite.scale.toFixed( 6 ),
 				baselineMismatch,
 				rtkPointCount: demoModelConfig.rtkSurveyDataset?.points.length ?? 0,
 				undergroundObjectCount: demoModelConfig.undergroundObjects?.length ?? 0,
 				sensorCount: demoModelConfig.sensors?.length ?? 0,
 				riskPointCount: demoModelConfig.riskPoints?.length ?? 0,
-				markerImageReady: firstImageUrl !== null,
-				markerImageIssue: resolveMarkerImageIssue( firstTarget ),
 				siteOriginText: formatGeodetic(
 					demoModelConfig.siteFrame.origin.lat,
 					demoModelConfig.siteFrame.origin.lon,
@@ -228,17 +250,16 @@ export class RegistrationStateRuntime {
 				controlTargetSummaries: activeTargets.map( ( target ) => ( {
 					id: target.id,
 					name: target.name ?? target.markerId ?? target.id,
-					imageUrl: target.imageUrl ?? target.patternUrl ?? '-',
 					centerEnuText: formatTupleText( target.centerEnu ),
 					cornersEnuText: target.cornersEnu === undefined
-						? '未配置，将尝试由 centerEnu + yawDeg + sizeMeters 推算'
+						? 'not configured, will use centerEnu + yawDeg + sizeMeters'
 						: target.cornersEnu.map( formatTupleText ).join( ' / ' ),
-					yawDegText: typeof target.yawDeg === 'number' ? `${target.yawDeg.toFixed( 2 )}deg` : '未配置',
-					sizeMetersText: typeof target.sizeMeters === 'number' ? `${target.sizeMeters.toFixed( 3 )}m` : '未配置',
-					trackingWidthMetersText: typeof target.trackingWidthMeters === 'number'
-						? `${target.trackingWidthMeters.toFixed( 3 )}m`
-						: '未配置',
-					planeText: target.plane === 'vertical' ? '竖直' : '水平'
+					cornerOrderText: Array.isArray( target.cornerOrder ) && target.cornerOrder.length > 0
+						? target.cornerOrder.join( ' -> ' )
+						: 'leftTop -> rightTop -> rightBottom -> leftBottom',
+					yawDegText: typeof target.yawDeg === 'number' ? `${target.yawDeg.toFixed( 2 )}deg` : 'not configured',
+					sizeMetersText: typeof target.sizeMeters === 'number' ? `${target.sizeMeters.toFixed( 3 )}m` : 'not configured',
+					planeText: target.plane === 'vertical' ? 'vertical' : 'horizontal'
 				} ) )
 			}
 		} );
@@ -252,7 +273,7 @@ export class RegistrationStateRuntime {
 			currentStep: 'load-config',
 			localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
 			targetId: firstTarget?.id ?? null,
-			message: `控制标志来源：${controlTargetSourceText}`
+			message: `control target source: ${controlTargetSourceText}`
 		} ) );
 
 		if ( baselineMismatch ) {
@@ -260,7 +281,7 @@ export class RegistrationStateRuntime {
 				currentStep: 'load-config',
 				localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
 				targetId: firstTarget?.id ?? null,
-				message: '当前已保存现场基准与模型配置可能不一致，请确认是否更新基准配置。'
+				message: 'Saved site baseline control targets may differ from model config targets.'
 			} ) );
 		}
 
@@ -268,8 +289,77 @@ export class RegistrationStateRuntime {
 			currentStep: 'load-config',
 			localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
 			targetId: firstTarget?.id ?? null,
-			message: '工程真值配置状态已解析'
+			message: 'Engineering config status resolved.'
 		} ) );
+		this.logEngineeringCalibrationConfigStatus( {
+			demoModelConfig,
+			firstTarget,
+			missingRequiredFields,
+			hasMockEngineeringData,
+			hasModelLocalToEnu: registrationSolution !== null,
+			hasRtkSurveyDataset: demoModelConfig.rtkSurveyDataset !== undefined
+				&& demoModelConfig.rtkSurveyDataset.points.length > 0,
+			modelLocalToEnuSource,
+			hitTestReady: this.options.store.getState().arSessionPhase !== 'scanning',
+			localizationReady: this.options.getActiveArFromEnuSolution() !== null
+		} );
+
+	}
+
+	private logEngineeringCalibrationConfigStatus(args: {
+		demoModelConfig: DemoModelConfig;
+		firstTarget: VisualControlTarget | undefined;
+		missingRequiredFields: string[];
+		hasMockEngineeringData: boolean;
+		hasModelLocalToEnu: boolean;
+		hasRtkSurveyDataset: boolean;
+		modelLocalToEnuSource: 'explicit' | 'control-points' | 'missing';
+		hitTestReady: boolean;
+		localizationReady: boolean;
+	}): void {
+
+		const signature = [
+			args.demoModelConfig.modelId,
+			args.firstTarget?.id ?? 'none',
+			args.missingRequiredFields.join( ',' ),
+			args.hasMockEngineeringData ? 'mock' : 'formal',
+			args.hasModelLocalToEnu ? 'm2e' : 'no-m2e',
+			args.modelLocalToEnuSource,
+			args.hasRtkSurveyDataset ? 'rtk' : 'no-rtk'
+		].join( '|' );
+		if ( signature === this.lastEngineeringConfigLogSignature ) {
+			return;
+		}
+
+		this.lastEngineeringConfigLogSignature = signature;
+		const payload = {
+			siteId: args.demoModelConfig.modelId,
+			modelId: args.demoModelConfig.modelId,
+			sessionId: this.options.getCurrentSessionId(),
+			targetId: args.firstTarget?.id ?? null,
+			currentCorner: null,
+			capturedPointCount: this.options.store.getState().markerCalibration.capturedCornerCount,
+			source: args.hasMockEngineeringData ? 'mock' : this.options.getRepositoryDataSource() === 'api' ? 'backend' : 'json',
+			hasSiteOrigin: true,
+			hasModelLocalToEnu: args.hasModelLocalToEnu,
+			modelLocalToEnuSource: args.modelLocalToEnuSource,
+			hasCornersEnu: args.firstTarget?.cornersEnu !== undefined,
+			hasRtkSurveyDataset: args.hasRtkSurveyDataset,
+			hitTestReady: args.hitTestReady,
+			localizationReady: args.localizationReady,
+			modelPlaced: this.options.store.getState().placementSummary.positionText !== '-',
+			missingRequiredFields: args.missingRequiredFields,
+			hasMockEngineeringData: args.hasMockEngineeringData,
+			createdAt: Date.now()
+		};
+
+		console.info( '[EngineeringCalibrationLoaded]', payload );
+		if ( args.missingRequiredFields.length === 0 && args.hasMockEngineeringData === false ) {
+			console.info( '[EngineeringCalibrationConfigValidated]', payload );
+			return;
+		}
+
+		console.warn( '[EngineeringCalibrationConfigInvalid]', payload );
 
 	}
 
@@ -286,15 +376,15 @@ export class RegistrationStateRuntime {
 				siteCalibrationBaseline: {
 					...createDefaultSiteCalibrationBaselineState(),
 					statusText: this.options.getWorkflowMode() === 'ar-inspection'
-						? '当前站点未加载现场基准'
-						: '当前站点还没有保存现场基准'
+						? 'No saved site baseline loaded for this site.'
+						: 'No saved site baseline for this site.'
 				}
 			} );
 			if ( options?.silentStatus !== true && siteId !== null ) {
 				this.options.setStatus(
 					this.options.getWorkflowMode() === 'ar-inspection'
-						? '正在加载现场基准，当前站点尚未保存基准配置。'
-						: '当前站点还没有保存现场基准。'
+						? 'No saved site baseline for this site. Please align manually.'
+						: 'No saved site baseline for this site.'
 				);
 			}
 			return null;
@@ -306,8 +396,8 @@ export class RegistrationStateRuntime {
 				siteId: baseline.siteId,
 				source: baseline.source,
 				statusText: this.options.getWorkflowMode() === 'ar-inspection'
-					? '现场基准已加载'
-					: '当前站点已有现场基准',
+					? 'Site baseline loaded.'
+					: 'Site baseline available.',
 				controlTargetCount: baseline.controlTargets.length,
 				updatedAtText: formatTimestampText( baseline.updatedAt ?? baseline.createdAt )
 			}
@@ -315,37 +405,20 @@ export class RegistrationStateRuntime {
 
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
 			for ( const target of baseline.controlTargets ) {
-				const imageUrl = getControlTargetImageUrl( target );
-				if ( imageUrl === null ) {
-					console.warn( '[MarkerImageUrlMissing]', {
-						mode: this.options.getWorkflowMode(),
-						siteId: baseline.siteId,
-						sessionId: this.options.getCurrentSessionId(),
-						targetId: target.id,
-						imageUrl: target.imageUrl ?? null,
-						patternUrl: target.patternUrl ?? null,
-						createdAt: Date.now()
-					} );
-					continue;
-				}
-
 				console.info( '[ArSessionUsingBaselineControlTargets]', {
 					mode: this.options.getWorkflowMode(),
 					siteId: baseline.siteId,
 					sessionId: this.options.getCurrentSessionId(),
 					targetId: target.id,
-					imageUrl,
-					patternUrl: target.patternUrl ?? null,
-					trackedImagesCount: baseline.controlTargets.length,
+					controlTargetCount: baseline.controlTargets.length,
 					createdAt: Date.now(),
-					source: baseline.source,
-					invalidPatt: isPattFileUrl( imageUrl )
+					source: baseline.source
 				} );
 			}
 		}
 
 		if ( options?.silentStatus !== true && this.options.getWorkflowMode() === 'ar-inspection' ) {
-			this.options.setStatus( '正在加载现场基准。' );
+			this.options.setStatus( 'Loading site baseline.' );
 		}
 
 		return baseline;
@@ -473,6 +546,117 @@ function formatTupleText(tuple: [ number, number, number ]): string {
 
 }
 
+function resolveEngineeringDataSourceText(
+	controlTargetSource: 'site-config' | 'baseline' | 'none',
+	repositoryDataSource: 'local' | 'api'
+): string {
+
+	if ( controlTargetSource === 'baseline' ) {
+		return repositoryDataSource === 'api' ? 'backend' : 'localStorage';
+	}
+
+	if ( controlTargetSource === 'site-config' ) {
+		return 'json';
+	}
+
+	return 'none';
+
+}
+
+function formatModelLocalToEnuSource(
+	source: 'explicit' | 'control-points' | 'missing'
+): string {
+
+	switch ( source ) {
+		case 'explicit':
+			return '显式配置';
+		case 'control-points':
+			return '由 controlPoints 求解';
+		case 'missing':
+			return '缺失';
+	}
+
+}
+
+function hasMockEngineeringDataInConfig(
+	config: DemoModelConfig,
+	controlTargets: VisualControlTarget[]
+): boolean {
+
+	const searchableText = [
+		config.modelId,
+		...( config.rtkSurveyDataset?.points ?? [] ).map( ( point ) => point.note ?? '' ),
+		...controlTargets.map( ( target ) => {
+			const maybeNote = ( target as VisualControlTarget & { note?: unknown } ).note;
+			return typeof maybeNote === 'string' ? maybeNote : '';
+		} )
+	].join( ' ' ).toLowerCase();
+
+	return /mock|demo|placeholder|debug/.test( searchableText );
+
+}
+
+function resolveMockRtkPointIds(config: DemoModelConfig): string[] {
+
+	return ( config.rtkSurveyDataset?.points ?? [] )
+		.filter( ( point ) => /mock|demo|placeholder|debug/i.test( point.note ?? '' ) )
+		.map( ( point ) => point.id );
+
+}
+
+function resolveRecommendedFieldHints(config: DemoModelConfig): string[] {
+
+	const hints: string[] = [];
+	if ( config.configCompleteness.hasExplicitSiteId === false ) {
+		hints.push( '建议补充 siteId' );
+	}
+	if ( config.configCompleteness.hasSiteName === false ) {
+		hints.push( '建议补充 siteName' );
+	}
+	if ( config.configCompleteness.hasExplicitModelLocalToEnu === false ) {
+		hints.push( '建议补充显式 modelLocalToEnu' );
+	}
+	if ( config.configCompleteness.controlPointsHaveEnu === false ) {
+		hints.push( '建议补充 controlPoints[].enu' );
+	}
+
+	return hints;
+
+}
+
+function resolveMissingFormalInspectionFields(args: {
+	hasSiteOrigin: boolean;
+	hasModelLocalToEnu: boolean;
+	hasRtkSurveyDataset: boolean;
+	hasControlTargets: boolean;
+	hasPlacementAnchor: boolean;
+	activeControlTargetHasCornersEnu: boolean;
+}): string[] {
+
+	const missing: string[] = [];
+	if ( args.hasSiteOrigin === false ) {
+		missing.push( 'siteOrigin' );
+	}
+	if ( args.hasModelLocalToEnu === false ) {
+		missing.push( 'modelLocalToEnu' );
+	}
+	if ( args.hasControlTargets === false ) {
+		missing.push( 'controlTargets' );
+	}
+	if ( args.activeControlTargetHasCornersEnu === false ) {
+		missing.push( 'controlTargets[].cornersEnu' );
+	}
+	if ( args.hasRtkSurveyDataset === false ) {
+		missing.push( 'rtkSurveyDataset' );
+	}
+	if ( args.hasPlacementAnchor === false ) {
+		missing.push( 'placementAnchorEnu' );
+	}
+
+	return missing;
+
+}
+
 function areControlTargetsEquivalent(
 	left: VisualControlTarget[],
 	right: VisualControlTarget[]
@@ -489,7 +673,6 @@ function areControlTargetsEquivalent(
 		}
 
 		return target.id === other.id
-			&& ( target.imageUrl ?? target.patternUrl ?? '' ) === ( other.imageUrl ?? other.patternUrl ?? '' )
 			&& areEnuTuplesEqual( target.centerEnu, other.centerEnu );
 	} );
 
@@ -503,29 +686,6 @@ function areEnuTuplesEqual(
 	return Math.abs( left[ 0 ] - right[ 0 ] ) <= 1e-6
 		&& Math.abs( left[ 1 ] - right[ 1 ] ) <= 1e-6
 		&& Math.abs( left[ 2 ] - right[ 2 ] ) <= 1e-6;
-
-}
-
-function resolveMarkerImageIssue(target: VisualControlTarget | undefined): string | undefined {
-
-	if ( target === undefined ) {
-		return '未配置控制标志';
-	}
-
-	const imageUrl = target.imageUrl ?? target.patternUrl;
-	if ( typeof imageUrl !== 'string' || imageUrl.trim().length === 0 ) {
-		return '当前控制标志未配置可识别图片';
-	}
-
-	if ( isPattFileUrl( imageUrl ) ) {
-		return '.patt 不能用于 WebXR Image Tracking，请配置 PNG/JPG/WebP 图片';
-	}
-
-	if ( getControlTargetImageUrl( target ) === null ) {
-		return '控制标志图片格式无效，请配置 PNG/JPG/WebP 图片';
-	}
-
-	return undefined;
 
 }
 

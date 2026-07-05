@@ -49,15 +49,12 @@ export interface MarkerEngineeringConfig {
 	id: string;
 	bindControlPointId?: string;
 	sizeMeters: number;
-	trackingWidthMeters?: number;
 	enu?: {
 		east: number;
 		north: number;
 		up?: number;
 	};
 	yawDeg?: number;
-	patternUrl?: string;
-	imageUrl?: string;
 	centerEnu?: [ number, number, number ];
 	cornersEnu?: [
 		[ number, number, number ],
@@ -95,6 +92,12 @@ export interface DemoModelConfig {
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
+	configCompleteness: {
+		hasExplicitSiteId: boolean;
+		hasSiteName: boolean;
+		hasExplicitModelLocalToEnu: boolean;
+		controlPointsHaveEnu: boolean;
+	};
 }
 
 interface LegacyControlPointShape {
@@ -290,7 +293,13 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
-		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : []
+		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
+		configCompleteness: {
+			hasExplicitSiteId: false,
+			hasSiteName: hasOwnObjectKey( config, 'siteName' ),
+			hasExplicitModelLocalToEnu: hasOwnObjectKey( config, 'modelLocalToEnu' ),
+			controlPointsHaveEnu: Object.values( config.controlPoints ).every( hasControlPointEnu )
+		}
 	};
 
 }
@@ -329,7 +338,13 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
-		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : []
+		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
+		configCompleteness: {
+			hasExplicitSiteId: true,
+			hasSiteName: hasOwnObjectKey( config, 'siteName' ),
+			hasExplicitModelLocalToEnu: hasOwnObjectKey( config, 'modelLocalToEnu' ),
+			controlPointsHaveEnu: ( config.controlPoints ?? [] ).every( hasControlPointEnu )
+		}
 	};
 
 }
@@ -490,12 +505,6 @@ export function loadMarkerEngineeringConfigs(
 		) {
 			throw new Error( `markers[${index}] is missing a valid sizeMeters.` );
 		}
-		const trackingWidthMeters = typeof marker.trackingWidthMeters === 'number'
-			&& Number.isFinite( marker.trackingWidthMeters )
-			&& marker.trackingWidthMeters > 0
-			? marker.trackingWidthMeters
-			: undefined;
-
 		const bindControlPointId = typeof marker.bindControlPointId === 'string'
 			&& marker.bindControlPointId.trim().length > 0
 			? marker.bindControlPointId.trim()
@@ -511,22 +520,12 @@ export function loadMarkerEngineeringConfigs(
 		const yawDeg = typeof marker.yawDeg === 'number' && Number.isFinite( marker.yawDeg )
 			? marker.yawDeg
 			: 0;
-		const patternUrl = typeof marker.patternUrl === 'string' && marker.patternUrl.trim().length > 0
-			? marker.patternUrl.trim()
-			: undefined;
-		const imageUrl = typeof marker.imageUrl === 'string' && marker.imageUrl.trim().length > 0
-			? marker.imageUrl.trim()
-			: undefined;
-
 		return {
 			id: marker.id.trim(),
 			bindControlPointId,
 			sizeMeters: marker.sizeMeters,
-			trackingWidthMeters,
 			enu,
 			yawDeg,
-			patternUrl,
-			imageUrl,
 			centerEnu: normalizeEnuTuple( marker.centerEnu ),
 			cornersEnu: normalizeCornersEnu( marker.cornersEnu ),
 			plane: marker.plane === 'vertical' ? 'vertical' : 'horizontal'
@@ -597,18 +596,14 @@ function normalizeSiteConfigControlTargets(
 			return [];
 		}
 
-		const imageUrl = marker.imageUrl ?? marker.patternUrl;
 		return [ {
 			id: marker.id,
 			name: marker.bindControlPointId ?? marker.id,
 			markerId: marker.id,
-			imageUrl,
-			patternUrl: marker.patternUrl,
 			centerEnu,
 			cornersEnu: marker.cornersEnu,
 			yawDeg: marker.yawDeg,
 			sizeMeters: marker.sizeMeters,
-			trackingWidthMeters: marker.trackingWidthMeters ?? marker.sizeMeters,
 			plane: marker.plane ?? 'horizontal',
 			cornerOrder: [ 'leftTop', 'rightTop', 'rightBottom', 'leftBottom' ]
 		} satisfies VisualControlTarget ];
@@ -666,9 +661,6 @@ function normalizeVisualControlTargets(
 			cornersEnu: normalizeCornersEnu( target.cornersEnu ),
 			yawDeg: typeof target.yawDeg === 'number' && Number.isFinite( target.yawDeg ) ? target.yawDeg : undefined,
 			sizeMeters: typeof target.sizeMeters === 'number' && Number.isFinite( target.sizeMeters ) ? target.sizeMeters : undefined,
-			trackingWidthMeters: typeof target.trackingWidthMeters === 'number' && Number.isFinite( target.trackingWidthMeters )
-				? target.trackingWidthMeters
-				: undefined,
 			plane: target.plane === 'vertical' ? 'vertical' : 'horizontal'
 		} ];
 	} );
@@ -686,6 +678,22 @@ function normalizeEnuTuple(value: [ number, number, number ] | number[] | undefi
 	}
 
 	return [ value[ 0 ], value[ 1 ], value[ 2 ] ];
+
+}
+
+function hasOwnObjectKey(value: object, key: string): boolean {
+
+	return Object.prototype.hasOwnProperty.call( value, key );
+
+}
+
+function hasControlPointEnu(value: unknown): boolean {
+
+	if ( typeof value !== 'object' || value === null ) {
+		return false;
+	}
+
+	return hasOwnObjectKey( value, 'enu' );
 
 }
 

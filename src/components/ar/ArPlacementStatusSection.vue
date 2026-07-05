@@ -21,12 +21,12 @@ const props = withDefaults( defineProps<{
 const placementCards = computed( () => [
 	{ label: '工程配置', value: formatConfigStatus( props.state ) },
 	{ label: '控制标志来源', value: props.state.engineeringConfigStatus.controlTargetSourceText },
-	{ label: 'AR 跟踪状态', value: formatSessionPhase( props.state.arSessionPhase ) },
-	{ label: 'Marker 校正状态', value: formatMarkerCalibrationStatus( props.state ) },
-	{ label: '当前定位 source', value: formatLocalizationSource( props.state.registrationChainDebug.arSessionLocalization.source ) },
-	{ label: '模型放置状态', value: formatModelPlacementStatus( props.state ) },
-	{ label: '放置模式', value: formatPlacementMode( props.state.placementMode ) },
-	{ label: '巡查放置方式', value: formatInspectionPlacementSource( props.state.inspectionPlacementSource ) },
+	{ label: '地面检测', value: formatSessionPhase( props.state.arSessionPhase ) },
+	{ label: '当前会话空间校正', value: formatMarkerCalibrationStatus( props.state ) },
+	{ label: '校正 source', value: formatLocalizationSource( props.state.registrationChainDebug.arSessionLocalization.source ) },
+	{ label: '模型自动放置', value: formatModelPlacementStatus( props.state ) },
+	{ label: '工程显示模式', value: formatPlacementMode( props.state.placementMode ) },
+	{ label: '巡查校正方式', value: formatInspectionPlacementSource( props.state.inspectionPlacementSource ) },
 	{ label: '状态说明', value: props.state.registrationStatusDetail || '-', wide: true },
 	{ label: '模型位置', value: props.state.placementSummary.positionText, wide: true },
 	{ label: '模型姿态', value: props.state.placementSummary.quaternionText, wide: true },
@@ -54,16 +54,16 @@ function formatConfigStatus(state: RegistrationStoreState): string {
 
 	const config = state.engineeringConfigStatus;
 	if ( config.hasSiteOrigin && config.hasModelLocalToEnu && config.hasRtkSurveyDataset && config.hasControlTargets ) {
-		return '工程真值配置已加载';
+		return '工程配置已加载';
 	}
 
-	return '工程真值配置不完整';
+	return '工程配置不完整';
 
 }
 
 function formatPlacementMode(mode: ArPlacementMode): string {
 
-	return mode === 'localized' ? '正式工程定位' : '临时演示放置';
+	return mode === 'localized' ? '按工程坐标显示' : 'debug-only';
 
 }
 
@@ -71,13 +71,13 @@ function formatSessionPhase(phase: ArSessionPhase): string {
 
 	switch ( phase ) {
 		case 'scanning':
-			return '跟踪中，等待平面';
+			return '请缓慢移动设备，扫描地面';
 		case 'ready-to-place':
-			return '平面已识别，等待 Marker / 手动空间校正';
+			return '地面检测完成，等待当前会话空间校正';
 		case 'placing':
-			return '正在根据空间校正放置模型';
+			return '正在等待模型自动放置';
 		case 'placed':
-			return '模型已放置';
+			return '模型已按工程坐标显示';
 		default:
 			return phase;
 	}
@@ -87,10 +87,8 @@ function formatSessionPhase(phase: ArSessionPhase): string {
 function formatInspectionPlacementSource(source: InspectionPlacementSource): string {
 
 	switch ( source ) {
-		case 'marker-auto':
-			return '隐藏式 Marker 自动识别';
-		case 'plane-hit-test':
-			return '临时演示放置';
+		case 'manual-marker':
+			return '手动 Marker 四角点校正';
 		default:
 			return source;
 	}
@@ -101,18 +99,14 @@ function formatLocalizationSource(source: string): string {
 
 	switch ( source ) {
 		case 'marker':
-			return '控制标志校正';
-		case 'marker-auto-image':
-			return '自动控制标志识别';
-		case 'manual-site-pose':
-			return '手动场景定位';
+			return 'Marker 四角点';
 		case 'rtk':
 			return 'RTK 预留来源，未接入实时设备定位';
 		case 'fallback':
 			return 'fallback';
 		case 'unknown':
 		case '':
-			return '尚未建立当前会话定位解';
+			return '尚未建立当前会话空间校正';
 		default:
 			return source;
 	}
@@ -122,47 +116,35 @@ function formatLocalizationSource(source: string): string {
 function formatMarkerCalibrationStatus(state: RegistrationStoreState): string {
 
 	if ( state.markerCalibration.applied ) {
-		return '控制标志校正完成';
+		return '当前会话空间校正完成';
 	}
 
 	if ( state.markerCalibration.solved ) {
-		return '已求解，等待应用到模型';
+		return '已求解，等待模型自动放置';
 	}
 
 	if ( state.markerCalibration.active ) {
 		return `手动采集中：${state.markerCalibration.capturedCornerCount}/${state.markerCalibration.expectedCornerCount}`;
 	}
 
-	if ( state.inspectionPlacementSource === 'marker-auto' ) {
-		return '自动识别中，等待控制标志进入视野';
-	}
-
-	return '未校正';
+	return '尚未完成';
 
 }
 
 function formatModelPlacementStatus(state: RegistrationStoreState): string {
 
-	if ( state.placementMode === 'hit-test-temporary' && state.placementSummary.positionText !== '-' ) {
-		return '当前为临时演示放置';
-	}
-
 	if ( state.placementSummary.positionText !== '-' && state.registrationChainDebug.arSessionLocalization.available ) {
 		return '模型已按工程坐标显示';
 	}
 
-	return '模型未正式放置';
+	return '模型尚未按工程坐标显示';
 
 }
 
 function resolvePlacementHint(state: RegistrationStoreState): string {
 
-	if ( state.placementMode === 'hit-test-temporary' ) {
-		return '当前为临时演示放置，模型底部已对齐地面，不代表工程真实位置。';
-	}
-
 	if ( state.engineeringConfigStatus.hasControlTargets === false ) {
-		return '当前模型未配置控制标志，无法进行正式 AR 空间校正。';
+		return '当前模型未配置控制标志，无法进行当前会话空间校正。';
 	}
 
 	if ( state.engineeringConfigStatus.hasRtkSurveyDataset === false ) {
@@ -170,7 +152,7 @@ function resolvePlacementHint(state: RegistrationStoreState): string {
 	}
 
 	if ( state.engineeringConfigStatus.hasPlacementAnchor === false ) {
-		return '当前模型未配置地面参考点，手动场景定位可能不可用。';
+		return '当前模型未配置 placementAnchorEnu，建议补充工程参考点。';
 	}
 
 	if ( state.engineeringConfigStatus.baselineMismatch ) {
@@ -179,22 +161,16 @@ function resolvePlacementHint(state: RegistrationStoreState): string {
 
 	switch ( state.registrationChainDebug.arSessionLocalization.source ) {
 		case 'marker':
-		case 'marker-auto-image':
-		case 'manual-site-pose':
-			return '模型已按工程坐标显示，未强制贴地。';
+			return '模型已按工程坐标显示。';
 		default:
 			return state.arSessionPhase === 'ready-to-place'
-				? '已检测到平面，请继续对准现场控制标志完成空间校正。'
-				: '当前未完成空间校正，不能作为正式巡查定位结果。';
+				? '已检测到地面，但尚未完成空间校正，不能自动放置工程模型。'
+				: '当前未完成空间校正，不能作为正式巡查结果。';
 	}
 
 }
 
 function resolveCurrentStep(state: RegistrationStoreState): string {
-
-	if ( state.placementMode === 'hit-test-temporary' ) {
-		return 'debug-temporary-placement';
-	}
 
 	if ( state.appMode !== 'ar-session' ) {
 		return 'enter-ar';
@@ -234,7 +210,15 @@ function createUiLogPayload(
 		currentStep,
 		localizationSource: state.registrationChainDebug.arSessionLocalization.source,
 		targetId: state.engineeringConfigStatus.activeControlTargetId ?? state.markerCalibration.markerId,
-		message
+		message,
+		hasSiteOrigin: state.engineeringConfigStatus.hasSiteOrigin,
+		hasModelLocalToEnu: state.engineeringConfigStatus.hasModelLocalToEnu,
+		modelLocalToEnuSource: state.engineeringConfigStatus.modelLocalToEnuSource,
+		hasCornersEnu: state.engineeringConfigStatus.activeControlTargetHasCornersEnu,
+		hasRtkSurveyDataset: state.engineeringConfigStatus.hasRtkSurveyDataset,
+		hitTestReady: state.arSessionPhase !== 'scanning',
+		localizationReady: state.registrationChainDebug.arSessionLocalization.available,
+		modelPlaced: state.placementSummary.positionText !== '-'
 	};
 
 }
@@ -245,7 +229,7 @@ function createUiLogPayload(
 		<ArInfoGrid :items="placementCards" />
 		<div
 			class="runtime-banner"
-			:class="{ warning: state.placementMode === 'hit-test-temporary' || state.registrationChainDebug.arSessionLocalization.available === false }"
+			:class="{ warning: state.registrationChainDebug.arSessionLocalization.available === false }"
 		>
 			{{ placementHint }}
 		</div>

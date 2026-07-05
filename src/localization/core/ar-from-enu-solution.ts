@@ -3,8 +3,6 @@ import type { SavedMarkerLocalizationResult } from '@/localization/marker/marker
 
 export type ArLocalizationSource =
 	| 'marker'
-	| 'marker-auto-image'
-	| 'manual-site-pose'
 	| 'rtk'
 	| 'fallback'
 	| 'vps'

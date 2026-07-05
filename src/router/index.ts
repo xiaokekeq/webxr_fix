@@ -18,11 +18,6 @@ const routes: RouteRecordRaw[] = [
 		meta: { title: '现场基准配置', workflowMode: 'site-baseline-config' }
 	},
 	{
-		path: '/marker-debug',
-		component: () => import( '@/views/MarkerDebugView.vue' ),
-		meta: { title: 'Marker 调试' }
-	},
-	{
 		path: '/map',
 		component: () => import( '@/views/MapView.vue' ),
 		meta: { title: '地图', tab: 2 }

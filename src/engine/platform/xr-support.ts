@@ -3,9 +3,7 @@ import type {
 	SetStatus,
 	XRAnchorHandle,
 	XRHitTestController,
-	XRHitTestQuality,
-	XrImageTrackingState,
-	XrSessionRequestOptions
+	XRHitTestQuality
 } from '@/features/ar/types/runtime-types.js';
 
 interface CreateXRHitTestControllerOptions {
@@ -32,12 +30,6 @@ interface DepthAwareSessionInit extends XRDepthSensingSessionInit {
 	domOverlay?: {
 		root: HTMLElement;
 	};
-	trackedImages?: XRTrackedImageInit[];
-}
-
-interface XRTrackedImageInit {
-	image: ImageBitmap;
-	widthInMeters: number;
 }
 
 const reticlePosition = new THREE.Vector3();
@@ -108,13 +100,6 @@ export function createXRHitTestController(
 	let recentHitSamples: Array<{ position: THREE.Vector3; time: number }> = [];
 	let sessionRequestPending = false;
 	let activeSession: XRSession | null = null;
-	let trackedImageTargetIds: string[] = [];
-	let imageTrackingState: XrImageTrackingState = {
-		requested: false,
-		supported: false,
-		active: false,
-		reason: 'idle'
-	};
 
 	function setup(): void {
 
@@ -134,15 +119,6 @@ export function createXRHitTestController(
 		lastHitTestResult = null;
 		anchorSupportDetected = false;
 		recentHitSamples = [];
-		imageTrackingState = {
-			...imageTrackingState,
-			active: imageTrackingState.requested && imageTrackingState.supported,
-			reason: imageTrackingState.requested
-				? imageTrackingState.supported
-					? 'session-active'
-					: imageTrackingState.reason
-				: 'idle'
-		};
 		setStatus( '已进入 AR，请缓慢移动手机，让系统持续识别地面或墙面。' );
 
 		const session = renderer.xr.getSession();
@@ -184,13 +160,6 @@ export function createXRHitTestController(
 		lastHitTestResult = null;
 		anchorSupportDetected = false;
 		recentHitSamples = [];
-		trackedImageTargetIds = [];
-		imageTrackingState = {
-			requested: false,
-			supported: false,
-			active: false,
-			reason: 'session-ended'
-		};
 		onSessionEnd?.();
 		setStatus( 'AR 会话已结束，可再次进入 AR。' );
 
@@ -370,22 +339,6 @@ export function createXRHitTestController(
 
 	}
 
-	function getImageTrackingState(): XrImageTrackingState {
-
-		return { ...imageTrackingState };
-
-	}
-
-	function getTrackedImageTargetId(index: number): string | null {
-
-		if ( index < 0 || index >= trackedImageTargetIds.length ) {
-			return null;
-		}
-
-		return trackedImageTargetIds[ index ] ?? null;
-
-	}
-
 	return {
 		setup,
 		update,
@@ -395,9 +348,7 @@ export function createXRHitTestController(
 		getHitTestQuality,
 		supportsAnchors,
 		createAnchorFromLatestHit,
-		getImageTrackingState,
-		getTrackedImageTargetId,
-		async requestSession(options?: XrSessionRequestOptions) {
+		async requestSession() {
 
 			if ( renderer.xr.isPresenting || sessionRequestPending ) {
 				return;
@@ -412,75 +363,10 @@ export function createXRHitTestController(
 			setStatus( '正在请求 AR 会话...' );
 
 			try {
-				const trackedImageResources = await resolveTrackedImageResources( options?.trackedImages ?? [] );
-				const shouldAttemptImageTracking = trackedImageResources.trackedImages.length > 0;
-				console.info( '[AutoMarkerImageTrackingRequested]', {
-					requestedTargetsCount: options?.trackedImages?.length ?? 0,
-					trackedImagesCount: trackedImageResources.trackedImages.length,
-					targetIds: trackedImageResources.targetIds,
-					reason: trackedImageResources.reason
-				} );
-				trackedImageTargetIds = trackedImageResources.targetIds;
-				imageTrackingState = {
-					requested: ( options?.trackedImages?.length ?? 0 ) > 0,
-					supported: shouldAttemptImageTracking,
-					active: false,
-					reason: shouldAttemptImageTracking
-						? 'requesting'
-						: ( options?.trackedImages?.length ?? 0 ) > 0
-							? trackedImageResources.reason
-							: 'idle'
-				};
-				let session: XRSession;
-				const imageTrackingSessionInit = createSessionInit( trackedImageResources.trackedImages );
-				console.info( '[AutoMarkerImageTrackingSessionInit]', {
-					optionalFeatures: imageTrackingSessionInit.optionalFeatures ?? [],
-					hasImageTrackingFeature: ( imageTrackingSessionInit.optionalFeatures ?? [] ).includes( 'image-tracking' ),
-					trackedImagesCount: trackedImageResources.trackedImages.length,
-					targetIds: trackedImageResources.targetIds
-				} );
-
-				try {
-					session = await navigator.xr.requestSession(
-						'immersive-ar',
-						imageTrackingSessionInit
-					);
-					imageTrackingState = {
-						...imageTrackingState,
-						supported: shouldAttemptImageTracking,
-						active: shouldAttemptImageTracking,
-						reason: shouldAttemptImageTracking ? 'enabled' : imageTrackingState.reason
-					};
-				} catch ( error ) {
-					if ( shouldAttemptImageTracking === false ) {
-						throw error;
-					}
-
-					console.warn( '[AutoMarkerImageTrackingUnsupported]', {
-						trackedImagesCount: trackedImageResources.trackedImages.length,
-						targetIds: trackedImageResources.targetIds,
-						reason: 'request-session-failed',
-						error
-					} );
-					trackedImageTargetIds = [];
-					imageTrackingState = {
-						requested: true,
-						supported: false,
-						active: false,
-						reason: 'unsupported'
-					};
-					const fallbackSessionInit = createSessionInit();
-					console.info( '[AutoMarkerImageTrackingSessionInit]', {
-						optionalFeatures: fallbackSessionInit.optionalFeatures ?? [],
-						hasImageTrackingFeature: ( fallbackSessionInit.optionalFeatures ?? [] ).includes( 'image-tracking' ),
-						trackedImagesCount: 0,
-						targetIds: []
-					} );
-					session = await navigator.xr.requestSession(
-						'immersive-ar',
-						fallbackSessionInit
-					);
-				}
+				const session = await navigator.xr.requestSession(
+					'immersive-ar',
+					createSessionInit()
+				);
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( session );
 			} catch ( error ) {
@@ -521,145 +407,12 @@ export function createXRHitTestController(
 
 }
 
-function createSessionInit(trackedImages?: XRTrackedImageInit[]): DepthAwareSessionInit {
+function createSessionInit(): DepthAwareSessionInit {
 
-	const sessionInit: DepthAwareSessionInit = {
+	return {
 		requiredFeatures: [ 'hit-test' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		domOverlay: { root: document.body }
-	};
-	if ( trackedImages !== undefined && trackedImages.length > 0 ) {
-		sessionInit.optionalFeatures = [ ...( sessionInit.optionalFeatures ?? [] ), 'image-tracking' ];
-		sessionInit.trackedImages = trackedImages;
-	}
-
-	return sessionInit;
-
-}
-
-async function resolveTrackedImageResources(
-	definitions: NonNullable<XrSessionRequestOptions['trackedImages']>
-): Promise<{
-	trackedImages: XRTrackedImageInit[];
-	targetIds: string[];
-	reason: string;
-}> {
-
-	if ( definitions.length === 0 ) {
-		console.info( '[AutoMarkerTrackedImagesEmpty]', {
-			siteId: null,
-			markerId: null,
-			patternUrl: null,
-			trackingWidthMeters: null,
-			sizeMeters: null,
-			imageLoaded: false,
-			trackedImagesCount: 0,
-			reason: 'no-targets'
-		} );
-		return {
-			trackedImages: [],
-			targetIds: [],
-			reason: 'no-targets'
-		};
-	}
-
-	if ( typeof createImageBitmap !== 'function' ) {
-		const firstDefinition = definitions[ 0 ];
-		console.info( '[AutoMarkerTrackedImagesEmpty]', {
-			siteId: firstDefinition?.siteId ?? null,
-			markerId: firstDefinition?.markerId ?? firstDefinition?.targetId ?? null,
-			patternUrl: firstDefinition?.patternUrl ?? firstDefinition?.imageUrl ?? null,
-			trackingWidthMeters: firstDefinition?.trackingWidthMeters ?? firstDefinition?.widthInMeters ?? null,
-			sizeMeters: firstDefinition?.sizeMeters ?? null,
-			imageLoaded: false,
-			trackedImagesCount: 0,
-			reason: 'create-image-bitmap-unavailable'
-		} );
-		return {
-			trackedImages: [],
-			targetIds: [],
-			reason: 'create-image-bitmap-unavailable'
-		};
-	}
-
-	const trackedImages: XRTrackedImageInit[] = [];
-	const targetIds: string[] = [];
-
-	for ( const definition of definitions ) {
-		console.info( '[AutoMarkerTrackedImagesPreparing]', {
-			siteId: definition.siteId ?? null,
-			markerId: definition.markerId ?? definition.targetId,
-			patternUrl: definition.patternUrl ?? definition.imageUrl,
-			trackingWidthMeters: definition.trackingWidthMeters ?? definition.widthInMeters,
-			sizeMeters: definition.sizeMeters ?? null,
-			imageLoaded: false,
-			trackedImagesCount: trackedImages.length
-		} );
-		try {
-			const response = await fetch( definition.imageUrl );
-			if ( response.ok === false ) {
-				throw new Error( `HTTP ${response.status}` );
-			}
-
-			const blob = await response.blob();
-			const image = await createImageBitmap( blob );
-			trackedImages.push( {
-				image,
-				widthInMeters: definition.widthInMeters
-			} );
-			targetIds.push( definition.targetId );
-			console.info( '[AutoMarkerTrackedImageLoaded]', {
-				siteId: definition.siteId ?? null,
-				markerId: definition.markerId ?? definition.targetId,
-				patternUrl: definition.patternUrl ?? definition.imageUrl,
-				trackingWidthMeters: definition.trackingWidthMeters ?? definition.widthInMeters,
-				sizeMeters: definition.sizeMeters ?? null,
-				imageLoaded: true,
-				trackedImagesCount: trackedImages.length
-			} );
-		} catch ( error ) {
-			console.warn( '[AutoMarkerImageLoadFailed]', {
-				siteId: definition.siteId ?? null,
-				markerId: definition.markerId ?? definition.targetId,
-				patternUrl: definition.patternUrl ?? definition.imageUrl,
-				trackingWidthMeters: definition.trackingWidthMeters ?? definition.widthInMeters,
-				sizeMeters: definition.sizeMeters ?? null,
-				imageLoaded: false,
-				trackedImagesCount: trackedImages.length,
-				error
-			} );
-		}
-	}
-
-	if ( trackedImages.length === 0 ) {
-		const firstDefinition = definitions[ 0 ];
-		console.info( '[AutoMarkerTrackedImagesEmpty]', {
-			siteId: firstDefinition?.siteId ?? null,
-			markerId: firstDefinition?.markerId ?? firstDefinition?.targetId ?? null,
-			patternUrl: firstDefinition?.patternUrl ?? firstDefinition?.imageUrl ?? null,
-			trackingWidthMeters: firstDefinition?.trackingWidthMeters ?? firstDefinition?.widthInMeters ?? null,
-			sizeMeters: firstDefinition?.sizeMeters ?? null,
-			imageLoaded: false,
-			trackedImagesCount: 0,
-			reason: 'image-load-failed'
-		} );
-	} else {
-		console.info( '[AutoMarkerTrackedImagesReady]', {
-			siteId: definitions[ 0 ]?.siteId ?? null,
-			markerId: null,
-			patternUrl: null,
-			trackingWidthMeters: null,
-			sizeMeters: null,
-			imageLoaded: true,
-			trackedImagesCount: trackedImages.length,
-			targetIds
-		} );
-	}
-
-	return {
-		trackedImages,
-		targetIds,
-		reason: trackedImages.length > 0 ? 'ready' : 'image-load-failed'
 	};
 
 }

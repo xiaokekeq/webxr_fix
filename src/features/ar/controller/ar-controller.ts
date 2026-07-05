@@ -1,11 +1,9 @@
 ﻿import type {
 	ArDisplayMode,
-	ArPlacementMode,
 	InspectionPlacementSource,
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
-import type { ManualAdjustmentPreset } from '@/localization/manual/manual-registration.js';
 import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
@@ -50,17 +48,8 @@ export interface LoadModelArController {
 		clearMarkerLocalizationCorrection(): void;
 		clearSavedMarkerLocalization(): void;
 		resetPlacement(): void;
-		setManualAdjustmentPreset(preset: ManualAdjustmentPreset): void;
 		setInspectionPlacementSource(source: InspectionPlacementSource): void;
-		setPlacementMode(mode: ArPlacementMode): void;
-		adjustTranslation(axis: 'x' | 'y' | 'z', direction: 1 | -1): void;
-		adjustYaw(direction: 1 | -1): void;
-		adjustScale(direction: 1 | -1): void;
-		saveManualRegistration(): void;
-		resetManualRegistration(): void;
-		clearSavedRegistration(): void;
 		enterAr(): void;
-		placeModelAtHitTest(): void;
 		placeModel(): Promise<void>;
 		exitAr(): void;
 		setRegistrationView(_view: RegistrationView): void;
@@ -260,69 +249,15 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			setManualAdjustmentPreset(preset) {
-
-				engine.setManualAdjustmentPreset( preset );
-
-			},
-
 			setInspectionPlacementSource(source) {
 
 				engine.setInspectionPlacementSource( source );
 
 			},
 
-			setPlacementMode(mode) {
-
-				engine.setPlacementMode( mode );
-
-			},
-
-			adjustTranslation(axis, direction) {
-
-				engine.adjustTranslation( axis, direction );
-
-			},
-
-			adjustYaw(direction) {
-
-				engine.adjustYaw( direction );
-
-			},
-
-			adjustScale(direction) {
-
-				engine.adjustScale( direction );
-
-			},
-
-			saveManualRegistration() {
-
-				engine.saveManualRegistration();
-
-			},
-
-			resetManualRegistration() {
-
-				engine.resetManualRegistration();
-
-			},
-
-			clearSavedRegistration() {
-
-				engine.clearSavedRegistration();
-
-			},
-
 			enterAr() {
 
 				engine.enterAr();
-
-			},
-
-			placeModelAtHitTest() {
-
-				engine.placeModelAtHitTest();
 
 			},
 

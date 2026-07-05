@@ -185,7 +185,7 @@ export class SessionLifecycleRuntime {
 		}
 
 		if ( this.options.getHitTestController().hasGroundHit() === false ) {
-			this.options.setStatus( '请先扫描可用平面，再执行临时放置。' );
+			this.options.setStatus( '请先完成地面检测，再继续调试路径。' );
 			return;
 		}
 
@@ -216,7 +216,7 @@ export class SessionLifecycleRuntime {
 		this.options.syncArSessionPhase();
 
 		if ( placed === false ) {
-			this.options.setStatus( '已识别平面，但临时放置未完成，请重试。' );
+			this.options.setStatus( '地面检测已完成，但调试路径未完成，请重试。' );
 			return;
 		}
 

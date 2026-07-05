@@ -7,10 +7,8 @@ import {
 	type RegistrationView
 } from '@/features/ar/controller/ar-controller.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
-import type { ManualAdjustmentPreset } from '@/localization/manual/manual-registration.js';
 import type {
 	ArDisplayMode,
-	ArPlacementMode,
 	InspectionPlacementSource,
 	SectionCutPlaneMode,
 	WorkspaceMode
@@ -108,12 +106,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 	}
 
-	function canUseManualAdjustmentOverlay(): boolean {
-
-		return engineSnapshotRef.value.appMode === 'ar-session';
-
-	}
-
 	function buildInspectionRecordInput(): Omit<CreateInspectionRecordInput, 'siteId'> {
 
 		const draft = uiStateRef.value.inspectionDraft;
@@ -178,9 +170,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		controller.actions.activatePanel( mode );
 		const nextRegistrationView =
-			mode === 'registration' && currentUiState.registrationView === 'manual' && canUseManualAdjustmentOverlay()
-				? 'overview'
-				: mode === 'registration'
+			mode === 'registration'
 					? currentUiState.registrationView
 					: 'overview';
 
@@ -370,69 +360,15 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		setManualAdjustmentPreset(preset: ManualAdjustmentPreset): void {
-
-			ensureController().actions.setManualAdjustmentPreset( preset );
-
-		},
-
 		setInspectionPlacementSource(source: InspectionPlacementSource): void {
 
 			ensureController().actions.setInspectionPlacementSource( source );
 
 		},
 
-		setPlacementMode(mode: ArPlacementMode): void {
-
-			ensureController().actions.setPlacementMode( mode );
-
-		},
-
-		adjustTranslation(axis: 'x' | 'y' | 'z', direction: 1 | -1): void {
-
-			ensureController().actions.adjustTranslation( axis, direction );
-
-		},
-
-		adjustYaw(direction: 1 | -1): void {
-
-			ensureController().actions.adjustYaw( direction );
-
-		},
-
-		adjustScale(direction: 1 | -1): void {
-
-			ensureController().actions.adjustScale( direction );
-
-		},
-
-		saveManualRegistration(): void {
-
-			ensureController().actions.saveManualRegistration();
-
-		},
-
-		resetManualRegistration(): void {
-
-			ensureController().actions.resetManualRegistration();
-
-		},
-
-		clearSavedRegistration(): void {
-
-			ensureController().actions.clearSavedRegistration();
-
-		},
-
 		enterAr(): void {
 
 			ensureController().actions.enterAr();
-
-		},
-
-		placeModelAtHitTest(): void {
-
-			ensureController().actions.placeModelAtHitTest();
 
 		},
 
@@ -454,9 +390,8 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		setRegistrationView(view: RegistrationView): void {
 
-			const shouldUseManualOverlay = view === 'manual' && canUseManualAdjustmentOverlay();
 			patchUiState( {
-				drawerOpen: shouldUseManualOverlay ? false : true,
+				drawerOpen: true,
 				registrationView: view
 			} );
 

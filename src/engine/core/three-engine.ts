@@ -31,7 +31,6 @@ import {
 	createDefaultSavedMarkerLocalizationState,
 	createDefaultSiteCalibrationBaselineState,
 	createDefaultEngineeringConfigStatusState,
-	createDefaultMarkerAutoImageState,
 	createDefaultTargetGuidanceState,
 	createRegistrationStore,
 	type AnnotationDetailState,
@@ -88,7 +87,6 @@ import { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-
 import { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
 import { ManualRegistrationWorkflow } from '@/engine/placement/manual-registration-workflow.js';
 import { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
-import { getControlTargetImageUrl, isPattFileUrl } from '@/localization/baseline/site-calibration-baseline.js';
 import type {
 	ArWorkflowMode,
 	SiteCalibrationBaseline,
@@ -151,7 +149,7 @@ function createInitialState(): RegistrationStoreState {
 		},
 		manualAdjustmentPreset: 'fine',
 		placementMode: 'localized',
-		inspectionPlacementSource: 'marker-auto',
+		inspectionPlacementSource: 'manual-marker',
 		registrationMetrics: {
 			gpsText: '-',
 			enuText: '-',
@@ -165,7 +163,6 @@ function createInitialState(): RegistrationStoreState {
 		engineeringConfigStatus: createDefaultEngineeringConfigStatusState(),
 		savedMarkerLocalization: createDefaultSavedMarkerLocalizationState(),
 		markerCalibration: createDefaultMarkerCalibrationState(),
-		markerAutoImage: createDefaultMarkerAutoImageState(),
 		placementSummary: {
 			positionText: '-',
 			quaternionText: '-',
@@ -347,12 +344,7 @@ export class ThreeEngine {
 		} );
 
 		this.arLocalizationRuntime = new ArLocalizationRuntime( {
-			placementSession: this.placementSession,
-			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
 			getCurrentSessionId: () => this.currentArSessionId,
-			getRegistrationSolution: () => this.registrationSolution,
-			hasManualAdjustments: () => this.manualRegistration.hasAdjustments(),
-			hasActiveManualSitePose: () => this.manualRegistrationWorkflow.hasActiveSitePose(),
 			getActiveMarkerArFromEnuSolution: () => this.activeMarkerArFromEnuSolution,
 			getMarkerCorrectionFallbackArFromEnuSolution: () => this.markerCorrectionFallbackArFromEnuSolution,
 		} );
@@ -371,11 +363,6 @@ export class ThreeEngine {
 				this.emit();
 			},
 			requestPreferredPlacement: () => {
-				if ( this.store.getState().inspectionPlacementSource === 'plane-hit-test' ) {
-					this.placeModelAtHitTest();
-					return;
-				}
-
 				this.store.patch( { placementMode: 'localized' } );
 				this.pointerSelection.suppressSelectionFor( 1200 );
 				this.placementWorkflow.requestAutoPlacement();
@@ -384,22 +371,6 @@ export class ThreeEngine {
 				this.markerCalibrationRuntime.startCurrentSessionCalibration();
 				this.setStatus( message );
 			},
-			updateAutoImageState: ( patch ) => {
-				const current = this.store.getState().markerAutoImage;
-				this.store.patch( {
-					markerAutoImage: {
-						...current,
-						...patch
-					}
-				} );
-				if ( typeof patch.message === 'string' && patch.message.length > 0 ) {
-					statusRuntime.setStatus( patch.message );
-				}
-				this.emit();
-			},
-			onStableObservation: ( targetId, observation, stableFrameCount ) => {
-				return this.markerCalibrationRuntime.solveAndApplyAutoImageCalibration( targetId, observation, stableFrameCount );
-			}
 		} );
 
 		this.markerCalibrationRuntime = new MarkerCalibrationRuntime( {
@@ -416,7 +387,6 @@ export class ThreeEngine {
 			hasAppliedMarkerSolutionForCurrentSession: () => (
 				(
 					this.activeMarkerArFromEnuSolution?.source === 'marker'
-					|| this.activeMarkerArFromEnuSolution?.source === 'marker-auto-image'
 				)
 				&& this.activeMarkerArFromEnuSolution.sessionId === this.currentArSessionId
 			),
@@ -435,6 +405,7 @@ export class ThreeEngine {
 			store: this.store,
 			getWorkflowMode: () => this.workflowMode,
 			getCurrentSessionId: () => this.currentArSessionId,
+			getRepositoryDataSource: () => repositories.dataSource,
 			getDemoModelConfig: () => this.demoModelConfig,
 			getRegistrationSolution: () => this.registrationSolution,
 			getResolvedMarkerPosesInEnu: () => this.resolvedMarkerPosesInEnu,
@@ -442,9 +413,6 @@ export class ThreeEngine {
 			getActiveMarkerArFromEnuSolutionForCurrentSession: () => this.getActiveMarkerArFromEnuSolutionForCurrentSession(),
 			getActiveArFromEnuSolution: () => this.getActiveArFromEnuSolution(),
 			getActiveSiteCalibrationBaseline: () => this.activeSiteCalibrationBaseline,
-			getActiveManualSitePose: () => this.manualRegistrationWorkflow.getActiveSitePose(),
-			hasActiveManualSitePose: () => this.manualRegistrationWorkflow.hasActiveSitePose(),
-			hasRestoredManualSitePose: () => this.manualRegistrationWorkflow.hasRestoredSitePose(),
 			resolveBaselineControlTargets: () => this.resolveBaselineControlTargets(),
 			syncMarkerCalibrationState: ( override ) => {
 				this.markerCalibrationRuntime.syncState( override );
@@ -710,15 +678,6 @@ export class ThreeEngine {
 			),
 			onAttemptAutoPlacement: () => {
 				this.placementWorkflow.attemptAutoPlacement();
-			},
-			getTrackedImages: () => {
-				return this.inspectionMarkerWorkflow.getTrackedImages();
-			},
-			onImageTrackingStateChange: ( state ) => {
-				this.inspectionMarkerWorkflow.handleImageTrackingStateChange( state );
-			},
-			onImageTrackingObservation: ( observation ) => {
-				this.inspectionMarkerWorkflow.handleImageTrackingObservation( observation );
 			},
 			onFrameUpdate: ( frame ) => {
 				this.displayModeController.updateDepthState( frame );
@@ -1033,45 +992,17 @@ export class ThreeEngine {
 
 		const baseline = this.buildSiteCalibrationBaseline( this.activeSiteCalibrationBaseline?.createdAt );
 		for ( const target of baseline.controlTargets ) {
-			const imageUrl = getControlTargetImageUrl( target );
-			if ( imageUrl === null ) {
-				console.warn( '[MarkerImageUrlMissing]', {
-					mode: this.workflowMode,
-					siteId: baseline.siteId,
-					dataSource: repositories.dataSource,
-					repository: 'siteBaseline',
-					sessionId: this.currentArSessionId,
-					targetId: target.id,
-					imageUrl: target.imageUrl ?? null,
-					patternUrl: target.patternUrl ?? null,
-					createdAt: Date.now()
-				} );
-			} else if ( isPattFileUrl( imageUrl ) ) {
-				console.warn( '[MarkerImageUrlInvalidPattFile]', {
-					mode: this.workflowMode,
-					siteId: baseline.siteId,
-					dataSource: repositories.dataSource,
-					repository: 'siteBaseline',
-					sessionId: this.currentArSessionId,
-					targetId: target.id,
-					imageUrl,
-					patternUrl: target.patternUrl ?? null,
-					createdAt: Date.now()
-				} );
-			} else {
-				console.info( '[SiteBaselineConfigControlTargetLoaded]', {
-					mode: this.workflowMode,
-					siteId: baseline.siteId,
-					dataSource: repositories.dataSource,
-					repository: 'siteBaseline',
-					sessionId: this.currentArSessionId,
-					targetId: target.id,
-					imageUrl,
-					patternUrl: target.patternUrl ?? null,
-					createdAt: Date.now(),
-					source: baseline.source
-				} );
-			}
+			console.info( '[SiteBaselineConfigControlTargetLoaded]', {
+				mode: this.workflowMode,
+				siteId: baseline.siteId,
+				dataSource: repositories.dataSource,
+				repository: 'siteBaseline',
+				sessionId: this.currentArSessionId,
+				targetId: target.id,
+				centerEnu: target.centerEnu,
+				createdAt: Date.now(),
+				source: baseline.source
+			} );
 		}
 
 		console.info( '[SiteBaselineSaveStarted]', {
@@ -1081,7 +1012,6 @@ export class ThreeEngine {
 			repository: 'siteBaseline',
 			sessionId: this.currentArSessionId,
 			targetId: null,
-			imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
 			source: baseline.source,
 			createdAt: Date.now(),
 			controlTargetCount: baseline.controlTargets.length
@@ -1098,7 +1028,6 @@ export class ThreeEngine {
 					sessionId: this.currentArSessionId,
 					source: baseline.source,
 					targetId: null,
-					imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
 					createdAt: Date.now(),
 					trackingState: validation.forbiddenPath ?? 'forbidden-keys'
 				} );
@@ -1123,7 +1052,6 @@ export class ThreeEngine {
 				repository: 'siteBaseline',
 				sessionId: this.currentArSessionId,
 				targetId: null,
-				imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
 				createdAt: Date.now(),
 				error: validation.reason
 			} );
@@ -1139,7 +1067,6 @@ export class ThreeEngine {
 				repository: 'siteBaseline',
 				sessionId: this.currentArSessionId,
 				targetId: null,
-				imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
 				source: baseline.source,
 				createdAt: baseline.updatedAt ?? baseline.createdAt,
 				controlTargetCount: baseline.controlTargets.length
@@ -1169,7 +1096,6 @@ export class ThreeEngine {
 				repository: 'siteBaseline',
 				sessionId: this.currentArSessionId,
 				targetId: null,
-				imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
 				createdAt: Date.now(),
 				error: error instanceof Error ? error.message : String( error )
 			} );
@@ -1351,36 +1277,20 @@ export class ThreeEngine {
 
 	setInspectionPlacementSource(source: InspectionPlacementSource): void {
 
-		const placementMode = source === 'plane-hit-test' ? 'hit-test-temporary' : 'localized';
 		this.store.patch( {
 			inspectionPlacementSource: source,
-			placementMode
+			placementMode: 'localized'
 		} );
 
-		if ( source !== 'marker-auto' ) {
-			this.markerCalibrationRuntime.resetCurrentSessionCalibration();
-			if ( this.activeMarkerArFromEnuSolution !== null ) {
-				this.resetMarkerLocalizationCorrection();
-				this.syncRegistrationChainDebug();
-			}
+		this.markerCalibrationRuntime.resetCurrentSessionCalibration();
+		if ( this.activeMarkerArFromEnuSolution !== null ) {
+			this.resetMarkerLocalizationCorrection();
+			this.syncRegistrationChainDebug();
 		}
 
 		this.setStatus(
-			source === 'marker-auto'
-				? '已切换为隐藏式 Marker 自动识别，扫描成功后会自动放置模型。'
-				: '已切换为当前平面临时放置。'
+			'已切换为手动 Marker 四角点校正：请采集控制标志四角点完成当前会话空间校正。'
 		);
-
-		if (
-			this.workflowMode === 'ar-inspection'
-			&& this.sceneBundle.renderer.xr.isPresenting
-			&& this.placementSession.getPlacedModel() === null
-			&& this.xrRuntime.getHitTestController().hasGroundHit()
-		) {
-			if ( source === 'plane-hit-test' ) {
-				this.placeModelAtHitTest();
-			}
-		}
 
 		this.emit();
 
@@ -1651,7 +1561,6 @@ export class ThreeEngine {
 					repository: 'siteBaseline',
 					sessionId: this.currentArSessionId,
 					targetId: baseline.controlTargets[ 0 ]?.id ?? null,
-					imageUrl: baseline.controlTargets[ 0 ]?.imageUrl ?? baseline.controlTargets[ 0 ]?.patternUrl ?? null,
 					createdAt: baseline.updatedAt ?? baseline.createdAt,
 					controlTargetCount: baseline.controlTargets.length
 				} );
@@ -1730,7 +1639,6 @@ export class ThreeEngine {
 			dataSource: repositories.dataSource,
 			repository: 'arSessionContext',
 			targetId: resolved.controlTargets[ 0 ]?.id ?? null,
-			imageUrl: resolved.controlTargets[ 0 ]?.imageUrl ?? resolved.controlTargets[ 0 ]?.patternUrl ?? null,
 			createdAt: Date.now(),
 			controlTargetCount: resolved.controlTargets.length,
 			baselineAvailable: nextContext.baseline !== null
@@ -1745,7 +1653,6 @@ export class ThreeEngine {
 				dataSource: repositories.dataSource,
 				repository: 'arSessionContext',
 				targetId: resolved.controlTargets[ 0 ]?.id ?? null,
-				imageUrl: resolved.controlTargets[ 0 ]?.imageUrl ?? resolved.controlTargets[ 0 ]?.patternUrl ?? null,
 				createdAt: Date.now(),
 				controlTargetCount: resolved.controlTargets.length
 			}
@@ -1809,7 +1716,7 @@ export class ThreeEngine {
 		metadata: {
 			markerId: string;
 			markerConfigId: string;
-			source?: 'marker' | 'marker-auto-image';
+			source?: 'marker';
 		}
 	): boolean {
 
@@ -1857,6 +1764,28 @@ export class ThreeEngine {
 			rmsErrorMeters: solution.rmsErrorMeters,
 			sampleCount: solution.correspondenceCount
 		};
+		const currentTarget = this.getCurrentControlTargets()
+			.find( ( target ) => target.id === metadata.markerId || target.markerId === metadata.markerId );
+		console.info( '[CurrentSessionLocalizationCached]', {
+			siteId: this.demoModelConfig?.modelId ?? null,
+			modelId: this.demoModelConfig?.modelId ?? null,
+			sessionId: this.currentArSessionId,
+			targetId: metadata.markerId,
+			currentCorner: null,
+			capturedPointCount: solution.correspondenceCount,
+			source: solution.arFromEnuSolution.source,
+			hasSiteOrigin: this.demoModelConfig !== null,
+			hasModelLocalToEnu: this.registrationSolution !== null,
+			modelLocalToEnuSource: this.demoModelConfig?.configCompleteness.hasExplicitModelLocalToEnu === true
+				? 'explicit'
+				: this.registrationSolution === null ? 'missing' : 'control-points',
+			hasCornersEnu: currentTarget?.cornersEnu !== undefined,
+			hasRtkSurveyDataset: ( this.demoModelConfig?.rtkSurveyDataset?.points.length ?? 0 ) > 0,
+			hitTestReady: this.xrRuntime.getHitTestController().hasGroundHit(),
+			localizationReady: true,
+			modelPlaced: this.placementSession.getPlacedModel() !== null,
+			createdAt: Date.now()
+		} );
 
 		let appliedToPlacedModel = this.placementSession.applyArLocalizationSolution( {
 			modelTemplate: this.modelTemplate,
@@ -1873,7 +1802,7 @@ export class ThreeEngine {
 			this.arSessionStateRuntime.markPlacementCommitted( true );
 		} else if ( this.workflowMode === 'ar-inspection' ) {
 			this.pointerSelection.suppressSelectionFor( 1200 );
-			console.info( '[MarkerAutoPlacementRequested]', {
+			console.info( '[MarkerPlacementRequested]', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
 				sessionId: this.currentArSessionId,
@@ -1887,7 +1816,7 @@ export class ThreeEngine {
 		}
 
 		if ( appliedToPlacedModel && this.workflowMode === 'ar-inspection' ) {
-			console.info( '[MarkerAutoPlacementCompleted]', {
+			console.info( '[MarkerPlacementCompleted]', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
 				sessionId: this.currentArSessionId,
@@ -1975,10 +1904,7 @@ export class ThreeEngine {
 		}
 
 		const nonMarkerSolution = this.getCurrentNonMarkerArFromEnuSolution();
-		if (
-			nonMarkerSolution !== null
-			&& ( nonMarkerSolution.source === 'manual-site-pose' || nonMarkerSolution.source === 'rtk' )
-		) {
+		if ( nonMarkerSolution !== null && nonMarkerSolution.source === 'rtk' ) {
 			console.info( '[LocalizationPriorityResolved]', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
@@ -1996,12 +1922,6 @@ export class ThreeEngine {
 	private getMarkerCorrectionFallbackSolution(): ArFromEnuSolution | null {
 
 		return this.arLocalizationRuntime.getMarkerCorrectionFallbackSolution();
-
-	}
-
-	private deriveCurrentPlacedModelArFromEnuSolution(): ArFromEnuSolution | null {
-
-		return this.arLocalizationRuntime.deriveCurrentPlacedModelArFromEnuSolution();
 
 	}
 
