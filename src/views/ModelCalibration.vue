@@ -25,6 +25,7 @@ const store = useArShellStore();
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<CalibrationPanelView>( 'overview' );
+const markerCalibrationOverlayOpen = ref( false );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
@@ -225,8 +226,52 @@ const sliderValue = computed<number>( {
 		store.actions.setStructureRevealValue( value );
 	}
 } );
+const showMarkerCalibrationOverlay = computed(
+	() => hasArSession.value && markerCalibrationOverlayOpen.value && engine.value.markerCalibration.active
+);
+const canUseMarkerCorners = computed( () => configStatus.value.activeControlTargetHasCornersEnu );
+const canCaptureMarkerCorner = computed(
+	() => showMarkerCalibrationOverlay.value && canUseMarkerCorners.value
+);
+const canApplyMarkerCalibration = computed(
+	() => canCaptureMarkerCorner.value
+		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
+);
+const markerCornerPrompt = computed( () => {
+	if ( canUseMarkerCorners.value === false ) {
+		return '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。';
+	}
+
+	const label = engine.value.markerCalibration.nextCornerLabel;
+	if ( label.includes( '左上' ) || label.includes( 'leftTop' ) ) {
+		return '请将准星对准控制标志左上角并采集。';
+	}
+	if ( label.includes( '右上' ) || label.includes( 'rightTop' ) ) {
+		return '请将准星对准控制标志右上角并采集。';
+	}
+	if ( label.includes( '右下' ) || label.includes( 'rightBottom' ) ) {
+		return '请将准星对准控制标志右下角并采集。';
+	}
+	if ( label.includes( '左下' ) || label.includes( 'leftBottom' ) ) {
+		return '请将准星对准控制标志左下角并采集。';
+	}
+	return '请按左上角、右上角、右下角、左下角顺序采集控制标志四角。';
+} );
 
 watch( hasArSession, syncArOverlayClass, { immediate: true } );
+watch(
+	() => engine.value.markerCalibration.active,
+	(active) => {
+		if ( active === false ) {
+			markerCalibrationOverlayOpen.value = false;
+		}
+	}
+);
+watch( hasArSession, (active) => {
+	if ( active === false ) {
+		markerCalibrationOverlayOpen.value = false;
+	}
+} );
 
 async function mountEngineHosts(): Promise<void> {
 	await store.initialize();
@@ -270,14 +315,41 @@ function toggleWorkspacePanel(): void {
 	store.actions.activatePanel( 'registration' );
 }
 
-function handleStartPrecisionCalibration(): void {
-	activePanelView.value = 'ar-check';
-	store.actions.startCurrentSessionMarkerCalibration();
+function closeDrawerIfOpen(): void {
+	if ( ui.value.drawerOpen ) {
+		store.actions.toggleDrawer();
+	}
 }
 
-function handleSolvePrecisionCalibration(): void {
+async function handleStartPrecisionCalibration(): Promise<void> {
+	activePanelView.value = 'ar-check';
+	store.actions.startCurrentSessionMarkerCalibration();
+	await nextTick();
+	if ( engine.value.markerCalibration.active ) {
+		markerCalibrationOverlayOpen.value = true;
+		closeDrawerIfOpen();
+	}
+}
+
+function handleCapturePrecisionCalibrationCorner(): void {
+	store.actions.captureCurrentSessionMarkerCorner();
+}
+
+async function handleSolvePrecisionCalibration(): Promise<void> {
 	activePanelView.value = 'ar-check';
 	store.actions.solveAndApplyCurrentSessionMarkerCalibration();
+	await nextTick();
+	markerCalibrationOverlayOpen.value = engine.value.markerCalibration.active;
+	closeDrawerIfOpen();
+}
+
+async function handleExitPrecisionCalibration(): Promise<void> {
+	if ( engine.value.markerCalibration.active ) {
+		store.actions.resetCurrentSessionMarkerCalibration();
+	}
+	markerCalibrationOverlayOpen.value = false;
+	await nextTick();
+	closeDrawerIfOpen();
 }
 
 function handleSaveBaseline(): void {
@@ -316,7 +388,12 @@ function setArOverlayClass(active: boolean): void {
 <template>
 	<div class="calibration-page" :class="{ 'ar-active': hasArSession }" @click="store.actions.handleArUiInteraction()">
 		<div class="page-scroll">
-			<header class="page-header" @pointerdown.stop="store.actions.handleArUiInteraction()" @click.stop>
+			<header
+				v-if="showMarkerCalibrationOverlay === false"
+				class="page-header"
+				@pointerdown.stop="store.actions.handleArUiInteraction()"
+				@click.stop
+			>
 				<div>
 					<div class="page-title">工程配准数据配置 / 校验</div>
 					<div class="page-subtitle">{{ currentModelName }}</div>
@@ -370,7 +447,7 @@ function setArOverlayClass(active: boolean): void {
 
 		<transition name="sheet-fade">
 			<section
-				v-if="hasArSession && ui.drawerOpen"
+				v-if="hasArSession && ui.drawerOpen && showMarkerCalibrationOverlay === false"
 				class="bottom-sheet"
 				@pointerdown.stop="store.actions.handleArUiInteraction()"
 				@click.stop
@@ -454,18 +531,6 @@ function setArOverlayClass(active: boolean): void {
 							<button type="button" class="chip-button" @click="handleStartPrecisionCalibration()">
 								开始四角点采集
 							</button>
-							<button type="button" class="chip-button" @click="store.actions.captureCurrentSessionMarkerCorner()">
-								采集当前角点
-							</button>
-							<button type="button" class="chip-button active" @click="handleSolvePrecisionCalibration()">
-								完成空间校正
-							</button>
-							<button type="button" class="chip-button" @click="store.actions.resetCurrentSessionMarkerCalibration()">
-								重置角点
-							</button>
-							<button type="button" class="chip-button" @click="store.actions.clearMarkerLocalizationCorrection()">
-								清除本次校正
-							</button>
 						</div>
 					</ArPanelSection>
 				</template>
@@ -486,8 +551,43 @@ function setArOverlayClass(active: boolean): void {
 			</section>
 		</transition>
 
+		<section
+			v-if="showMarkerCalibrationOverlay"
+			class="marker-calibration-overlay"
+			@pointerdown.stop="store.actions.handleArUiInteraction()"
+			@click.stop
+		>
+			<div class="marker-calibration-title">手动 Marker 四角点校正</div>
+			<div class="marker-calibration-progress">
+				{{ engine.markerCalibration.capturedCornerCount }}/{{ engine.markerCalibration.expectedCornerCount }}
+				<span>{{ engine.markerCalibration.nextCornerLabel || '-' }}</span>
+			</div>
+			<div class="marker-calibration-hint">{{ markerCornerPrompt }}</div>
+			<div class="marker-calibration-actions">
+				<button
+					type="button"
+					class="marker-action primary"
+					:disabled="canCaptureMarkerCorner === false"
+					@click="handleCapturePrecisionCalibrationCorner()"
+				>
+					采集当前角点
+				</button>
+				<button
+					type="button"
+					class="marker-action success"
+					:disabled="canApplyMarkerCalibration === false"
+					@click="handleSolvePrecisionCalibration()"
+				>
+					完成校正
+				</button>
+				<button type="button" class="marker-action" @click="handleExitPrecisionCalibration()">
+					退出
+				</button>
+			</div>
+		</section>
+
 		<nav
-			v-if="hasArSession"
+			v-if="hasArSession && showMarkerCalibrationOverlay === false"
 			class="action-dock action-dock-compact"
 			aria-label="AR 校验操作"
 			@pointerdown.stop="store.actions.handleArUiInteraction()"
@@ -504,7 +604,7 @@ function setArOverlayClass(active: boolean): void {
 		</nav>
 
 		<ArModelInfoPanel
-			v-if="hasArSession && ui.drawerOpen === false"
+			v-if="hasArSession && ui.drawerOpen === false && showMarkerCalibrationOverlay === false"
 			:state="engine"
 			@close="store.actions.closePropertyPanel()"
 		/>
@@ -725,6 +825,82 @@ function setArOverlayClass(active: boolean): void {
 .dock-label {
 	font-size: 11px;
 	margin-top: 2px;
+}
+
+.marker-calibration-overlay {
+	position: fixed;
+	z-index: 9;
+	left: 14px;
+	right: 14px;
+	bottom: max(14px, env(safe-area-inset-bottom));
+	display: grid;
+	gap: 8px;
+	padding: 12px;
+	border-radius: 18px;
+	background: rgba(8, 15, 27, 0.76);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	box-shadow: 0 22px 62px rgba(0, 0, 0, 0.38);
+	backdrop-filter: blur(22px);
+	pointer-events: auto;
+}
+
+.marker-calibration-title {
+	font-size: 13px;
+	font-weight: 900;
+	color: #e0f2fe;
+}
+
+.marker-calibration-progress {
+	display: flex;
+	justify-content: space-between;
+	gap: 10px;
+	font-size: 12px;
+	font-weight: 800;
+	color: #d5f7ff;
+}
+
+.marker-calibration-progress span {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: rgba(226, 232, 240, 0.86);
+}
+
+.marker-calibration-hint {
+	font-size: 12px;
+	line-height: 1.45;
+	color: rgba(226, 232, 240, 0.86);
+}
+
+.marker-calibration-actions {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.marker-action {
+	min-height: 44px;
+	border: 1px solid rgba(148, 163, 184, 0.22);
+	border-radius: 14px;
+	background: rgba(15, 23, 42, 0.86);
+	color: #eff6ff;
+	font-size: 12px;
+	font-weight: 900;
+}
+
+.marker-action.primary {
+	background: rgba(0, 212, 255, 0.2);
+	border-color: rgba(0, 212, 255, 0.42);
+}
+
+.marker-action.success {
+	background: rgba(20, 184, 166, 0.22);
+	border-color: rgba(45, 212, 191, 0.42);
+}
+
+.marker-action:disabled {
+	opacity: 0.42;
 }
 
 .bottom-sheet {
