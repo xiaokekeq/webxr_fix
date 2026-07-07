@@ -613,9 +613,6 @@ function resolveRecommendedFieldHints(config: DemoModelConfig): string[] {
 	if ( config.configCompleteness.hasSiteName === false ) {
 		hints.push( '建议补充 siteName' );
 	}
-	if ( config.configCompleteness.hasExplicitModelLocalToEnu === false ) {
-		hints.push( '建议补充显式 modelLocalToEnu' );
-	}
 	if ( config.configCompleteness.controlPointsHaveEnu === false ) {
 		hints.push( '建议补充 controlPoints[].enu' );
 	}

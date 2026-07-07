@@ -132,6 +132,8 @@ function createInitialState(): RegistrationStoreState {
 		layerPeelingValue: 0,
 		sectionCutValue: 50,
 		sectionCutPlaneMode: 'horizontal-section',
+		undergroundPreviewEnabled: false,
+		undergroundPreviewDepthMeters: 1,
 		timelineStages: TIMELINE_STAGES,
 		currentTimelineStageIndex: 2,
 		layerNames: STATIC_LAYER_NAMES,
@@ -920,6 +922,21 @@ export class ThreeEngine {
 
 		this.store.patch( { sectionCutPlaneMode: mode } );
 		this.setStatus( `剖切方向已切换为：${getSectionCutPlaneModeLabel( mode )}` );
+
+	}
+
+	toggleUndergroundPreview(): void {
+
+		const state = this.store.getState();
+		const enabled = ! state.undergroundPreviewEnabled;
+		this.placementSession.setUndergroundPreview( enabled, state.undergroundPreviewDepthMeters );
+		this.store.patch( { undergroundPreviewEnabled: enabled } );
+		this.setStatus(
+			enabled
+				? `地底预览已开启：模型下沉 ${state.undergroundPreviewDepthMeters.toFixed( 1 )}m。`
+				: '地底预览已关闭：模型恢复正常高度。'
+		);
+		this.emit();
 
 	}
 

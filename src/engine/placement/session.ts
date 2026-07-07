@@ -53,6 +53,7 @@ export interface PlacementSession {
 	getPlacementBase(): ManualPlacementBase | null;
 	getAutoPlacementPending(): boolean;
 	markAutoPlacementPending(): void;
+	setUndergroundPreview(enabled: boolean, depthMeters: number): void;
 	resetPlacement(): void;
 	requestAutoPlacement(modelTemplate: THREE.Group | null): void;
 	placeAtHitTest(args: {
@@ -128,6 +129,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	let activeArAnchor: XRAnchorHandle | null = null;
 	let usesArPlacementAnchor = false;
 	let arAnchorRequestId = 0;
+	let undergroundPreviewOffsetMeters = 0;
 
 	function getActivePlacedModel(): THREE.Group | null {
 
@@ -144,6 +146,32 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	function updatePlacementSummary(): void {
 
 		store.patch( { placementSummary: createPlacementSummaryState( getActivePlacedModel() ) } );
+
+	}
+
+	function applyCurrentUndergroundPreviewOffset(): void {
+
+		if ( arPlacedModel === null || undergroundPreviewOffsetMeters === 0 ) {
+			return;
+		}
+
+		arPlacedModel.position.y += undergroundPreviewOffsetMeters;
+		arPlacedModel.updateMatrixWorld( true );
+
+	}
+
+	function setUndergroundPreview(enabled: boolean, depthMeters: number): void {
+
+		const nextOffset = enabled ? - Math.max( 0, depthMeters ) : 0;
+		const delta = nextOffset - undergroundPreviewOffsetMeters;
+		undergroundPreviewOffsetMeters = nextOffset;
+
+		if ( arPlacedModel !== null && delta !== 0 ) {
+			arPlacedModel.position.y += delta;
+			arPlacedModel.updateMatrixWorld( true );
+			updatePlacementSummary();
+			trackArPlacement( 'manual' );
+		}
 
 	}
 
@@ -345,6 +373,8 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		},
 
+		setUndergroundPreview,
+
 		resetPlacement() {
 
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
@@ -417,6 +447,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelAnchor: sceneBundle.arModelAnchor,
 				adjustedPlacement: finalPlacement
 			} );
+			applyCurrentUndergroundPreviewOffset();
 			autoPlacementPending = false;
 			updateRegistrationStatusDetail( '状态：模型已放置' );
 			updatePlacementSummary();
@@ -497,6 +528,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelAnchor: sceneBundle.arModelAnchor,
 				adjustedPlacement: finalPlacement
 			} );
+			applyCurrentUndergroundPreviewOffset();
 			trackArPlacement( placementSource );
 
 			autoPlacementPending = false;
@@ -564,6 +596,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelAnchor: sceneBundle.arModelAnchor,
 				adjustedPlacement: finalPlacement
 			} );
+			applyCurrentUndergroundPreviewOffset();
 			trackArPlacement( resolvePlacementSourceFromArLocalization( arFromEnuSolution.source ) );
 			updatePlacementSummary();
 			return true;
@@ -602,6 +635,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 					modelAnchor: sceneBundle.arModelAnchor,
 					adjustedPlacement: finalPlacement
 				} );
+				applyCurrentUndergroundPreviewOffset();
 				trackArPlacement( 'manual' );
 			}
 

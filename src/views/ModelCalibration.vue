@@ -116,7 +116,7 @@ const rtkCards = computed( () => [
 	{ label: '点数量', value: `${configStatus.value.rtkPointCount}` },
 	{ label: 'coordinateSystem', value: configStatus.value.rtkCoordinateSystemText },
 	{ label: 'mock/demo 点', value: configStatus.value.mockRtkPointIds.length > 0 ? configStatus.value.mockRtkPointIds.join( '、' ) : '未标记' , wide: true },
-	{ label: '需替换字段', value: 'siteOrigin、rtkSurveyDataset.points、controlTargets.centerEnu、controlTargets.cornersEnu、controlPoints[].enu、placementAnchorEnu、modelLocalToEnu', wide: true }
+	{ label: '需替换字段', value: 'siteOrigin、rtkSurveyDataset.points、controlTargets.centerEnu、controlTargets.cornersEnu、controlPoints[].enu、placementAnchorEnu', wide: true }
 ] );
 
 const saveCards = computed( () => [
@@ -547,8 +547,8 @@ function setArOverlayClass(active: boolean): void {
 				<template v-else-if="activePanelView === 'model'">
 					<ArPanelSection title="模型到工程坐标" first>
 						<ArInfoGrid :items="modelToEnuCards" />
-						<div v-if="configStatus.modelLocalToEnuSource === 'control-points'" class="runtime-banner warning">
-							当前未配置显式 modelLocalToEnu，运行时将由 controlPoints 求解工程变换；每个控制点需要同时配置 modelLocal 和 enu。
+						<div v-if="configStatus.modelLocalToEnuSource === 'control-points'" class="runtime-banner">
+							当前 modelLocalToEnu 由 controlPoints 求解；每个控制点需要同时配置 modelLocal 和 enu。
 						</div>
 					</ArPanelSection>
 				</template>
@@ -585,6 +585,21 @@ function setArOverlayClass(active: boolean): void {
 
 				<template v-else-if="activePanelView === 'ar-check'">
 					<ArPlacementStatusSection :state="engine" title="AR 校验状态" first />
+					<ArPanelSection title="地底预览">
+						<div class="chip-grid">
+							<button
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.undergroundPreviewEnabled }"
+								@click="store.actions.toggleUndergroundPreview()"
+							>
+								{{ engine.undergroundPreviewEnabled ? '关闭下沉' : '下沉 1m' }}
+							</button>
+						</div>
+						<div class="runtime-banner">
+							仅移动当前显示模型，不修改 RTK 配准和保存数据。
+						</div>
+					</ArPanelSection>
 					<ArPanelSection title="手动 Marker 四角点校验">
 						<ArInfoGrid :items="markerCalibrationCards" />
 						<div class="runtime-banner">

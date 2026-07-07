@@ -235,6 +235,8 @@ export interface RegistrationStoreState {
 	layerPeelingValue: number;
 	sectionCutValue: number;
 	sectionCutPlaneMode: SectionCutPlaneMode;
+	undergroundPreviewEnabled: boolean;
+	undergroundPreviewDepthMeters: number;
 	timelineStages: readonly string[];
 	currentTimelineStageIndex: number;
 	layerNames: readonly string[];

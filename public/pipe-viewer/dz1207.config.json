@@ -1,22 +1,33 @@
 {
   "modelId": "dz1207",
+  "siteId": "dz1207",
+  "siteName": "707 堤坝警示牌控制点",
   "siteFrame": {
     "origin": {
-      "lng": 118.735937335447,
-      "lat": 31.9399836566532,
-      "height": 39.5
+      "lng": 118.7359443694,
+      "lat": 31.9400473778,
+      "height": 24.33046,
+      "coordType": "WGS84",
+      "longitude": 118.7359443694,
+      "latitude": 31.9400473778,
+      "coordinateSystem": "WGS84"
     },
     "axes": "enu"
   },
   "siteOrigin": {
-    "lng": 118.735937335447,
-    "lat": 31.9399836566532,
-    "height": 39.5
+    "longitude": 118.7359443694,
+    "latitude": 31.9400473778,
+    "height": 24.33046,
+    "coordinateSystem": "WGS84",
+    "lng": 118.7359443694,
+    "lat": 31.9400473778,
+    "coordType": "WGS84"
   },
   "anchor": {
-    "lng": 118.735937335447,
-    "lat": 31.9399836566532,
-    "height": 39.5
+    "lng": 118.7359443694,
+    "lat": 31.9400473778,
+    "height": 24.33046,
+    "coordType": "WGS84"
   },
   "yaw": 0,
   "scale": 1,
@@ -25,116 +36,364 @@
     "minControlPoints": 3
   },
   "controlPoints": {
-    "CP_01": {
+    "707-1": {
+      "name": "模型控制点 707-1",
       "modelLocal": {
         "x": -2.182275,
         "y": 0.067804,
         "z": 0.802388
       },
       "world": {
-        "lng": 118.735937335447,
-        "lat": 31.9399836566532,
-        "height": 39.5
-      }
+        "lng": 118.7358803583,
+        "lat": 31.9400360222,
+        "height": 24.29345,
+        "coordType": "WGS84"
+      },
+      "enu": [
+        -6.0526,
+        -1.2592,
+        -0.037
+      ],
+      "modelLocalSource": "inherited from previous CP_01.modelLocal; verify against model corner before formal acceptance"
     },
-    "CP_02": {
+    "707-2": {
+      "name": "模型控制点 707-2",
       "modelLocal": {
         "x": 2.056397,
         "y": 0.067804,
         "z": 0.876878
       },
       "world": {
-        "lng": 118.735937887078,
-        "lat": 31.9399561338513,
-        "height": 39.5
-      }
+        "lng": 118.7359142694,
+        "lat": 31.9400648028,
+        "height": 24.24052,
+        "coordType": "WGS84"
+      },
+      "enu": [
+        -2.8461,
+        1.9322,
+        -0.0899
+      ],
+      "modelLocalSource": "inherited from previous CP_02.modelLocal; verify against model corner before formal acceptance"
     },
-    "CP_03": {
+    "707-3": {
+      "name": "模型控制点 707-3",
       "modelLocal": {
         "x": 2.081138,
         "y": 0.031047,
         "z": -0.811129
       },
       "world": {
-        "lng": 118.735942808114,
-        "lat": 31.9399696317561,
-        "height": 39.5
-      }
+        "lng": 118.7359345528,
+        "lat": 31.9400473944,
+        "height": 24.29282,
+        "coordType": "WGS84"
+      },
+      "enu": [
+        -0.9282,
+        0.0018,
+        -0.0376
+      ],
+      "modelLocalSource": "inherited from previous CP_03.modelLocal; verify against model corner before formal acceptance"
     },
-    "CP_04": {
+    "707-4": {
+      "name": "模型控制点 707-4",
       "modelLocal": {
         "x": -2.157534,
         "y": 0.031047,
         "z": -0.885617
       },
       "world": {
-        "lng": 118.735933373185,
-        "lat": 31.9399729506,
-        "height": 39.5
-      }
+        "lng": 118.7359008583,
+        "lat": 31.9400187222,
+        "height": 24.31788,
+        "coordType": "WGS84"
+      },
+      "enu": [
+        -4.1142,
+        -3.1775,
+        -0.0126
+      ],
+      "modelLocalSource": "inherited from previous CP_04.modelLocal; verify against model corner before formal acceptance"
     }
   },
   "markers": [
     {
-      "id": "dike-marker-001",
-      "bindControlPointId": "CP_01",
-      "sizeMeters": 0.2,
-      "yawDeg": 0
+      "id": "marker-warning-707",
+      "name": "707 警示牌控制标志",
+      "enu": [
+        -4.0705,
+        -3.8872,
+        -0.0058
+      ],
+      "sizeMeters": 0.297,
+      "yawDeg": 0,
+      "cornersEnu": [
+        [
+          -4.2881,
+          -3.8896,
+          -0.0093
+        ],
+        [
+          -4.0564,
+          -3.6848,
+          -0.0143
+        ],
+        [
+          -3.8605,
+          -3.8745,
+          0.0027
+        ],
+        [
+          -4.0772,
+          -4.1,
+          -0.0024
+        ]
+      ],
+      "plane": "horizontal"
     }
   ],
   "rtkSurveyDataset": {
     "siteId": "dz1207",
-    "coordinateSystem": "mixed",
-    "source": "rtk-survey-json",
+    "coordinateSystem": "WGS84",
+    "source": "manual-import",
+    "sourceFile": "nj0706_2026-07-07-10-49-53.xlsx",
+    "originPointId": "707-10",
+    "enuOrder": "east,north,up",
     "points": [
       {
-        "id": "SITE_ORIGIN",
-        "name": "Site origin",
-        "type": "site-origin",
+        "id": "707-1",
+        "name": "707-1",
+        "type": "model-control-point",
         "geodetic": {
-          "longitude": 118.735937335447,
-          "latitude": 31.9399836566532,
-          "altitude": 39.5
+          "longitude": 118.7358803583,
+          "latitude": 31.9400360222,
+          "height": 24.29345
         },
-        "note": "Placeholder RTK survey point based on current engineering origin."
+        "enu": [
+          -6.0526,
+          -1.2592,
+          -0.037
+        ]
       },
       {
-        "id": "CP_01",
-        "name": "Control point 01",
-        "type": "ground-control-point",
+        "id": "707-2",
+        "name": "707-2",
+        "type": "model-control-point",
         "geodetic": {
-          "longitude": 118.735937335447,
-          "latitude": 31.9399836566532,
-          "altitude": 39.5
+          "longitude": 118.7359142694,
+          "latitude": 31.9400648028,
+          "height": 24.24052
         },
-        "relatedTargetId": "dike-marker-001"
+        "enu": [
+          -2.8461,
+          1.9322,
+          -0.0899
+        ]
+      },
+      {
+        "id": "707-3",
+        "name": "707-3",
+        "type": "model-control-point",
+        "geodetic": {
+          "longitude": 118.7359345528,
+          "latitude": 31.9400473944,
+          "height": 24.29282
+        },
+        "enu": [
+          -0.9282,
+          0.0018,
+          -0.0376
+        ]
+      },
+      {
+        "id": "707-4",
+        "name": "707-4",
+        "type": "model-control-point",
+        "geodetic": {
+          "longitude": 118.7359008583,
+          "latitude": 31.9400187222,
+          "height": 24.31788
+        },
+        "enu": [
+          -4.1142,
+          -3.1775,
+          -0.0126
+        ]
+      },
+      {
+        "id": "707-6",
+        "name": "707-6",
+        "type": "marker-corner",
+        "geodetic": {
+          "longitude": 118.7358990194,
+          "latitude": 31.9400123,
+          "height": 24.32113
+        },
+        "enu": [
+          -4.2881,
+          -3.8896,
+          -0.0093
+        ]
+      },
+      {
+        "id": "707-7",
+        "name": "707-7",
+        "type": "marker-corner",
+        "geodetic": {
+          "longitude": 118.7359014694,
+          "latitude": 31.9400141472,
+          "height": 24.31619
+        },
+        "enu": [
+          -4.0564,
+          -3.6848,
+          -0.0143
+        ]
+      },
+      {
+        "id": "707-8",
+        "name": "707-8",
+        "type": "marker-corner",
+        "geodetic": {
+          "longitude": 118.7359035417,
+          "latitude": 31.9400124361,
+          "height": 24.33315
+        },
+        "enu": [
+          -3.8605,
+          -3.8745,
+          0.0027
+        ]
+      },
+      {
+        "id": "707-9",
+        "name": "707-9",
+        "type": "marker-corner",
+        "geodetic": {
+          "longitude": 118.73590125,
+          "latitude": 31.9400104028,
+          "height": 24.3281
+        },
+        "enu": [
+          -4.0772,
+          -4.1,
+          -0.0024
+        ]
+      },
+      {
+        "id": "707-10",
+        "name": "707-10",
+        "type": "site-origin",
+        "geodetic": {
+          "longitude": 118.7359443694,
+          "latitude": 31.9400473778,
+          "height": 24.33046
+        },
+        "enu": [
+          0,
+          0,
+          0
+        ]
       }
-    ]
+    ],
+    "note": "WGS fields used; projected northing/easting fields intentionally ignored."
   },
   "controlTargets": [
     {
-      "id": "dike-marker-001",
-      "name": "CP_01 control marker",
-      "markerId": "dike-marker-001",
-      "centerEnu": [0, 0, 0],
-      "cornersEnu": [
-        [-0.15, 0.15, 0],
-        [0.15, 0.15, 0],
-        [0.15, -0.15, 0],
-        [-0.15, -0.15, 0]
+      "id": "marker-warning-707",
+      "name": "707 警示牌控制标志",
+      "type": "marker-corners-4",
+      "markerId": "marker-warning-707",
+      "centerEnu": [
+        -4.0705,
+        -3.8872,
+        -0.0058
       ],
-      "yawDeg": 0,
-      "sizeMeters": 0.3,
+      "cornerOrder": [
+        "leftTop",
+        "rightTop",
+        "rightBottom",
+        "leftBottom"
+      ],
+      "cornersEnu": [
+        [
+          -4.2881,
+          -3.8896,
+          -0.0093
+        ],
+        [
+          -4.0564,
+          -3.6848,
+          -0.0143
+        ],
+        [
+          -3.8605,
+          -3.8745,
+          0.0027
+        ],
+        [
+          -4.0772,
+          -4.1,
+          -0.0024
+        ]
+      ],
       "plane": "horizontal",
-      "cornerOrder": ["leftTop", "rightTop", "rightBottom", "leftBottom"],
-      "note": "MOCK/DEMO control marker ENU corners; replace with real RTK surveyed marker corners later."
+      "note": "cornersEnu order: 707-6 leftTop, 707-7 rightTop, 707-8 rightBottom, 707-9 leftBottom; warning sign marker, generated from WGS84 -> ECEF -> ENU relative to 707-10."
     }
   ],
-  "placementAnchorEnu": [0, 0, 0],
+  "placementAnchorEnu": [
+    0,
+    0,
+    0
+  ],
   "placementAnchorMeaning": "site-origin-ground-reference",
   "visualGroundOffsetMeters": 0,
   "undergroundObjects": [],
   "sensors": [],
   "riskPoints": [],
-  "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json"
+  "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json",
+  "rtkValidation": {
+    "siteOriginWgs": {
+      "longitude": 118.7359443694,
+      "latitude": 31.9400473778,
+      "height": 24.33046,
+      "coordinateSystem": "WGS84",
+      "lng": 118.7359443694,
+      "lat": 31.9400473778,
+      "coordType": "WGS84"
+    },
+    "markerEdgesMeters": {
+      "707-6->707-7": 0.3093,
+      "707-7->707-8": 0.2732,
+      "707-8->707-9": 0.3128,
+      "707-9->707-6": 0.298
+    },
+    "markerDiagonalsMeters": {
+      "707-6->707-8": 0.428,
+      "707-7->707-9": 0.4159
+    },
+    "markerOrderCrossingCheck": {
+      "crossSigns": [
+        -0.0841,
+        -0.0853,
+        -0.0932,
+        -0.0919
+      ],
+      "appearsCrossed": false
+    },
+    "unitChecks": [
+      "WGS longitude/latitude parsed from DMS and inside China range.",
+      "Projected north/east columns look like planar coordinates and were not used.",
+      "Marker edges are decimeter-scale, not tens/hundreds of meters.",
+      "Marker is a surveyed warning sign marker, not an A4 sheet; A4 size check is intentionally not applied."
+    ],
+    "modelControlPointRegionMeters": {
+      "707-1->707-2": 4.5243,
+      "707-2->707-3": 2.7217,
+      "707-3->707-4": 4.501,
+      "707-4->707-1": 2.7272
+    },
+    "modelLocalStatus": "modelLocal values inherited from existing CP_01..CP_04. They were not derived from RTK and must be verified against model corners."
+  }
 }

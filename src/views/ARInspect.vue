@@ -582,6 +582,23 @@ function setArOverlayClass(active: boolean): void {
 							</button>
 						</div>
 					</div>
+
+					<div class="sheet-section">
+						<div class="section-label">地底预览</div>
+						<div class="chip-grid">
+							<button
+								type="button"
+								class="chip-button"
+								:class="{ active: engine.undergroundPreviewEnabled }"
+								@click="store.actions.toggleUndergroundPreview()"
+							>
+								{{ engine.undergroundPreviewEnabled ? '关闭下沉' : '下沉 1m' }}
+							</button>
+						</div>
+						<div class="runtime-banner">
+							仅移动当前显示模型，不修改 RTK 配准和保存数据。
+						</div>
+					</div>
 				</template>
 
 				<template v-else-if="activePanelView === 'localization'">

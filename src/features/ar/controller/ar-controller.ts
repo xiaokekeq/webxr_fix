@@ -32,6 +32,7 @@ export interface LoadModelArController {
 		setDisplayMode(mode: ArDisplayMode): void;
 		setStructureRevealValue(value: number): void;
 		setSectionCutPlaneMode(mode: SectionCutPlaneMode): void;
+		toggleUndergroundPreview(): void;
 		activatePanel(mode: WorkspaceMode): void;
 		toggleDrawer(): void;
 		setTimelineStage(index: number): void;
@@ -146,6 +147,12 @@ export function createLoadModelArController(): LoadModelArController {
 			setSectionCutPlaneMode(mode) {
 
 				engine.setSectionCutPlaneMode( mode );
+
+			},
+
+			toggleUndergroundPreview() {
+
+				engine.toggleUndergroundPreview();
 
 			},
 

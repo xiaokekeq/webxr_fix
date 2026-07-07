@@ -295,7 +295,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
 		configCompleteness: {
-			hasExplicitSiteId: false,
+			hasExplicitSiteId: hasOwnObjectKey( config, 'siteId' ),
 			hasSiteName: hasOwnObjectKey( config, 'siteName' ),
 			hasExplicitModelLocalToEnu: hasOwnObjectKey( config, 'modelLocalToEnu' ),
 			controlPointsHaveEnu: Object.values( config.controlPoints ).every( hasControlPointEnu )
