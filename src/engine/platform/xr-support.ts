@@ -407,24 +407,18 @@ export function createXRHitTestController(
 			setStatus( '正在请求 AR 会话...' );
 
 			try {
+				// 尝试带 depth-sensing 配置，4秒超时保护防卡死
+				console.info( '[CpuDepthSessionRequested]', '尝试带 depth-sensing 的 AR 会话...' );
 				let session: XRSession;
 				try {
-					console.info( '[CpuDepthSessionRequested]', 'Requesting AR session with depth-sensing config...' );
-					session = await navigator.xr.requestSession(
-						'immersive-ar',
-						createSessionInitWithDepth()
-					);
-					console.info( '[CpuDepthSessionRequested]', 'Session created with depth-sensing.' );
-				} catch ( depthError ) {
-					console.warn(
-						'[CpuDepthSessionFallbackWithoutDepth]',
-						'depth-sensing session request failed, falling back to plain AR.',
-						depthError
-					);
-					session = await navigator.xr.requestSession(
-						'immersive-ar',
-						createSessionInitPlain()
-					);
+					session = await Promise.race( [
+						navigator.xr.requestSession( 'immersive-ar', createSessionInitWithDepth() ),
+						new Promise<never>( ( _, rej ) => setTimeout( () => rej( new Error( 'timeout' ) ), 4000 ) )
+					] );
+					console.info( '[CpuDepthSessionEnabled]', 'depth-sensing 已启用' );
+				} catch {
+					console.warn( '[CpuDepthSessionFallbackWithoutDepth]', 'depth-sensing 不可用，回退普通 AR' );
+					session = await navigator.xr.requestSession( 'immersive-ar', createSessionInitPlain() );
 				}
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( session );

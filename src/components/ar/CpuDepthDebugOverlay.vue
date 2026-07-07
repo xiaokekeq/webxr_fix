@@ -94,8 +94,9 @@ onUnmounted( () => {
 		@click.stop
 	>
 		<div class="depth-title">CPU Depth</div>
+		<div class="depth-session-badge badge-fail">depth-sensing session 未创建</div>
 		<div class="depth-error">
-			当前设备或浏览器不支持 WebXR CPU Depth。
+			当前 AR 会话未启用 CPU Depth。可能原因：设备不支持、requestSession 超时或不兼容。
 		</div>
 	</div>
 </template>
@@ -122,7 +123,27 @@ onUnmounted( () => {
 	font-size: 11px;
 	font-weight: 900;
 	color: #00d4ff;
+	margin-bottom: 4px;
+}
+
+.depth-session-badge {
+	padding: 3px 7px;
+	border-radius: 6px;
+	font-size: 9px;
+	font-weight: 800;
 	margin-bottom: 6px;
+}
+
+.badge-ok {
+	background: rgba( 0, 255, 168, 0.16 );
+	border: 1px solid rgba( 0, 255, 168, 0.36 );
+	color: #00ffa8;
+}
+
+.badge-fail {
+	background: rgba( 245, 80, 50, 0.16 );
+	border: 1px solid rgba( 245, 80, 50, 0.36 );
+	color: #ffb4a0;
 }
 
 .depth-heatmap {
