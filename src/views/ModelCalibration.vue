@@ -383,6 +383,21 @@ async function handleExitPrecisionCalibration(): Promise<void> {
 	closeDrawerIfOpen();
 }
 
+const cpuDepthDiagClass = computed( () => {
+	if ( cpuDepthDebugState.supported === 'unknown' ) return 'diag-checking';
+	return cpuDepthDebugState.depthSensingSessionEnabled ? 'diag-ok' : 'diag-fail';
+} );
+
+const cpuDepthDiagText = computed( () => {
+	if ( cpuDepthDebugState.supported === 'unknown' ) {
+		return 'CPU Depth 检测中...';
+	}
+	if ( cpuDepthDebugState.depthSensingSessionEnabled ) {
+		return '✓ CPU Depth 已支持 (getDepthInformation 可用)';
+	}
+	return '✗ CPU Depth 不支持 (getDepthInformation 不可用，当前 AR 会话未启用深度感知)';
+} );
+
 const cpuDepthButtonLabel = computed( () => {
 	if ( cpuDepthDebugState.enabled ) {
 		return '隐藏 CPU Depth 深度图';
@@ -660,6 +675,18 @@ function setArOverlayClass(active: boolean): void {
 				</button>
 			</div>
 		</section>
+
+		<!-- CPU Depth 自动诊断条：AR启动后自动显示检测结果 -->
+		<div
+			v-if="hasArSession"
+			class="cpu-depth-diagnostic"
+			:class="cpuDepthDiagClass"
+			data-ar-ui="true"
+			@pointerdown.stop
+			@click.stop
+		>
+			{{ cpuDepthDiagText }}
+		</div>
 
 		<CpuDepthDebugOverlay />
 
@@ -1136,5 +1163,41 @@ function setArOverlayClass(active: boolean): void {
 		max-width: 42vw;
 		font-size: 11px;
 	}
+}
+
+.cpu-depth-diagnostic {
+	position: fixed;
+	z-index: 15;
+	top: max( 8px, env(safe-area-inset-top) );
+	left: 50%;
+	transform: translateX( -50% );
+	max-width: 92vw;
+	padding: 6px 14px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 800;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	overflow: hidden;
+	backdrop-filter: blur( 18px );
+	pointer-events: auto;
+}
+
+.diag-checking {
+	background: rgba( 30, 41, 59, 0.82 );
+	border: 1px solid rgba( 148, 163, 184, 0.3 );
+	color: #cbd5e1;
+}
+
+.diag-ok {
+	background: rgba( 0, 180, 120, 0.22 );
+	border: 1px solid rgba( 0, 255, 168, 0.45 );
+	color: #00ffa8;
+}
+
+.diag-fail {
+	background: rgba( 200, 50, 30, 0.22 );
+	border: 1px solid rgba( 255, 100, 80, 0.45 );
+	color: #ffb4a0;
 }
 </style>

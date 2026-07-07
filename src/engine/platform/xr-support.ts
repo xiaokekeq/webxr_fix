@@ -7,7 +7,8 @@ import type {
 } from '@/features/ar/types/runtime-types.js';
 import {
 	markDepthSensingSessionEnabled,
-	resetDepthSensingSessionState
+	resetDepthSensingSessionState,
+	cpuDepthDebugState
 } from '@/engine/visualization/cpu-depth-visualization.js';
 
 interface CreateXRHitTestControllerOptions {
@@ -210,9 +211,11 @@ export function createXRHitTestController(
 				if ( hasGetDepth ) {
 					markDepthSensingSessionEnabled();
 				} else {
+					cpuDepthDebugState.supported = false;
 					console.info( '[CpuDepthSessionUnsupported]', 'getDepthInformation not available in current AR session.' );
 				}
 			} catch {
+				cpuDepthDebugState.supported = false;
 				console.info( '[CpuDepthSessionUnsupported]', 'Depth probe failed.' );
 			}
 		}
