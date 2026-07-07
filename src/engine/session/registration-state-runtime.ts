@@ -588,16 +588,47 @@ export function hasMockEngineeringDataInConfig(
 	controlTargets: VisualControlTarget[]
 ): boolean {
 
-	const searchableText = [
-		config.modelId,
-		...( config.rtkSurveyDataset?.points ?? [] ).map( ( point ) => point.note ?? '' ),
+	const reasons = resolveMockEngineeringDataReasons( config, controlTargets );
+	const hasMock = reasons.length > 0;
+	console.info( '[MockEngineeringDataResolved]', {
+		modelId: config.modelId,
+		hasMockEngineeringData: hasMock,
+		reasons,
+		allowMockCalibration: canApplyMockEngineeringCalibration()
+	} );
+	return hasMock;
+
+}
+
+export function canApplyMockEngineeringCalibration(): boolean {
+
+	return import.meta.env.DEV === true || import.meta.env.VITE_ALLOW_MOCK_CALIBRATION === 'true';
+
+}
+
+function resolveMockEngineeringDataReasons(
+	config: DemoModelConfig,
+	controlTargets: VisualControlTarget[]
+): string[] {
+
+	const candidates = [
+		{ label: 'modelId', value: config.modelId },
+		...( config.rtkSurveyDataset?.points ?? [] ).map( ( point ) => ( {
+			label: `rtk:${point.id}`,
+			value: point.note ?? ''
+		} ) ),
 		...controlTargets.map( ( target ) => {
 			const maybeNote = ( target as VisualControlTarget & { note?: unknown } ).note;
-			return typeof maybeNote === 'string' ? maybeNote : '';
+			return {
+				label: `controlTarget:${target.id}`,
+				value: typeof maybeNote === 'string' ? maybeNote : ''
+			};
 		} )
-	].join( ' ' ).toLowerCase();
+	];
 
-	return /mock|demo|placeholder|debug/.test( searchableText );
+	return candidates
+		.filter( ( item ) => /mock|demo|placeholder|debug/i.test( item.value ) )
+		.map( ( item ) => `${item.label}=${item.value}` );
 
 }
 

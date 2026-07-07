@@ -65,6 +65,12 @@ export interface MarkerEngineeringConfig {
 	plane?: 'horizontal' | 'vertical';
 }
 
+interface RawMarkerEngineeringConfig extends Omit<MarkerEngineeringConfig, 'enu' | 'sizeMeters'> {
+	sizeMeters?: number;
+	trackingWidthMeters?: number;
+	enu?: MarkerEngineeringConfig['enu'] | number[];
+}
+
 export type DemoModelRegistrationMode = 'rigid' | 'similarity';
 
 export interface DemoModelConfig {
@@ -139,7 +145,7 @@ interface LocalDebugModelConfig {
 	yawDeg?: number;
 	scale?: number;
 	controlPoints?: LocalDebugControlPointShape[];
-	markers?: MarkerEngineeringConfig[];
+	markers?: RawMarkerEngineeringConfig[];
 	attachments?: RawDemoModelAttachmentShape[];
 	attachmentsUrl?: string;
 	rtkSurveyDataset?: RtkSurveyDataset;
@@ -160,7 +166,7 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 		modelLocal: DemoModelLocalPoint;
 		world: RawGeodeticCoordinateShape;
 	} | LegacyControlPointShape>;
-	markers?: MarkerEngineeringConfig[];
+	markers?: RawMarkerEngineeringConfig[];
 	attachments?: RawDemoModelAttachmentShape[];
 	attachmentsUrl?: string;
 	rtkSurveyDataset?: RtkSurveyDataset;
@@ -192,13 +198,25 @@ export async function loadDemoModelConfig(
 	}
 
 	const raw = await response.json() as RawDemoModelConfig;
-	const enrichedRaw = await enrichDemoModelConfigAttachments( raw );
-	const normalized = normalizeDemoModelConfig( enrichedRaw );
-	validateDemoModelConfig( normalized );
+	try {
+		const enrichedRaw = await enrichDemoModelConfigAttachments( raw );
+		const normalized = normalizeDemoModelConfig( enrichedRaw );
+		validateDemoModelConfig( normalized );
+		console.info( '[DemoModelConfigLoaded]', createConfigDebugPayload( url, normalized ) );
+		console.info( '[Demo Model Config]', normalized );
 
-	console.info( '[Demo Model Config]', normalized );
-
-	return normalized;
+		return normalized;
+	} catch ( error ) {
+		console.error( '[DemoModelConfigParseFailed]', {
+			configUrl: url,
+			modelId: 'modelId' in raw ? raw.modelId : 'siteId' in raw ? raw.siteId : null,
+			hasSiteFrameOrigin: 'siteFrame' in raw && raw.siteFrame?.origin !== undefined,
+			rawControlTargetsCount: 'controlTargets' in raw && Array.isArray( raw.controlTargets ) ? raw.controlTargets.length : 0,
+			rawMarkersCount: 'markers' in raw && Array.isArray( raw.markers ) ? raw.markers.length : 0,
+			error: error instanceof Error ? error.message : String( error )
+		} );
+		throw error;
+	}
 
 }
 
@@ -489,7 +507,7 @@ function validateDemoModelConfig(config: DemoModelConfig): void {
 }
 
 export function loadMarkerEngineeringConfigs(
-	markers: MarkerEngineeringConfig[] | undefined
+	markers: RawMarkerEngineeringConfig[] | undefined
 ): MarkerEngineeringConfig[] {
 
 	if ( Array.isArray( markers ) === false ) {
@@ -501,11 +519,8 @@ export function loadMarkerEngineeringConfigs(
 			throw new Error( `markers[${index}] is missing a valid id.` );
 		}
 
-		if (
-			typeof marker.sizeMeters !== 'number'
-			|| Number.isFinite( marker.sizeMeters ) === false
-			|| marker.sizeMeters <= 0
-		) {
+		const sizeMeters = normalizeMarkerSizeMeters( marker );
+		if ( sizeMeters === undefined ) {
 			throw new Error( `markers[${index}] is missing a valid sizeMeters.` );
 		}
 		const bindControlPointId = typeof marker.bindControlPointId === 'string'
@@ -526,7 +541,7 @@ export function loadMarkerEngineeringConfigs(
 		return {
 			id: marker.id.trim(),
 			bindControlPointId,
-			sizeMeters: marker.sizeMeters,
+			sizeMeters,
 			enu,
 			yawDeg,
 			centerEnu: normalizeEnuTuple( marker.centerEnu ),
@@ -870,12 +885,25 @@ function normalizeOptionalAttachmentText(value: string | undefined): string | un
 }
 
 function normalizeMarkerEnu(
-	enu: MarkerEngineeringConfig['enu'] | undefined,
+	enu: MarkerEngineeringConfig['enu'] | number[] | undefined,
 	label: string
 ): MarkerEngineeringConfig['enu'] | undefined {
 
 	if ( enu === undefined ) {
 		return undefined;
+	}
+
+	if ( Array.isArray( enu ) ) {
+		const tuple = normalizeEnuTuple( enu );
+		if ( tuple === undefined ) {
+			throw new Error( `${label} tuple must contain finite east/north/up values.` );
+		}
+
+		return {
+			east: tuple[ 0 ],
+			north: tuple[ 1 ],
+			up: tuple[ 2 ]
+		};
 	}
 
 	if (
@@ -895,6 +923,33 @@ function normalizeMarkerEnu(
 		east: enu.east,
 		north: enu.north,
 		up
+	};
+
+}
+
+function normalizeMarkerSizeMeters(marker: RawMarkerEngineeringConfig): number | undefined {
+
+	const size = typeof marker.sizeMeters === 'number'
+		? marker.sizeMeters
+		: marker.trackingWidthMeters;
+	return typeof size === 'number' && Number.isFinite( size ) && size > 0
+		? size
+		: undefined;
+
+}
+
+function createConfigDebugPayload(configUrl: string, config: DemoModelConfig): Record<string, unknown> {
+
+	return {
+		modelId: config.modelId,
+		configUrl,
+		siteFrameOriginLoaded: typeof config.siteFrame.origin.lat === 'number' && typeof config.siteFrame.origin.lon === 'number',
+		controlTargetCount: config.controlTargets.length,
+		markersCount: config.markers.length,
+		cornersEnuValid: config.controlTargets.map( ( target ) => ( {
+			id: target.id,
+			hasCornersEnu: normalizeCornersEnu( target.cornersEnu ) !== undefined
+		} ) )
 	};
 
 }

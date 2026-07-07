@@ -6,6 +6,7 @@ import ArModelInfoPanel from '@/components/ar/ArModelInfoPanel.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import CpuDepthDebugOverlay from '@/components/ar/CpuDepthDebugOverlay.vue';
+import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
 import { cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
@@ -200,11 +201,11 @@ const canCaptureMarkerCorner = computed(
 );
 const canApplyMarkerCalibration = computed(
 	() => canCaptureMarkerCorner.value
-		&& configStatus.value.hasMockEngineeringData === false
+		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
 		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
 );
 const markerApplyBlockedText = computed( () => (
-	configStatus.value.hasMockEngineeringData
+	configStatus.value.hasMockEngineeringData && canApplyMockEngineeringCalibration() === false
 		? configStatus.value.mockWarningText || '当前为示例工程坐标，请替换为 RTK 实测数据。'
 		: ''
 ) );

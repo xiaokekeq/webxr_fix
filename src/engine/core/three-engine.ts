@@ -14,6 +14,7 @@ import { ArLocalizationRuntime } from '@/engine/session/ar-localization-runtime.
 import {
 	RegistrationStateRuntime,
 	areControlTargetsEquivalent,
+	canApplyMockEngineeringCalibration,
 	hasMockEngineeringDataInConfig
 } from '@/engine/session/registration-state-runtime.js';
 import { SessionLifecycleRuntime } from '@/engine/session/session-lifecycle-runtime.js';
@@ -1805,9 +1806,12 @@ export class ThreeEngine {
 		}
 
 		const currentControlTargets = this.getCurrentControlTargets();
+		const hasMockEngineeringData = this.demoModelConfig !== null
+			&& hasMockEngineeringDataInConfig( this.demoModelConfig, currentControlTargets );
 		if (
 			this.demoModelConfig !== null
-			&& hasMockEngineeringDataInConfig( this.demoModelConfig, currentControlTargets )
+			&& hasMockEngineeringData
+			&& canApplyMockEngineeringCalibration() === false
 		) {
 			console.warn( '[MockEngineeringMarkerLocalizationRejected]', {
 				mode: this.workflowMode,
@@ -1826,6 +1830,16 @@ export class ThreeEngine {
 			} );
 			this.setStatus( '当前为示例工程坐标，请替换为 RTK 实测数据后再完成正式空间校正。' );
 			return false;
+		}
+		if ( this.demoModelConfig !== null && hasMockEngineeringData ) {
+			console.warn( '[MockEngineeringMarkerLocalizationAllowedInDev]', {
+				mode: this.workflowMode,
+				siteId: this.demoModelConfig.modelId,
+				sessionId: this.currentArSessionId,
+				targetId: metadata.markerId,
+				allowMockCalibration: true,
+				createdAt: Date.now()
+			} );
 		}
 
 		const fallbackSolution = this.activeMarkerArFromEnuSolution === null

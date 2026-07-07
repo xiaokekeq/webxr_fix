@@ -48,9 +48,14 @@ export class LocalJsonSiteConfigRepository implements SiteConfigRepository {
 			console.info( '[SiteConfigLoadSucceeded]', {
 				mode: 'repository',
 				siteId,
+				configUrl: model.configUrl,
 				dataSource: 'local',
 				repository: 'siteConfig',
 				targetId: config.controlTargets[ 0 ]?.id ?? null,
+				siteFrameOriginLoaded: typeof config.siteFrame.origin.lat === 'number' && typeof config.siteFrame.origin.lon === 'number',
+				controlTargetCount: config.controlTargets.length,
+				markersCount: config.markers.length,
+				cornersEnuValid: config.controlTargets.some( ( target ) => target.cornersEnu !== undefined ),
 				createdAt: Date.now()
 			} );
 			return config;

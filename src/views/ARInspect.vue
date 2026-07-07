@@ -5,6 +5,7 @@ import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArModelInfoPanel from '@/components/ar/ArModelInfoPanel.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
+import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS
@@ -27,6 +28,7 @@ const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<InspectPanelView>( 'localization' );
 const markerCalibrationOverlayOpen = ref( false );
+const debugInfoOpen = ref( false );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
@@ -93,11 +95,18 @@ const sessionStatusText = computed( () => {
 
 const configCards = computed( () => [
 	{ label: '当前模型', value: `${engine.value.selectedModelId || '-'} / ${currentModelName.value}`, wide: true },
-	{ label: '配置 JSON', value: currentConfigUrl.value, wide: true },
 	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
 	{ label: '模型控制点', value: `${engine.value.registrationChainDebug.engineeringControlRegistration.controlPointCount} 个` },
 	{ label: '控制标志', value: formatActiveMarkerText(), wide: true },
 	{ label: '四角 ENU', value: canUseMarkerCorners.value ? '已配置' : '缺失' }
+] );
+
+const debugCards = computed( () => [
+	{ label: '配置 JSON', value: currentConfigUrl.value, wide: true },
+	{ label: '数据来源', value: configStatus.value.hasMockEngineeringData ? 'mock/demo' : configStatus.value.engineeringDataSourceText },
+	{ label: 'RTK 点数', value: configStatus.value.hasRtkSurveyDataset ? `${configStatus.value.rtkPointCount}` : '未加载' },
+	{ label: '控制标志来源', value: configStatus.value.controlTargetSourceText },
+	{ label: 'mock note', value: configStatus.value.mockWarningText || '-', wide: true }
 ] );
 
 const configWarnings = computed( () => {
@@ -116,6 +125,11 @@ const configWarnings = computed( () => {
 	}
 	if ( configStatus.value.baselineMismatch ) {
 		warnings.push( '已保存 baseline 与当前 JSON 不一致，本次使用当前 JSON。' );
+	}
+	if ( configStatus.value.hasMockEngineeringData ) {
+		warnings.push( canApplyMockEngineeringCalibration()
+			? '当前是 mock/demo 工程数据；开发环境允许完成流程，生产环境会禁止正式校正。'
+			: configStatus.value.mockWarningText );
 	}
 	return warnings;
 } );
@@ -139,11 +153,11 @@ const canCaptureMarkerCorner = computed(
 );
 const canApplyMarkerCalibration = computed(
 	() => canCaptureMarkerCorner.value
-		&& configStatus.value.hasMockEngineeringData === false
+		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
 		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
 );
 const markerApplyBlockedText = computed( () => (
-	configStatus.value.hasMockEngineeringData
+	configStatus.value.hasMockEngineeringData && canApplyMockEngineeringCalibration() === false
 		? configStatus.value.mockWarningText || '当前为示例工程坐标，请替换为 RTK 实测数据。'
 		: ''
 ) );
@@ -516,6 +530,10 @@ function setArOverlayClass(active: boolean): void {
 						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
 							{{ warning }}
 						</div>
+						<button type="button" class="debug-toggle" @click="debugInfoOpen = !debugInfoOpen">
+							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
+						</button>
+						<ArInfoGrid v-if="debugInfoOpen" :items="debugCards" />
 					</ArPanelSection>
 
 					<ArPlacementStatusSection :state="engine" title="AR 定位" />
@@ -869,12 +887,23 @@ function setArOverlayClass(active: boolean): void {
 	bottom: calc(82px + env(safe-area-inset-bottom));
 	max-height: 62vh;
 	overflow: auto;
-	padding: 14px;
+	padding: 14px 14px 96px;
 	border-radius: 24px;
 	background: rgba(8, 15, 27, 0.86);
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
 	backdrop-filter: blur(24px);
+}
+
+.debug-toggle {
+	margin-top: 10px;
+	border: 1px solid rgba(148, 163, 184, 0.22);
+	border-radius: 12px;
+	background: rgba(15, 23, 42, 0.72);
+	color: #dbeafe;
+	padding: 8px 10px;
+	font-size: 12px;
+	font-weight: 800;
 }
 
 .sheet-header {
