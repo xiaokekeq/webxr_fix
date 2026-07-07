@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArModelInfoPanel from '@/components/ar/ArModelInfoPanel.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
+import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import {
 	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS
@@ -12,51 +13,10 @@ import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
 type InspectPanelView = 'display' | 'localization' | 'record';
 
-const TEXT = {
-	title: '堤防 AR 巡查',
-	enterArTitle: '进入 AR 巡查',
-	enterArSub: '读取工程真值配置后进入 AR。hit-test 只用于确认平面就绪；请手动采集现场 Marker 四角点，校正成功后模型才会按工程坐标正式显示。',
-	enterAr: '进入 AR',
-	selectModel: '选择站点',
-	status: '状态',
-	waiting: '待进入 AR',
-	scanning: '正在扫描平面',
-	ready: '平面已识别，等待空间校正',
-	placing: '正在应用空间校正',
-	placed: '巡查中',
-	panelTool: '控制面板',
-	exit: '退出 AR',
-	takeSnapshot: '截图',
-	closePanel: '收起',
-	display: '显示控制',
-	localization: '巡查流程',
-	record: '巡查记录',
-	configStatus: '工程配置状态',
-	localizationStatus: '当前会话空间校正',
-	displayMode: '模型显示',
-	sectionPlane: '剖切方向',
-	placementSource: '校正方式',
-	calibrationPanel: '手动 Marker 四角点校正',
-	cornerProgress: '角点进度',
-	nextCorner: '当前要采集',
-	targetMarker: '目标 Marker',
-	startCalibration: '手动 Marker 四角点校正',
-	captureCorner: '采集当前角点',
-	applyCalibration: '完成校正',
-	resetCalibration: '重置角点',
-	inspectionResult: '结果',
-	inspectionType: '类型',
-	inspectionSeverity: '等级',
-	inspectionNote: '备注',
-	saveInspection: '保存巡查记录',
-	exportRecords: '导出巡查记录',
-	unknownModel: '未选择站点'
-} as const;
-
 const PANEL_OPTIONS: Array<{ value: InspectPanelView; label: string }> = [
-	{ value: 'display', label: TEXT.display },
-	{ value: 'localization', label: TEXT.localization },
-	{ value: 'record', label: TEXT.record }
+	{ value: 'display', label: '显示' },
+	{ value: 'localization', label: '配准' },
+	{ value: 'record', label: '记录' }
 ];
 
 const route = useRoute();
@@ -71,14 +31,12 @@ const markerCalibrationOverlayOpen = ref( false );
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
-const currentModelName = computed(
-	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.name ?? TEXT.unknownModel
+const currentModel = computed(
+	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )
 );
-const currentConfigUrl = computed(
-	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )?.configUrl ?? '-'
-);
+const currentModelName = computed( () => currentModel.value?.name ?? '未选择站点' );
+const currentConfigUrl = computed( () => currentModel.value?.configUrl ?? '-' );
 const configStatus = computed( () => engine.value.engineeringConfigStatus );
-const activeTarget = computed( () => configStatus.value.controlTargetSummaries[ 0 ] );
 const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
 const modelPlaced = computed( () => engine.value.placementSummary.positionText !== '-' );
 const hitTestReady = computed(
@@ -113,113 +71,61 @@ const sliderValue = computed<number>( {
 		store.actions.setStructureRevealValue( value );
 	}
 } );
+
 const sessionStatusText = computed( () => {
 	if ( hasArSession.value === false ) {
-		return '请进入 AR 巡查';
+		return '待进入 AR';
 	}
-
 	if ( engine.value.markerCalibration.active ) {
-		return `手动四角点：${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}，请采集 ${engine.value.markerCalibration.nextCornerLabel || '下一个角点'}`;
+		return `采集四角 ${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}`;
 	}
-
 	if ( modelPlaced.value ) {
-		return '模型已按工程坐标显示';
+		return '模型已显示';
 	}
-
 	if ( localizationReady.value ) {
-		return hitTestReady.value
-			? '当前会话空间校正完成，等待模型自动放置'
-			: '当前会话空间校正完成，等待地面检测';
+		return '空间校正完成';
 	}
-
 	if ( hitTestReady.value ) {
-		return '已检测到地面，请完成控制标志四角点校正';
+		return '等待四角校正';
 	}
-
-	return engine.value.runtimeStatus || TEXT.scanning;
+	return engine.value.runtimeStatus || '扫描平面';
 } );
 
 const configCards = computed( () => [
-	{ label: '当前站点 / 模型', value: currentModelName.value, wide: true },
+	{ label: '当前模型', value: `${engine.value.selectedModelId || '-'} / ${currentModelName.value}`, wide: true },
 	{ label: '配置 JSON', value: currentConfigUrl.value, wide: true },
-	{ label: '数据来源', value: configStatus.value.hasMockEngineeringData ? 'mock' : configStatus.value.engineeringDataSourceText },
-	{ label: '数据状态', value: configStatus.value.hasMockEngineeringData ? '示例数据' : configStatus.value.hasRtkSurveyDataset ? 'RTK 实测数据' : '未知' },
-	{ label: 'RTK 数据', value: formatRtkDatasetStatus() },
 	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
-	{ label: 'modelLocalToEnu', value: configStatus.value.modelLocalToEnuText },
 	{ label: '模型控制点', value: `${engine.value.registrationChainDebug.engineeringControlRegistration.controlPointCount} 个` },
-	{ label: 'controlTargets', value: configStatus.value.hasControlTargets ? `已配置 ${configStatus.value.controlTargetCount} 个` : '未配置' },
-	{ label: '控制标志来源', value: configStatus.value.controlTargetSourceText },
-	{ label: '当前 Marker', value: formatActiveMarkerText(), wide: true },
-	{ label: 'cornersEnu', value: configStatus.value.activeControlTargetHasCornersEnu ? '已配置' : '缺失' },
-	{ label: 'placementAnchorEnu', value: configStatus.value.hasPlacementAnchor ? configStatus.value.placementAnchorText : '未配置', wide: true },
-	{ label: 'undergroundObjects', value: `${configStatus.value.undergroundObjectCount} 个` },
-	{ label: 'sensors', value: `${configStatus.value.sensorCount} 个` },
-	{ label: 'riskPoints', value: `${configStatus.value.riskPointCount} 个` }
-] );
-
-const arGroundCards = computed( () => [
-	{ label: 'AR 会话', value: hasArSession.value ? '已进入 AR 巡查' : '请进入 AR 巡查' },
-	{ label: '地面检测', value: hitTestReady.value ? '地面检测完成' : hasArSession.value ? '请缓慢移动设备，扫描地面' : '未进入 AR' },
-	{ label: '当前会话空间校正', value: localizationReady.value ? '当前会话空间校正完成' : '尚未完成' },
-	{ label: '模型自动放置', value: modelPlaced.value ? '模型已按工程坐标显示' : '等待当前会话空间校正' }
+	{ label: '控制标志', value: formatActiveMarkerText(), wide: true },
+	{ label: '四角 ENU', value: canUseMarkerCorners.value ? '已配置' : '缺失' }
 ] );
 
 const configWarnings = computed( () => {
 	const warnings: string[] = [];
-	if ( configStatus.value.hasControlTargets === false ) {
-		warnings.push( '当前模型未配置控制标志，无法进行正式 AR 空间校正。' );
-	}
 	if ( configStatus.value.hasRtkSurveyDataset === false ) {
-		warnings.push( '当前模型未配置 RTK 测量数据，请先补充工程真值配置。' );
+		warnings.push( '当前模型未加载 RTK 测量数据。' );
 	}
-	if ( configStatus.value.hasModelLocalToEnu === false || configStatus.value.activeControlTargetHasCornersEnu === false ) {
-		warnings.push( '工程配准数据不完整，请先完善模型到工程坐标和控制标志工程坐标。' );
+	if ( configStatus.value.hasModelLocalToEnu === false ) {
+		warnings.push( '模型控制点不足，无法求解 modelLocalToEnu。' );
 	}
-	for ( const hint of configStatus.value.recommendedFieldHints ) {
-		warnings.push( hint );
+	if ( configStatus.value.hasControlTargets === false ) {
+		warnings.push( '当前模型没有控制标志。' );
 	}
-	if ( configStatus.value.hasPlacementAnchor === false ) {
-		warnings.push( '当前模型未配置地面参考点，手动场景定位可能不可用。' );
+	if ( canUseMarkerCorners.value === false ) {
+		warnings.push( '当前控制标志缺少四角 ENU 坐标。' );
 	}
 	if ( configStatus.value.baselineMismatch ) {
-		warnings.push( '当前已保存现场基准与模型配置可能不一致，请确认是否更新基准配置。' );
+		warnings.push( '已保存 baseline 与当前 JSON 不一致，本次使用当前 JSON。' );
 	}
 	return warnings;
 } );
 
-function formatRtkDatasetStatus(): string {
-	if ( configStatus.value.hasRtkSurveyDataset === false ) {
-		return '未加载';
-	}
-
-	return configStatus.value.hasMockEngineeringData
-		? `示例数据 ${configStatus.value.rtkPointCount} 点`
-		: `已加载 ${configStatus.value.rtkPointCount} 点`;
-}
-
-function formatActiveMarkerText(): string {
-	const id = configStatus.value.activeControlTargetId ?? '-';
-	const name = configStatus.value.activeControlTargetName ?? '-';
-	return `${id} / ${name}`;
-}
-
-const localizationCards = computed( () => [
-	{ label: '地面检测', value: hitTestReady.value ? '地面检测完成' : '等待地面检测' },
-	{ label: '当前会话空间校正', value: localizationReady.value ? '已完成' : '未完成' },
-	{ label: '模型自动放置', value: modelPlaced.value ? '模型已按工程坐标显示' : '未显示' },
-	{ label: '校正 source', value: engine.value.registrationChainDebug.arSessionLocalization.source || 'unknown' },
-	{ label: '校正误差', value: engine.value.markerCalibration.rmsErrorMeters === undefined ? '-' : `${engine.value.markerCalibration.rmsErrorMeters.toFixed( 3 )}m` },
-	{ label: '航向', value: engine.value.markerCalibration.headingDeg === undefined ? '-' : `${engine.value.markerCalibration.headingDeg.toFixed( 2 )}deg` }
-] );
-
 const calibrationStatusCards = computed( () => [
-	{ label: TEXT.targetMarker, value: formatActiveMarkerText(), wide: true },
-	{ label: 'Marker id', value: engine.value.markerCalibration.markerId ?? configStatus.value.activeControlTargetId ?? '-' },
-	{ label: TEXT.cornerProgress, value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
-	{ label: TEXT.nextCorner, value: engine.value.markerCalibration.nextCornerLabel || '-' },
-	{ label: 'cornersEnu', value: canUseMarkerCorners.value ? '已配置' : '缺失' },
-	{ label: '失败原因', value: engine.value.runtimeStatus || '-' , wide: true }
+	{ label: '目标 Marker', value: formatActiveMarkerText(), wide: true },
+	{ label: '采集进度', value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
+	{ label: '当前角点', value: engine.value.markerCalibration.nextCornerLabel || '-' },
+	{ label: '误差', value: engine.value.markerCalibration.rmsErrorMeters === undefined ? '-' : `${engine.value.markerCalibration.rmsErrorMeters.toFixed( 3 )}m` },
+	{ label: '航向', value: engine.value.markerCalibration.headingDeg === undefined ? '-' : `${engine.value.markerCalibration.headingDeg.toFixed( 2 )}deg` }
 ] );
 
 const showMarkerCalibrationOverlay = computed(
@@ -241,44 +147,42 @@ const markerApplyBlockedText = computed( () => (
 		? configStatus.value.mockWarningText || '当前为示例工程坐标，请替换为 RTK 实测数据。'
 		: ''
 ) );
-const workflowHint = computed( () => {
-	if ( localizationReady.value && modelPlaced.value ) {
-		return '空间校正完成，模型已按工程坐标自动放置。';
-	}
-	if ( localizationReady.value && hitTestReady.value === false ) {
-		return '空间校正完成，等待地面检测后自动放置模型。';
-	}
-	if ( hitTestReady.value ) {
-		return '已检测到地面，请完成控制标志四角点校正。';
-	}
-	if ( hasArSession.value ) {
-		return '请缓慢移动设备，扫描地面。';
-	}
-	return '请进入 AR 巡查。';
-} );
 
 const markerCornerPrompt = computed( () => {
 	if ( canUseMarkerCorners.value === false ) {
-		return '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。';
+		return '当前控制标志缺少四角 ENU 坐标。';
 	}
 	if ( hasArSession.value && hitTestReady.value === false ) {
-		return '请缓慢移动设备，扫描地面。';
+		return '请先扫描地面。';
 	}
 
 	const label = engine.value.markerCalibration.nextCornerLabel;
 	if ( label.includes( '左上' ) || label.includes( 'leftTop' ) ) {
-		return '请将准星对准控制标志左上角 LT，并点击采集。';
+		return '对准控制标志左上角 LT 后采集。';
 	}
 	if ( label.includes( '右上' ) || label.includes( 'rightTop' ) ) {
-		return '请将准星对准控制标志右上角 RT，并点击采集。';
+		return '对准控制标志右上角 RT 后采集。';
 	}
 	if ( label.includes( '右下' ) || label.includes( 'rightBottom' ) ) {
-		return '请将准星对准控制标志右下角 RB，并点击采集。';
+		return '对准控制标志右下角 RB 后采集。';
 	}
 	if ( label.includes( '左下' ) || label.includes( 'leftBottom' ) ) {
-		return '请将准星对准控制标志左下角 LB，并点击采集。';
+		return '对准控制标志左下角 LB 后采集。';
 	}
-	return '请按左上角、右上角、右下角、左下角顺序采集控制标志四角。';
+	return '按 LT、RT、RB、LB 顺序采集。';
+} );
+
+const workflowHint = computed( () => {
+	if ( localizationReady.value && modelPlaced.value ) {
+		return '空间校正完成，模型已显示。';
+	}
+	if ( localizationReady.value ) {
+		return '空间校正完成，等待模型自动放置。';
+	}
+	if ( hitTestReady.value ) {
+		return '请完成控制标志四角校正。';
+	}
+	return hasArSession.value ? '请扫描地面。' : '请进入 AR。';
 } );
 
 watch(
@@ -312,6 +216,12 @@ watch( hasArSession, (active) => {
 		markerCalibrationOverlayOpen.value = false;
 	}
 } );
+
+function formatActiveMarkerText(): string {
+	const id = configStatus.value.activeControlTargetId ?? '-';
+	const name = configStatus.value.activeControlTargetName ?? '-';
+	return `${id} / ${name}`;
+}
 
 function resolveCurrentStep(): string {
 	if ( hasArSession.value === false ) {
@@ -357,8 +267,7 @@ async function startArSession(): Promise<void> {
 }
 
 function handleModelChange(event: Event): void {
-	const target = event.target as HTMLSelectElement;
-	store.actions.selectModel( target.value );
+	store.actions.selectModel( ( event.target as HTMLSelectElement ).value );
 }
 
 function activatePanelView(view: InspectPanelView): void {
@@ -457,10 +366,10 @@ function setArOverlayClass(active: boolean): void {
 				@click.stop
 			>
 				<div>
-					<div class="page-title">{{ TEXT.title }}</div>
+					<div class="page-title">堤防 AR 巡查</div>
 					<div class="page-subtitle">{{ currentModelName }}</div>
 				</div>
-				<div class="status-chip">{{ TEXT.status }}：{{ sessionStatusText }}</div>
+				<div class="status-chip">状态：{{ sessionStatusText }}</div>
 			</header>
 
 			<section class="scene-shell">
@@ -474,10 +383,12 @@ function setArOverlayClass(active: boolean): void {
 					@click.stop
 				>
 					<div class="launch-badge">AR</div>
-					<div class="launch-title">{{ TEXT.enterArTitle }}</div>
-					<p class="launch-subtitle">{{ TEXT.enterArSub }}</p>
+					<div class="launch-title">进入 AR 巡查</div>
+					<p class="launch-subtitle">
+						读取工程配置后进入 AR；现场需要采集控制标志四角点。
+					</p>
 					<label class="model-field">
-						<span>{{ TEXT.selectModel }}</span>
+						<span>选择站点</span>
 						<select class="select-field" :value="engine.selectedModelId" @change="handleModelChange">
 							<option v-for="model in engine.availableModels" :key="model.id" :value="model.id">
 								{{ model.name }}
@@ -485,7 +396,7 @@ function setArOverlayClass(active: boolean): void {
 						</select>
 					</label>
 					<button type="button" class="launch-button" @click.stop="startArSession">
-						{{ TEXT.enterAr }}
+						进入 AR
 					</button>
 				</div>
 			</section>
@@ -514,15 +425,15 @@ function setArOverlayClass(active: boolean): void {
 		>
 			<button type="button" class="dock-item dock-item-primary" @click.stop="openWorkspacePanel">
 				<span class="dock-icon">板</span>
-				<span class="dock-label">{{ TEXT.panelTool }}</span>
+				<span class="dock-label">控制面板</span>
 			</button>
 			<button type="button" class="dock-item" @click.stop="store.actions.takeSnapshot()">
 				<span class="dock-icon">图</span>
-				<span class="dock-label">{{ TEXT.takeSnapshot }}</span>
+				<span class="dock-label">截图</span>
 			</button>
 			<button type="button" class="dock-item" @click.stop="exitPage">
 				<span class="dock-icon">退</span>
-				<span class="dock-label">{{ TEXT.exit }}</span>
+				<span class="dock-label">退出 AR</span>
 			</button>
 		</nav>
 
@@ -547,13 +458,13 @@ function setArOverlayClass(active: boolean): void {
 						</button>
 					</div>
 					<button type="button" class="sheet-close" @click="store.actions.toggleDrawer()">
-						{{ TEXT.closePanel }}
+						收起
 					</button>
 				</div>
 
 				<template v-if="activePanelView === 'display'">
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.displayMode }}</div>
+						<div class="section-label">模型显示</div>
 						<div class="chip-grid">
 							<button
 								v-for="item in DISPLAY_MODE_OPTIONS"
@@ -569,7 +480,7 @@ function setArOverlayClass(active: boolean): void {
 					</div>
 
 					<div v-if="engine.displayMode === 'section-cut'" class="sheet-section">
-						<div class="section-label">{{ TEXT.sectionPlane }}</div>
+						<div class="section-label">剖切方向</div>
 						<div class="chip-grid">
 							<button
 								v-for="item in SECTION_CUT_PLANE_MODE_OPTIONS"
@@ -596,40 +507,23 @@ function setArOverlayClass(active: boolean): void {
 								{{ engine.undergroundPreviewEnabled ? '关闭下沉' : '下沉 1m' }}
 							</button>
 						</div>
-						<div class="runtime-banner">
-							仅移动当前显示模型，不修改 RTK 配准和保存数据。
-						</div>
 					</div>
 				</template>
 
 				<template v-else-if="activePanelView === 'localization'">
-					<ArPanelSection title="阶段 1：工程配置加载" first>
+					<ArPanelSection title="工程配置" first>
 						<ArInfoGrid :items="configCards" />
 						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
 							{{ warning }}
 						</div>
-						<div v-if="configStatus.hasMockEngineeringData" class="runtime-banner warning">
-							{{ configStatus.mockWarningText }}
-						</div>
 					</ArPanelSection>
 
-					<ArPanelSection title="阶段 2：进入 AR 与地面检测">
-						<ArInfoGrid :items="arGroundCards" />
-						<div class="runtime-banner" :class="{ warning: localizationReady === false }">
-							{{ workflowHint }}
-						</div>
-					</ArPanelSection>
+					<ArPlacementStatusSection :state="engine" title="AR 定位" />
 
-					<ArPanelSection title="阶段 3：手动 Marker 四角点校正">
+					<ArPanelSection title="四角点校正">
 						<ArInfoGrid :items="calibrationStatusCards" class="compact-info-grid" />
 						<div class="runtime-banner" :class="{ warning: canUseMarkerCorners === false }">
 							{{ markerCornerPrompt }}
-						</div>
-						<div class="runtime-banner">
-							角点顺序：1. 左上角；2. 右上角；3. 右下角；4. 左下角。
-						</div>
-						<div class="runtime-banner">
-							Marker 四角点用于当前 AR 会话空间校正；模型控制点用于模型到工程坐标配准，二者不要混用。
 						</div>
 						<div class="action-row">
 							<button
@@ -638,24 +532,18 @@ function setArOverlayClass(active: boolean): void {
 								:disabled="canStartMarkerCalibration === false"
 								@click="handleStartMarkerCalibration()"
 							>
-								{{ TEXT.startCalibration }}
+								开始四角点采集
 							</button>
 						</div>
 					</ArPanelSection>
-
-					<ArPanelSection title="阶段 4：模型自动放置与巡查">
-						<ArInfoGrid :items="localizationCards" />
-						<div class="runtime-banner">{{ workflowHint }}</div>
-					</ArPanelSection>
-
 				</template>
 
 				<template v-else>
 					<div class="sheet-section">
-						<div class="section-label">{{ TEXT.record }}</div>
+						<div class="section-label">巡查记录</div>
 						<div class="form-grid">
 							<label class="field">
-								<span>{{ TEXT.inspectionResult }}</span>
+								<span>结果</span>
 								<input
 									:value="ui.inspectionDraft.result"
 									type="text"
@@ -663,7 +551,7 @@ function setArOverlayClass(active: boolean): void {
 								>
 							</label>
 							<label class="field">
-								<span>{{ TEXT.inspectionType }}</span>
+								<span>类型</span>
 								<input
 									:value="ui.inspectionDraft.type"
 									type="text"
@@ -671,7 +559,7 @@ function setArOverlayClass(active: boolean): void {
 								>
 							</label>
 							<label class="field">
-								<span>{{ TEXT.inspectionSeverity }}</span>
+								<span>等级</span>
 								<input
 									:value="ui.inspectionDraft.severity"
 									type="text"
@@ -679,7 +567,7 @@ function setArOverlayClass(active: boolean): void {
 								>
 							</label>
 							<label class="field full">
-								<span>{{ TEXT.inspectionNote }}</span>
+								<span>备注</span>
 								<textarea
 									rows="4"
 									:value="ui.inspectionDraft.note"
@@ -689,10 +577,10 @@ function setArOverlayClass(active: boolean): void {
 						</div>
 						<div class="action-row">
 							<button type="button" class="action-button primary" @click="store.actions.saveInspectionRecord()">
-								{{ TEXT.saveInspection }}
+								保存记录
 							</button>
 							<button type="button" class="action-button" @click="store.actions.exportInspectionRecords()">
-								{{ TEXT.exportRecords }}
+								导出记录
 							</button>
 						</div>
 					</div>
@@ -707,7 +595,7 @@ function setArOverlayClass(active: boolean): void {
 			@pointerdown.stop="store.actions.handleArUiInteraction()"
 			@click.stop
 		>
-			<div class="marker-calibration-title">{{ TEXT.calibrationPanel }}</div>
+			<div class="marker-calibration-title">手动 Marker 四角点校正</div>
 			<div class="marker-calibration-progress">
 				{{ engine.markerCalibration.capturedCornerCount }}/{{ engine.markerCalibration.expectedCornerCount }}
 				<span>{{ engine.markerCalibration.nextCornerLabel || '-' }}</span>
@@ -723,7 +611,7 @@ function setArOverlayClass(active: boolean): void {
 					:disabled="canCaptureMarkerCorner === false"
 					@click="handleCaptureMarkerCorner()"
 				>
-					{{ TEXT.captureCorner }}
+					采集当前角点
 				</button>
 				<button
 					type="button"
@@ -731,7 +619,7 @@ function setArOverlayClass(active: boolean): void {
 					:disabled="canApplyMarkerCalibration === false"
 					@click="handleApplyMarkerCalibration()"
 				>
-					{{ TEXT.applyCalibration }}
+					完成校正
 				</button>
 				<button type="button" class="marker-action" @click="handleResetMarkerCalibration()">
 					重置采集
@@ -790,7 +678,6 @@ function setArOverlayClass(active: boolean): void {
 .page-title {
 	font-size: 24px;
 	font-weight: 800;
-	letter-spacing: 0.03em;
 	text-shadow: 0 2px 14px rgba(0, 0, 0, 0.32);
 }
 
@@ -903,7 +790,6 @@ function setArOverlayClass(active: boolean): void {
 .action-button,
 .chip-button,
 .sheet-close {
-	border: 0;
 	color: #eff6ff;
 	background: rgba(15, 23, 42, 0.82);
 	border: 1px solid rgba(148, 163, 184, 0.22);
@@ -973,6 +859,82 @@ function setArOverlayClass(active: boolean): void {
 .dock-label {
 	font-size: 11px;
 	margin-top: 2px;
+}
+
+.bottom-sheet {
+	position: fixed;
+	z-index: 8;
+	left: 16px;
+	right: 16px;
+	bottom: calc(82px + env(safe-area-inset-bottom));
+	max-height: 62vh;
+	overflow: auto;
+	padding: 14px;
+	border-radius: 24px;
+	background: rgba(8, 15, 27, 0.86);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+	backdrop-filter: blur(24px);
+}
+
+.sheet-header {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+}
+
+.sheet-tabs,
+.chip-grid,
+.action-row {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.sheet-tab {
+	border: 1px solid rgba(148, 163, 184, 0.2);
+	border-radius: 14px;
+	background: rgba(15, 23, 42, 0.74);
+	color: #dbeafe;
+	padding: 9px 11px;
+	font-size: 12px;
+	font-weight: 800;
+}
+
+.sheet-tab.active {
+	background: rgba(0, 212, 255, 0.2);
+	border-color: rgba(0, 212, 255, 0.42);
+	color: #fff;
+}
+
+.sheet-section {
+	margin-top: 12px;
+}
+
+.section-label {
+	margin-bottom: 8px;
+	font-size: 13px;
+	font-weight: 900;
+	color: #e0f2fe;
+}
+
+.runtime-banner {
+	margin-top: 10px;
+	padding: 9px 11px;
+	border-radius: 13px;
+	background: rgba(0, 212, 255, 0.08);
+	border: 1px solid rgba(0, 212, 255, 0.18);
+	font-size: 12px;
+	line-height: 1.55;
+	color: #d5f7ff;
+}
+
+.runtime-banner.warning {
+	background: rgba(245, 158, 11, 0.12);
+	border-color: rgba(245, 158, 11, 0.28);
+	color: #ffe8b6;
 }
 
 .marker-calibration-overlay {
@@ -1059,82 +1021,6 @@ function setArOverlayClass(active: boolean): void {
 
 .marker-action:disabled {
 	opacity: 0.42;
-}
-
-.bottom-sheet {
-	position: fixed;
-	z-index: 8;
-	left: 16px;
-	right: 16px;
-	bottom: calc(82px + env(safe-area-inset-bottom));
-	max-height: 62vh;
-	overflow: auto;
-	padding: 14px;
-	border-radius: 24px;
-	background: rgba(8, 15, 27, 0.86);
-	border: 1px solid rgba(255, 255, 255, 0.12);
-	box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
-	backdrop-filter: blur(24px);
-}
-
-.sheet-header {
-	display: flex;
-	gap: 8px;
-	align-items: center;
-	justify-content: space-between;
-	margin-bottom: 12px;
-}
-
-.sheet-tabs,
-.chip-grid,
-.action-row {
-	display: flex;
-	gap: 8px;
-	flex-wrap: wrap;
-}
-
-.sheet-tab {
-	border: 1px solid rgba(148, 163, 184, 0.2);
-	border-radius: 14px;
-	background: rgba(15, 23, 42, 0.74);
-	color: #dbeafe;
-	padding: 9px 11px;
-	font-size: 12px;
-	font-weight: 800;
-}
-
-.sheet-tab.active {
-	background: rgba(0, 212, 255, 0.2);
-	border-color: rgba(0, 212, 255, 0.42);
-	color: #fff;
-}
-
-.sheet-section {
-	margin-top: 12px;
-}
-
-.section-label {
-	margin-bottom: 8px;
-	font-size: 13px;
-	font-weight: 900;
-	color: #e0f2fe;
-}
-
-.runtime-banner {
-	margin-top: 10px;
-	padding: 9px 11px;
-	border-radius: 13px;
-	background: rgba(0, 212, 255, 0.08);
-	border: 1px solid rgba(0, 212, 255, 0.18);
-	font-size: 12px;
-	line-height: 1.55;
-	color: #d5f7ff;
-}
-
-.runtime-banner.warning {
-	background: rgba(245, 158, 11, 0.12);
-	border-color: rgba(245, 158, 11, 0.28);
-	color: #ffe8b6;
 }
 
 .form-grid {

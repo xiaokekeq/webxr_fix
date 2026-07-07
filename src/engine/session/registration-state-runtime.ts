@@ -167,13 +167,18 @@ export class RegistrationStateRuntime {
 
 		const baseline = this.options.getActiveSiteCalibrationBaseline();
 		const siteConfigTargets = this.options.resolveBaselineControlTargets();
+		const baselineMatchesSiteConfig = baseline !== null
+			&& siteConfigTargets.length > 0
+			&& areControlTargetsEquivalent( baseline.controlTargets, siteConfigTargets );
 		const useBaselineTargets = this.options.getWorkflowMode() === 'ar-inspection'
 			&& baseline !== null
-			&& baseline.controlTargets.length > 0;
+			&& baseline.controlTargets.length > 0
+			&& ( siteConfigTargets.length === 0 || baselineMatchesSiteConfig );
 		const activeTargets = useBaselineTargets ? baseline.controlTargets : siteConfigTargets;
 		const firstTarget = activeTargets[ 0 ];
 		const baselineMismatch = baseline !== null
 			&& siteConfigTargets.length > 0
+			&& baseline.controlTargets.length > 0
 			&& areControlTargetsEquivalent( baseline.controlTargets, siteConfigTargets ) === false;
 		const controlTargetSource = activeTargets.length === 0
 			? 'none'
@@ -654,7 +659,7 @@ function resolveMissingFormalInspectionFields(args: {
 
 }
 
-function areControlTargetsEquivalent(
+export function areControlTargetsEquivalent(
 	left: VisualControlTarget[],
 	right: VisualControlTarget[]
 ): boolean {
@@ -670,8 +675,55 @@ function areControlTargetsEquivalent(
 		}
 
 		return target.id === other.id
-			&& areEnuTuplesEqual( target.centerEnu, other.centerEnu );
+			&& target.markerId === other.markerId
+			&& target.plane === other.plane
+			&& areOptionalNumbersEqual( target.sizeMeters, other.sizeMeters )
+			&& areOptionalNumbersEqual( target.yawDeg, other.yawDeg )
+			&& areStringArraysEqual( target.cornerOrder, other.cornerOrder )
+			&& areEnuTuplesEqual( target.centerEnu, other.centerEnu )
+			&& areCornersEnuEqual( target.cornersEnu, other.cornersEnu );
 	} );
+
+}
+
+function areCornersEnuEqual(
+	left: VisualControlTarget['cornersEnu'],
+	right: VisualControlTarget['cornersEnu']
+): boolean {
+
+	if ( left === undefined || right === undefined ) {
+		return left === right;
+	}
+
+	return left.length === right.length
+		&& left.every( ( corner, index ) => areEnuTuplesEqual( corner, right[ index ] ) );
+
+}
+
+function areStringArraysEqual(
+	left: string[] | undefined,
+	right: string[] | undefined
+): boolean {
+
+	if ( left === undefined || right === undefined ) {
+		return left === right;
+	}
+
+	return left.length === right.length
+		&& left.every( ( item, index ) => item === right[ index ] );
+
+}
+
+function areOptionalNumbersEqual(
+	left: number | undefined,
+	right: number | undefined
+): boolean {
+
+	if ( left === undefined || right === undefined ) {
+		return left === right;
+	}
+
+	return Math.abs( left - right ) <= 1e-6;
 
 }
 

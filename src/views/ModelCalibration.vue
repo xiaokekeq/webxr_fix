@@ -9,15 +9,12 @@ import CpuDepthDebugOverlay from '@/components/ar/CpuDepthDebugOverlay.vue';
 import { cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
-type CalibrationPanelView = 'overview' | 'config' | 'model' | 'marker' | 'rtk' | 'save' | 'ar-check';
+type CalibrationPanelView = 'overview' | 'model' | 'marker' | 'ar-check';
 
 const PANEL_OPTIONS: Array<{ value: CalibrationPanelView; label: string }> = [
 	{ value: 'overview', label: '工程概览' },
-	{ value: 'config', label: '完整性' },
 	{ value: 'model', label: '模型到 ENU' },
 	{ value: 'marker', label: '控制标志' },
-	{ value: 'rtk', label: 'RTK 数据' },
-	{ value: 'save', label: '保存确认' },
 	{ value: 'ar-check', label: 'AR 校验' }
 ];
 
@@ -82,24 +79,11 @@ const sessionStatusText = computed( () => {
 const overviewCards = computed( () => [
 	{ label: 'siteId', value: engine.value.selectedModelId || '-' },
 	{ label: 'siteName', value: currentModelName.value },
-	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '缺失', wide: true },
 	{ label: '配置 JSON', value: currentConfigUrl.value, wide: true },
-	{ label: '数据来源', value: formatEngineeringDataSource() },
-	{ label: '是否示例数据', value: configStatus.value.hasMockEngineeringData ? '是' : '否' }
-] );
-
-const configCards = computed( () => [
 	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
-	{ label: 'modelLocalToEnu', value: configStatus.value.modelLocalToEnuText },
-	{ label: 'rtkSurveyDataset', value: formatRtkDatasetStatus() },
-	{ label: 'controlTargets', value: configStatus.value.hasControlTargets ? `${configStatus.value.controlTargetCount} 个` : '未配置' },
 	{ label: '当前 Marker', value: formatActiveMarkerText(), wide: true },
-	{ label: 'cornersEnu', value: configStatus.value.activeControlTargetHasCornersEnu ? '已配置' : '缺失' },
-	{ label: 'placementAnchorEnu', value: configStatus.value.hasPlacementAnchor ? configStatus.value.placementAnchorText : '未配置', wide: true },
-	{ label: '数据来源', value: configStatus.value.hasMockEngineeringData ? 'mock' : configStatus.value.engineeringDataSourceText },
-	{ label: 'undergroundObjects', value: `${configStatus.value.undergroundObjectCount} 个` },
-	{ label: 'sensors', value: `${configStatus.value.sensorCount} 个` },
-	{ label: 'riskPoints', value: `${configStatus.value.riskPointCount} 个` }
+	{ label: '数据来源', value: formatEngineeringDataSource() },
+	{ label: 'RTK 点数', value: configStatus.value.hasRtkSurveyDataset ? `${configStatus.value.rtkPointCount} 点` : '未加载' }
 ] );
 
 const modelToEnuCards = computed( () => [
@@ -112,20 +96,6 @@ const modelToEnuCards = computed( () => [
 	{ label: '模型单位', value: '按米解释' }
 ] );
 
-const rtkCards = computed( () => [
-	{ label: 'rtkSurveyDataset', value: configStatus.value.hasRtkSurveyDataset ? '存在' : '缺失' },
-	{ label: '点数量', value: `${configStatus.value.rtkPointCount}` },
-	{ label: 'coordinateSystem', value: configStatus.value.rtkCoordinateSystemText },
-	{ label: 'mock/demo 点', value: configStatus.value.mockRtkPointIds.length > 0 ? configStatus.value.mockRtkPointIds.join( '、' ) : '未标记' , wide: true },
-	{ label: '需替换字段', value: 'siteOrigin、rtkSurveyDataset.points、controlTargets.centerEnu、controlTargets.cornersEnu、controlPoints[].enu、placementAnchorEnu', wide: true }
-] );
-
-const saveCards = computed( () => [
-	{ label: '保存内容', value: '工程配置确认 / 校验备注', wide: true },
-	{ label: '不会保存', value: '当前 AR 会话矩阵、XR anchor、ENU -> AR local', wide: true },
-	{ label: 'AR 巡查要求', value: '仍需在当前会话中完成控制标志校正', wide: true }
-] );
-
 const configWarnings = computed( () => {
 	const warnings: string[] = [];
 	if ( configStatus.value.hasRtkSurveyDataset === false ) {
@@ -133,9 +103,6 @@ const configWarnings = computed( () => {
 	}
 	if ( configStatus.value.hasControlTargets === false ) {
 		warnings.push( '当前模型未配置控制标志，无法进行正式 AR 空间校正。' );
-	}
-	if ( configStatus.value.hasPlacementAnchor === false ) {
-		warnings.push( '当前模型未配置 placementAnchorEnu。' );
 	}
 	if ( configStatus.value.activeControlTargetHasCornersEnu === false ) {
 		warnings.push( '当前控制标志未配置 cornersEnu，正式巡查前请补充 RTK 实测四角点。' );
@@ -151,16 +118,6 @@ const configWarnings = computed( () => {
 	}
 	return warnings;
 } );
-
-function formatRtkDatasetStatus(): string {
-	if ( configStatus.value.hasRtkSurveyDataset === false ) {
-		return '未加载';
-	}
-
-	return configStatus.value.hasMockEngineeringData
-		? `示例数据 ${configStatus.value.rtkPointCount} 点`
-		: `已加载 ${configStatus.value.rtkPointCount} 点`;
-}
 
 function formatActiveMarkerText(): string {
 	const id = configStatus.value.activeControlTargetId ?? '-';
@@ -193,10 +150,7 @@ const markerCards = computed( () => {
 		{ label: `Marker ${index + 1}`, value: `${target.name} / ${target.id}`, wide: true },
 		{ label: 'centerEnu', value: target.centerEnuText, wide: true },
 		{ label: 'cornersEnu', value: target.cornersEnuText, wide: true },
-		{ label: 'cornerOrder', value: target.cornerOrderText, wide: true },
-		{ label: 'yawDeg', value: target.yawDegText },
-		{ label: 'sizeMeters', value: target.sizeMetersText },
-		{ label: 'plane', value: target.planeText }
+		{ label: 'cornerOrder', value: target.cornerOrderText, wide: true }
 	] );
 } );
 
@@ -401,20 +355,6 @@ function handleToggleCpuDepthDebug(): void {
 	store.actions.toggleCpuDepthDebug();
 }
 
-function handleSaveBaseline(): void {
-	console.info( '[EngineeringCalibrationSaveValidated]', {
-		mode: engine.value.workflowMode,
-		siteId: engine.value.selectedModelId || null,
-		modelId: engine.value.selectedModelId || null,
-		sessionId: engine.value.markerCalibration.currentSessionId,
-		currentStep: 'save-engineering-calibration',
-		localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
-		targetId: configStatus.value.activeControlTargetId ?? null,
-		message: '保存工程配置确认状态；不保存 ENU -> AR local、XR anchor 或 modelRoot transform。'
-	} );
-	store.actions.saveSiteCalibrationBaseline();
-}
-
 onMounted( () => {
 	void mountEngineHosts();
 	store.actions.setWorkflowMode( 'site-baseline-config' );
@@ -522,23 +462,6 @@ function setArOverlayClass(active: boolean): void {
 				<template v-if="activePanelView === 'overview'">
 					<ArPanelSection title="工程配准总览" first>
 						<ArInfoGrid :items="overviewCards" />
-						<div class="runtime-banner">
-							长期工程数据来自 JSON 或后端配置；当前 AR 会话的 ENU -> AR local 解只在本次 session 内有效。
-						</div>
-						<div class="runtime-banner">
-							CPU Depth 仅用于实时深度可视化调试，不参与工程配准和模型定位。
-						</div>
-						<div class="action-row">
-							<button type="button" class="action-button primary" @click="handleSaveBaseline()">
-								保存工程配置确认
-							</button>
-						</div>
-					</ArPanelSection>
-				</template>
-
-				<template v-else-if="activePanelView === 'config'">
-					<ArPanelSection title="工程配置完整性" first>
-						<ArInfoGrid :items="configCards" />
 						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
 							{{ warning }}
 						</div>
@@ -548,9 +471,6 @@ function setArOverlayClass(active: boolean): void {
 				<template v-else-if="activePanelView === 'model'">
 					<ArPanelSection title="模型到工程坐标" first>
 						<ArInfoGrid :items="modelToEnuCards" />
-						<div v-if="configStatus.modelLocalToEnuSource === 'control-points'" class="runtime-banner">
-							当前 modelLocalToEnu 由 controlPoints 求解；每个控制点需要同时配置 modelLocal 和 enu。
-						</div>
 					</ArPanelSection>
 				</template>
 
@@ -560,26 +480,8 @@ function setArOverlayClass(active: boolean): void {
 						<div class="runtime-banner">
 							当前 ENU 数组顺序为 [east, north, up]。
 						</div>
-						<div class="runtime-banner">
-							请将控制标志固定在地面，四角清晰可见，并按 LT / RT / RB / LB 顺序采集。
-						</div>
-						<div class="runtime-banner">
-							Marker 四角点用于当前 AR 会话空间校正；模型控制点用于模型到工程坐标配准，二者不要混用。
-						</div>
-						<div class="runtime-banner">
-							真实 RTK 导入顺序：cornersEnu[0]=leftTop/LT，cornersEnu[1]=rightTop/RT，cornersEnu[2]=rightBottom/RB，cornersEnu[3]=leftBottom/LB。
-						</div>
 						<div v-if="configStatus.activeControlTargetHasCornersEnu === false" class="runtime-banner warning">
 							当前控制标志缺少四角点工程坐标，无法进行四角点校正。
-						</div>
-					</ArPanelSection>
-				</template>
-
-				<template v-else-if="activePanelView === 'rtk'">
-					<ArPanelSection title="RTK 测量数据" first>
-						<ArInfoGrid :items="rtkCards" />
-						<div v-if="configStatus.hasMockEngineeringData" class="runtime-banner warning">
-							{{ configStatus.mockWarningText }}
 						</div>
 					</ArPanelSection>
 				</template>
@@ -614,20 +516,6 @@ function setArOverlayClass(active: boolean): void {
 								@click="handleStartPrecisionCalibration()"
 							>
 								开始四角点采集
-							</button>
-						</div>
-					</ArPanelSection>
-				</template>
-
-				<template v-else-if="activePanelView === 'save'">
-					<ArPanelSection title="保存配置确认" first>
-						<ArInfoGrid :items="saveCards" />
-						<div class="runtime-banner">
-							本页面不会保存当前 AR 会话矩阵；AR 巡查仍需在当前会话中完成控制标志校正。
-						</div>
-						<div class="action-row">
-							<button type="button" class="action-button primary" @click="handleSaveBaseline()">
-								保存工程配置确认
 							</button>
 						</div>
 					</ArPanelSection>

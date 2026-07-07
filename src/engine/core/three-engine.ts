@@ -13,6 +13,7 @@ import {
 import { ArLocalizationRuntime } from '@/engine/session/ar-localization-runtime.js';
 import {
 	RegistrationStateRuntime,
+	areControlTargetsEquivalent,
 	hasMockEngineeringDataInConfig
 } from '@/engine/session/registration-state-runtime.js';
 import { SessionLifecycleRuntime } from '@/engine/session/session-lifecycle-runtime.js';
@@ -1716,18 +1717,24 @@ export class ThreeEngine {
 		source: 'baseline' | 'site-config';
 	} {
 
+		const siteConfigTargets = this.resolveBaselineControlTargets();
+		const baselineTargets = this.activeSiteCalibrationBaseline?.controlTargets ?? [];
+		const baselineMatchesSiteConfig = siteConfigTargets.length > 0
+			&& areControlTargetsEquivalent( baselineTargets, siteConfigTargets );
+
 		if (
 			this.workflowMode === 'ar-inspection'
-			&& this.activeSiteCalibrationBaseline?.controlTargets.length
+			&& baselineTargets.length > 0
+			&& ( siteConfigTargets.length === 0 || baselineMatchesSiteConfig )
 		) {
 			return {
-				controlTargets: this.activeSiteCalibrationBaseline.controlTargets,
+				controlTargets: baselineTargets,
 				source: 'baseline'
 			};
 		}
 
 		return {
-			controlTargets: this.resolveBaselineControlTargets(),
+			controlTargets: siteConfigTargets,
 			source: 'site-config'
 		};
 

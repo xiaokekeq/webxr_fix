@@ -3,9 +3,7 @@ import { computed, watch } from 'vue';
 import ArInfoGrid from './ArInfoGrid.vue';
 import ArPanelSection from './ArPanelSection.vue';
 import type {
-	ArPlacementMode,
 	ArSessionPhase,
-	InspectionPlacementSource,
 	RegistrationStoreState
 } from '@/localization/core/registration-store.js';
 
@@ -14,23 +12,17 @@ const props = withDefaults( defineProps<{
 	title?: string;
 	first?: boolean;
 }>(), {
-	title: '定位与放置状态',
+	title: '定位状态',
 	first: false
 } );
 
 const placementCards = computed( () => [
 	{ label: '工程配置', value: formatConfigStatus( props.state ) },
-	{ label: '控制标志来源', value: props.state.engineeringConfigStatus.controlTargetSourceText },
+	{ label: '控制标志', value: props.state.engineeringConfigStatus.activeControlTargetName ?? props.state.engineeringConfigStatus.activeControlTargetId ?? '-' },
+	{ label: '四角坐标', value: props.state.engineeringConfigStatus.activeControlTargetHasCornersEnu ? '已配置' : '缺失' },
 	{ label: '地面检测', value: formatSessionPhase( props.state.arSessionPhase ) },
-	{ label: '当前会话空间校正', value: formatMarkerCalibrationStatus( props.state ) },
-	{ label: '校正 source', value: formatLocalizationSource( props.state.registrationChainDebug.arSessionLocalization.source ) },
-	{ label: '模型自动放置', value: formatModelPlacementStatus( props.state ) },
-	{ label: '工程显示模式', value: formatPlacementMode( props.state.placementMode ) },
-	{ label: '巡查校正方式', value: formatInspectionPlacementSource( props.state.inspectionPlacementSource ) },
-	{ label: '状态说明', value: props.state.registrationStatusDetail || '-', wide: true },
-	{ label: '模型位置', value: props.state.placementSummary.positionText, wide: true },
-	{ label: '模型姿态', value: props.state.placementSummary.quaternionText, wide: true },
-	{ label: '模型缩放', value: props.state.placementSummary.scaleText }
+	{ label: '空间校正', value: formatMarkerCalibrationStatus( props.state ) },
+	{ label: '模型放置', value: formatModelPlacementStatus( props.state ) }
 ] );
 
 const placementHint = computed( () => resolvePlacementHint( props.state ) );
@@ -41,7 +33,6 @@ watch(
 		props.state.registrationChainDebug.arSessionLocalization.source,
 		props.state.markerCalibration.active,
 		props.state.markerCalibration.applied,
-		props.state.placementMode,
 		props.state.placementSummary.positionText
 	].join( '|' ),
 	() => {
@@ -53,17 +44,9 @@ watch(
 function formatConfigStatus(state: RegistrationStoreState): string {
 
 	const config = state.engineeringConfigStatus;
-	if ( config.hasSiteOrigin && config.hasModelLocalToEnu && config.hasRtkSurveyDataset && config.hasControlTargets ) {
-		return '工程配置已加载';
-	}
-
-	return '工程配置不完整';
-
-}
-
-function formatPlacementMode(mode: ArPlacementMode): string {
-
-	return mode === 'localized' ? '按工程坐标显示' : 'debug-only';
+	return config.hasSiteOrigin && config.hasModelLocalToEnu && config.hasRtkSurveyDataset && config.hasControlTargets
+		? '已加载'
+		: '不完整';
 
 }
 
@@ -71,44 +54,15 @@ function formatSessionPhase(phase: ArSessionPhase): string {
 
 	switch ( phase ) {
 		case 'scanning':
-			return '请缓慢移动设备，扫描地面';
+			return '扫描中';
 		case 'ready-to-place':
-			return '地面检测完成，等待当前会话空间校正';
+			return '已检测';
 		case 'placing':
-			return '正在等待模型自动放置';
+			return '放置中';
 		case 'placed':
-			return '模型已按工程坐标显示';
+			return '已放置';
 		default:
 			return phase;
-	}
-
-}
-
-function formatInspectionPlacementSource(source: InspectionPlacementSource): string {
-
-	switch ( source ) {
-		case 'manual-marker':
-			return '手动 Marker 四角点校正';
-		default:
-			return source;
-	}
-
-}
-
-function formatLocalizationSource(source: string): string {
-
-	switch ( source ) {
-		case 'marker':
-			return 'Marker 四角点';
-		case 'rtk':
-			return 'RTK 预留来源，未接入实时设备定位';
-		case 'fallback':
-			return 'fallback';
-		case 'unknown':
-		case '':
-			return '尚未建立当前会话空间校正';
-		default:
-			return source;
 	}
 
 }
@@ -116,57 +70,46 @@ function formatLocalizationSource(source: string): string {
 function formatMarkerCalibrationStatus(state: RegistrationStoreState): string {
 
 	if ( state.markerCalibration.applied ) {
-		return '当前会话空间校正完成';
-	}
-
-	if ( state.markerCalibration.solved ) {
-		return '已求解，等待模型自动放置';
+		return '已完成';
 	}
 
 	if ( state.markerCalibration.active ) {
-		return `手动采集中：${state.markerCalibration.capturedCornerCount}/${state.markerCalibration.expectedCornerCount}`;
+		return `${state.markerCalibration.capturedCornerCount}/${state.markerCalibration.expectedCornerCount}`;
 	}
 
-	return '尚未完成';
+	return state.registrationChainDebug.arSessionLocalization.available ? '已求解' : '未完成';
 
 }
 
 function formatModelPlacementStatus(state: RegistrationStoreState): string {
 
-	if ( state.placementSummary.positionText !== '-' && state.registrationChainDebug.arSessionLocalization.available ) {
-		return '模型已按工程坐标显示';
-	}
-
-	return '模型尚未按工程坐标显示';
+	return state.placementSummary.positionText !== '-' && state.registrationChainDebug.arSessionLocalization.available
+		? '已显示'
+		: '未显示';
 
 }
 
 function resolvePlacementHint(state: RegistrationStoreState): string {
 
 	if ( state.engineeringConfigStatus.hasControlTargets === false ) {
-		return '当前模型未配置控制标志，无法进行当前会话空间校正。';
+		return '当前模型没有控制标志。';
 	}
 
-	if ( state.engineeringConfigStatus.hasRtkSurveyDataset === false ) {
-		return '当前模型未配置 RTK 测量数据，请先补充工程真值配置。';
-	}
-
-	if ( state.engineeringConfigStatus.hasPlacementAnchor === false ) {
-		return '当前模型未配置 placementAnchorEnu，建议补充工程参考点。';
+	if ( state.engineeringConfigStatus.activeControlTargetHasCornersEnu === false ) {
+		return '当前控制标志缺少四角 ENU 坐标。';
 	}
 
 	if ( state.engineeringConfigStatus.baselineMismatch ) {
-		return '当前已保存现场基准与模型配置可能不一致，请确认是否更新基准配置。';
+		return '已保存 baseline 与当前 JSON 不一致，本次使用当前 JSON。';
 	}
 
-	switch ( state.registrationChainDebug.arSessionLocalization.source ) {
-		case 'marker':
-			return '模型已按工程坐标显示。';
-		default:
-			return state.arSessionPhase === 'ready-to-place'
-				? '已检测到地面，请完成控制标志四角点校正。'
-				: '当前未完成空间校正，不能作为正式巡查结果。';
+	if ( state.registrationChainDebug.arSessionLocalization.source === 'marker' ) {
+		return '四角点校正已应用。';
 	}
+
+	return state.arSessionPhase === 'ready-to-place'
+		? '请采集控制标志四角点。'
+		: '请先扫描地面。';
 
 }
 
@@ -210,15 +153,7 @@ function createUiLogPayload(
 		currentStep,
 		localizationSource: state.registrationChainDebug.arSessionLocalization.source,
 		targetId: state.engineeringConfigStatus.activeControlTargetId ?? state.markerCalibration.markerId,
-		message,
-		hasSiteOrigin: state.engineeringConfigStatus.hasSiteOrigin,
-		hasModelLocalToEnu: state.engineeringConfigStatus.hasModelLocalToEnu,
-		modelLocalToEnuSource: state.engineeringConfigStatus.modelLocalToEnuSource,
-		hasCornersEnu: state.engineeringConfigStatus.activeControlTargetHasCornersEnu,
-		hasRtkSurveyDataset: state.engineeringConfigStatus.hasRtkSurveyDataset,
-		hitTestReady: state.arSessionPhase !== 'scanning',
-		localizationReady: state.registrationChainDebug.arSessionLocalization.available,
-		modelPlaced: state.placementSummary.positionText !== '-'
+		message
 	};
 
 }
