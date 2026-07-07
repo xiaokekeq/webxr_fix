@@ -186,7 +186,7 @@ export async function loadDemoModelConfig(
 
 	setStatus( 'Loading model registration config...' );
 
-	const response = await fetch( url );
+	const response = await fetch( url, { cache: 'no-store' } );
 	if ( response.ok === false ) {
 		throw new Error( `Failed to load model config: HTTP ${response.status}` );
 	}
@@ -261,7 +261,10 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		};
 	}
 
-	if ( normalizedControlPoints.ORIGIN === undefined ) {
+	if (
+		Object.keys( normalizedControlPoints ).length < registration.minControlPoints
+		&& normalizedControlPoints.ORIGIN === undefined
+	) {
 		normalizedControlPoints.ORIGIN = {
 			modelLocal: { x: 0, y: 0, z: 0 },
 			world: {

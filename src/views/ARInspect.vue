@@ -147,6 +147,7 @@ const configCards = computed( () => [
 	{ label: 'RTK 数据', value: formatRtkDatasetStatus() },
 	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
 	{ label: 'modelLocalToEnu', value: configStatus.value.modelLocalToEnuText },
+	{ label: '模型控制点', value: `${engine.value.registrationChainDebug.engineeringControlRegistration.controlPointCount} 个` },
 	{ label: 'controlTargets', value: configStatus.value.hasControlTargets ? `已配置 ${configStatus.value.controlTargetCount} 个` : '未配置' },
 	{ label: '控制标志来源', value: configStatus.value.controlTargetSourceText },
 	{ label: '当前 Marker', value: formatActiveMarkerText(), wide: true },

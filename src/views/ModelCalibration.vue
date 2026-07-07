@@ -104,6 +104,7 @@ const configCards = computed( () => [
 
 const modelToEnuCards = computed( () => [
 	{ label: 'modelLocalToEnu 状态', value: configStatus.value.modelLocalToEnuText, wide: true },
+	{ label: '模型控制点', value: `${engine.value.registrationChainDebug.engineeringControlRegistration.controlPointCount} 个` },
 	{ label: 'registration mode', value: configStatus.value.registrationModeText },
 	{ label: 'unitScale', value: engine.value.modelScaleSummary.unitScaleText },
 	{ label: 'upAxis', value: primaryAsset.value?.assetTransform?.upAxis ?? 'y' },

@@ -2,7 +2,7 @@ import type { PipeRecord } from '@/models/types/pipe-record.js';
 
 export async function loadPipeRecords(pipesUrl: string): Promise<Map<string, PipeRecord>> {
 
-	const response = await fetch( pipesUrl );
+	const response = await fetch( pipesUrl, { cache: 'no-store' } );
 	if ( response.ok === false ) {
 		throw new Error( `Failed to load pipes.json: HTTP ${response.status}` );
 	}

@@ -30,12 +30,12 @@
   },
   {
     "id": "dz1207",
-    "name": "dz1207 real anchor",
+    "name": "707 堤坝警示牌控制点",
     "primaryAssetId": "terrain",
     "assets": [
       {
         "id": "terrain",
-        "name": "dz1207 terrain",
+        "name": "707 堤坝模型",
         "modelUrl": "/pipe-viewer/dz1207/dizhi1207.obj",
         "materialUrl": "/pipe-viewer/dz1207/dizhi1207.mtl",
         "assetTransform": {

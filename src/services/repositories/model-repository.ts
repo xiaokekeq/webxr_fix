@@ -22,7 +22,7 @@ export class LocalJsonModelRepository implements ModelRepository {
 
 	async listModels(): Promise<ModelCatalogItem[]> {
 
-		const response = await fetch( MODEL_CATALOG_URL );
+		const response = await fetch( MODEL_CATALOG_URL, { cache: 'no-store' } );
 		if ( response.ok === false ) {
 			throw new Error( `Failed to load models.json: HTTP ${response.status}` );
 		}
