@@ -383,21 +383,6 @@ async function handleExitPrecisionCalibration(): Promise<void> {
 	closeDrawerIfOpen();
 }
 
-const cpuDepthDiagClass = computed( () => {
-	if ( cpuDepthDebugState.supported === 'unknown' ) return 'diag-checking';
-	return cpuDepthDebugState.depthSensingSessionEnabled ? 'diag-ok' : 'diag-fail';
-} );
-
-const cpuDepthDiagText = computed( () => {
-	if ( cpuDepthDebugState.supported === 'unknown' ) {
-		return 'CPU Depth 检测中...';
-	}
-	if ( cpuDepthDebugState.depthSensingSessionEnabled ) {
-		return '✓ CPU Depth 已支持 (getDepthInformation 可用)';
-	}
-	return '✗ CPU Depth 不支持 (getDepthInformation 不可用，当前 AR 会话未启用深度感知)';
-} );
-
 const cpuDepthButtonLabel = computed( () => {
 	if ( cpuDepthDebugState.enabled ) {
 		return '隐藏 CPU Depth 深度图';
@@ -676,19 +661,21 @@ function setArOverlayClass(active: boolean): void {
 			</div>
 		</section>
 
-		<!-- CPU Depth 自动诊断条：AR启动后自动显示检测结果 -->
+		<CpuDepthDebugOverlay />
+
+		<!-- Session 尝试日志：始终可见 -->
 		<div
-			v-if="hasArSession"
-			class="cpu-depth-diagnostic"
-			:class="cpuDepthDiagClass"
+			v-if="cpuDepthDebugState.sessionLog.length > 0 && showMarkerCalibrationOverlay === false"
+			class="depth-session-log"
 			data-ar-ui="true"
 			@pointerdown.stop
 			@click.stop
 		>
-			{{ cpuDepthDiagText }}
+			<div class="log-title">Depth Session 日志</div>
+			<div v-for="(line, i) in cpuDepthDebugState.sessionLog" :key="i" class="log-line">
+				{{ line }}
+			</div>
 		</div>
-
-		<CpuDepthDebugOverlay />
 
 		<nav
 			v-if="hasArSession && showMarkerCalibrationOverlay === false"
@@ -1165,39 +1152,34 @@ function setArOverlayClass(active: boolean): void {
 	}
 }
 
-.cpu-depth-diagnostic {
+.depth-session-log {
 	position: fixed;
-	z-index: 15;
-	top: max( 8px, env(safe-area-inset-top) );
-	left: 50%;
-	transform: translateX( -50% );
-	max-width: 92vw;
-	padding: 6px 14px;
-	border-radius: 999px;
-	font-size: 12px;
-	font-weight: 800;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-	overflow: hidden;
-	backdrop-filter: blur( 18px );
+	z-index: 11;
+	left: 12px;
+	right: 12px;
+	bottom: calc( 90px + env(safe-area-inset-bottom) );
+	max-height: 35vh;
+	overflow: auto;
+	padding: 8px 10px;
+	border-radius: 12px;
+	background: rgba( 8, 15, 27, 0.88 );
+	border: 1px solid rgba( 0, 212, 255, 0.28 );
+	backdrop-filter: blur( 16px );
+	font-family: monospace;
 	pointer-events: auto;
 }
 
-.diag-checking {
-	background: rgba( 30, 41, 59, 0.82 );
-	border: 1px solid rgba( 148, 163, 184, 0.3 );
-	color: #cbd5e1;
+.log-title {
+	font-size: 10px;
+	font-weight: 900;
+	color: #00d4ff;
+	margin-bottom: 4px;
 }
 
-.diag-ok {
-	background: rgba( 0, 180, 120, 0.22 );
-	border: 1px solid rgba( 0, 255, 168, 0.45 );
-	color: #00ffa8;
-}
-
-.diag-fail {
-	background: rgba( 200, 50, 30, 0.22 );
-	border: 1px solid rgba( 255, 100, 80, 0.45 );
-	color: #ffb4a0;
+.log-line {
+	font-size: 10px;
+	line-height: 1.6;
+	color: #d0e8f0;
+	word-break: break-all;
 }
 </style>

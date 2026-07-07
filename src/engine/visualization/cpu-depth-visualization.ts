@@ -25,6 +25,7 @@ export interface CpuDepthDebugState {
 	lastUpdatedAt?: number;
 	errorMessage?: string;
 	depthSensingSessionEnabled: boolean;
+	sessionLog: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -48,11 +49,18 @@ function buildDefaultState(): CpuDepthDebugState {
 		enabled: false,
 		supported: 'unknown',
 		active: false,
-		depthSensingSessionEnabled: false
+		depthSensingSessionEnabled: false,
+		sessionLog: []
 	};
 }
 
 export const cpuDepthDebugState = reactive<CpuDepthDebugState>( buildDefaultState() );
+
+export function pushDepthSessionLog( msg: string ): void {
+	const ts = new Date().toLocaleTimeString();
+	cpuDepthDebugState.sessionLog = [ ...cpuDepthDebugState.sessionLog, `[${ts}] ${msg}` ].slice( -12 );
+	console.info( '[CpuDepthUI]', msg );
+}
 
 // ---------------------------------------------------------------------------
 // Offscreen heatmap canvas
