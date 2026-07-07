@@ -133,7 +133,7 @@ const sessionStatusText = computed( () => {
 	}
 
 	if ( hitTestReady.value ) {
-		return '地面检测完成，等待当前会话空间校正';
+		return '已检测到地面，请完成控制标志四角点校正';
 	}
 
 	return engine.value.runtimeStatus || TEXT.scanning;
@@ -224,8 +224,11 @@ const calibrationStatusCards = computed( () => [
 const showMarkerCalibrationOverlay = computed(
 	() => hasArSession.value && markerCalibrationOverlayOpen.value && engine.value.markerCalibration.active
 );
+const canStartMarkerCalibration = computed(
+	() => hasArSession.value && hitTestReady.value && canUseMarkerCorners.value
+);
 const canCaptureMarkerCorner = computed(
-	() => showMarkerCalibrationOverlay.value && canUseMarkerCorners.value
+	() => showMarkerCalibrationOverlay.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canApplyMarkerCalibration = computed(
 	() => canCaptureMarkerCorner.value
@@ -245,7 +248,7 @@ const workflowHint = computed( () => {
 		return '空间校正完成，等待地面检测后自动放置模型。';
 	}
 	if ( hitTestReady.value ) {
-		return '已检测到地面，但尚未完成空间校正，不能自动放置工程模型。';
+		return '已检测到地面，请完成控制标志四角点校正。';
 	}
 	if ( hasArSession.value ) {
 		return '请缓慢移动设备，扫描地面。';
@@ -256,6 +259,9 @@ const workflowHint = computed( () => {
 const markerCornerPrompt = computed( () => {
 	if ( canUseMarkerCorners.value === false ) {
 		return '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。';
+	}
+	if ( hasArSession.value && hitTestReady.value === false ) {
+		return '请缓慢移动设备，扫描地面。';
 	}
 
 	const label = engine.value.markerCalibration.nextCornerLabel;
@@ -604,11 +610,14 @@ function setArOverlayClass(active: boolean): void {
 						<div class="runtime-banner">
 							角点顺序：1. 左上角；2. 右上角；3. 右下角；4. 左下角。
 						</div>
+						<div class="runtime-banner">
+							Marker 四角点用于当前 AR 会话空间校正；模型控制点用于模型到工程坐标配准，二者不要混用。
+						</div>
 						<div class="action-row">
 							<button
 								type="button"
 								class="action-button"
-								:disabled="canUseMarkerCorners === false"
+								:disabled="canStartMarkerCalibration === false"
 								@click="handleStartMarkerCalibration()"
 							>
 								{{ TEXT.startCalibration }}
@@ -891,6 +900,11 @@ function setArOverlayClass(active: boolean): void {
 .chip-button.active {
 	background: linear-gradient(135deg, rgba(0, 212, 255, 0.34), rgba(20, 184, 166, 0.24));
 	border-color: rgba(0, 212, 255, 0.44);
+}
+
+.action-button:disabled,
+.chip-button:disabled {
+	opacity: 0.42;
 }
 
 .launch-button {

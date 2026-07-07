@@ -19,10 +19,10 @@ import type {
 } from '@/features/ar/types/workflow.js';
 
 export const MARKER_CORNER_SEQUENCE = [
-	{ id: 'top-left', cornerOrderValue: 'leftTop', label: 'leftTop 左上角', pointLabel: 'LT' },
-	{ id: 'top-right', cornerOrderValue: 'rightTop', label: 'rightTop 右上角', pointLabel: 'RT' },
-	{ id: 'bottom-right', cornerOrderValue: 'rightBottom', label: 'rightBottom 右下角', pointLabel: 'RB' },
-	{ id: 'bottom-left', cornerOrderValue: 'leftBottom', label: 'leftBottom 左下角', pointLabel: 'LB' }
+	{ id: 'top-left', cornerOrderValue: 'leftTop', label: 'leftTop 左上角', pointLabel: 'leftTop', shortPointLabel: 'LT' },
+	{ id: 'top-right', cornerOrderValue: 'rightTop', label: 'rightTop 右上角', pointLabel: 'rightTop', shortPointLabel: 'RT' },
+	{ id: 'bottom-right', cornerOrderValue: 'rightBottom', label: 'rightBottom 右下角', pointLabel: 'rightBottom', shortPointLabel: 'RB' },
+	{ id: 'bottom-left', cornerOrderValue: 'leftBottom', label: 'leftBottom 左下角', pointLabel: 'leftBottom', shortPointLabel: 'LB' }
 ] as const;
 
 export type MarkerCornerSequenceId = ( typeof MARKER_CORNER_SEQUENCE )[ number ][ 'id' ];
@@ -267,6 +267,7 @@ export class MarkerCalibrationRuntime {
 			cornerId: cornerMeta.id,
 			cornerLabel: cornerMeta.label,
 			pointLabel: cornerMeta.pointLabel,
+			shortPointLabel: cornerMeta.shortPointLabel,
 			arLocalPosition: vector3ToObject( arPosition ),
 			arPosition: vector3ToObject( arPosition ),
 			hitTestReady: this.options.hasGroundHit()
@@ -279,6 +280,7 @@ export class MarkerCalibrationRuntime {
 			targetId: markerState.markerId,
 			cornerId: cornerMeta.id,
 			pointLabel: cornerMeta.pointLabel,
+			shortPointLabel: cornerMeta.shortPointLabel,
 			capturedCornerCount: this.currentSessionMarkerCornerCaptures.length,
 			expectedCornerCount: MARKER_CORNER_SEQUENCE.length,
 			arLocalPosition: vector3ToObject( arPosition ),
@@ -590,16 +592,12 @@ function validateMarkerCornersTarget(target: VisualControlTarget | undefined): s
 function normalizeMarkerCornerOrderValue(value: string): MarkerCornerOrderValue | null {
 
 	switch ( value ) {
-		case 'top-left':
 		case 'leftTop':
 			return 'leftTop';
-		case 'top-right':
 		case 'rightTop':
 			return 'rightTop';
-		case 'bottom-right':
 		case 'rightBottom':
 			return 'rightBottom';
-		case 'bottom-left':
 		case 'leftBottom':
 			return 'leftBottom';
 		default:

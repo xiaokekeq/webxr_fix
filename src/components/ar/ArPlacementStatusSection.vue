@@ -164,7 +164,7 @@ function resolvePlacementHint(state: RegistrationStoreState): string {
 			return '模型已按工程坐标显示。';
 		default:
 			return state.arSessionPhase === 'ready-to-place'
-				? '已检测到地面，但尚未完成空间校正，不能自动放置工程模型。'
+				? '已检测到地面，请完成控制标志四角点校正。'
 				: '当前未完成空间校正，不能作为正式巡查结果。';
 	}
 

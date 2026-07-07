@@ -30,6 +30,11 @@ const markerCalibrationOverlayOpen = ref( false );
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
+const hitTestReady = computed(
+	() => engine.value.arSessionPhase === 'ready-to-place'
+		|| engine.value.arSessionPhase === 'placing'
+		|| engine.value.arSessionPhase === 'placed'
+);
 const configStatus = computed( () => engine.value.engineeringConfigStatus );
 const currentModel = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )
@@ -62,7 +67,7 @@ const sessionStatusText = computed( () => {
 		case 'scanning':
 			return '正在扫描平面';
 		case 'ready-to-place':
-			return 'hit-test 已就绪，等待 Marker 四角点校正';
+			return '已检测到地面，请完成控制标志四角点校正';
 		case 'placing':
 			return '正在按工程坐标放置模型';
 		case 'placed':
@@ -230,8 +235,11 @@ const showMarkerCalibrationOverlay = computed(
 	() => hasArSession.value && markerCalibrationOverlayOpen.value && engine.value.markerCalibration.active
 );
 const canUseMarkerCorners = computed( () => configStatus.value.activeControlTargetHasCornersEnu );
+const canStartMarkerCalibration = computed(
+	() => hasArSession.value && hitTestReady.value && canUseMarkerCorners.value
+);
 const canCaptureMarkerCorner = computed(
-	() => showMarkerCalibrationOverlay.value && canUseMarkerCorners.value
+	() => showMarkerCalibrationOverlay.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canApplyMarkerCalibration = computed(
 	() => canCaptureMarkerCorner.value
@@ -246,6 +254,9 @@ const markerApplyBlockedText = computed( () => (
 const markerCornerPrompt = computed( () => {
 	if ( canUseMarkerCorners.value === false ) {
 		return '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。';
+	}
+	if ( hasArSession.value && hitTestReady.value === false ) {
+		return '请缓慢移动设备，扫描地面。';
 	}
 
 	const label = engine.value.markerCalibration.nextCornerLabel;
@@ -515,7 +526,7 @@ function setArOverlayClass(active: boolean): void {
 					<ArPanelSection title="模型到工程坐标" first>
 						<ArInfoGrid :items="modelToEnuCards" />
 						<div v-if="configStatus.modelLocalToEnuSource === 'control-points'" class="runtime-banner warning">
-							当前未配置显式 modelLocalToEnu，运行时将由 controlPoints 求解工程变换。
+							当前未配置显式 modelLocalToEnu，运行时将由 controlPoints 求解工程变换；每个控制点需要同时配置 modelLocal 和 enu。
 						</div>
 					</ArPanelSection>
 				</template>
@@ -528,6 +539,12 @@ function setArOverlayClass(active: boolean): void {
 						</div>
 						<div class="runtime-banner">
 							请将控制标志固定在地面，四角清晰可见，并按 LT / RT / RB / LB 顺序采集。
+						</div>
+						<div class="runtime-banner">
+							Marker 四角点用于当前 AR 会话空间校正；模型控制点用于模型到工程坐标配准，二者不要混用。
+						</div>
+						<div class="runtime-banner">
+							真实 RTK 导入顺序：cornersEnu[0]=leftTop/LT，cornersEnu[1]=rightTop/RT，cornersEnu[2]=rightBottom/RB，cornersEnu[3]=leftBottom/LB。
 						</div>
 						<div v-if="configStatus.activeControlTargetHasCornersEnu === false" class="runtime-banner warning">
 							当前控制标志缺少四角点工程坐标，无法进行四角点校正。
@@ -552,7 +569,12 @@ function setArOverlayClass(active: boolean): void {
 							请按 leftTop、rightTop、rightBottom、leftBottom 的顺序采集控制标志四角。
 						</div>
 						<div class="chip-grid">
-							<button type="button" class="chip-button" @click="handleStartPrecisionCalibration()">
+							<button
+								type="button"
+								class="chip-button"
+								:disabled="canStartMarkerCalibration === false"
+								@click="handleStartPrecisionCalibration()"
+							>
 								开始四角点采集
 							</button>
 						</div>
@@ -806,6 +828,11 @@ function setArOverlayClass(active: boolean): void {
 .chip-button.active {
 	background: linear-gradient(135deg, rgba(0, 212, 255, 0.34), rgba(20, 184, 166, 0.24));
 	border-color: rgba(0, 212, 255, 0.44);
+}
+
+.action-button:disabled,
+.chip-button:disabled {
+	opacity: 0.42;
 }
 
 .launch-button {
