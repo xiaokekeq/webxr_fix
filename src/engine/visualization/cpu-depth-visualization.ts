@@ -26,6 +26,7 @@ export interface CpuDepthDebugState {
 	errorMessage?: string;
 	depthSensingSessionEnabled: boolean;
 	sessionLog: string[];
+	frameHeartbeat?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,44 @@ export function pushDepthSessionLog( msg: string ): void {
 	const ts = new Date().toLocaleTimeString();
 	cpuDepthDebugState.sessionLog = [ ...cpuDepthDebugState.sessionLog, `[${ts}] ${msg}` ].slice( -12 );
 	console.info( '[CpuDepthUI]', msg );
+}
+
+// ---------------------------------------------------------------------------
+// Render-loop heartbeat (used to diagnose freeze vs. low-fps)
+// ---------------------------------------------------------------------------
+
+let heartbeatFrameCount = 0;
+let heartbeatWindowStart = 0;
+let heartbeatTotalFrames = 0;
+
+/**
+ * 每帧调用。每 500ms 更新一次 frameHeartbeat，用于在无控制台的移动端
+ * 判断渲染循环是否还在跑：
+ * - 数字持续跳动 => 主线程未阻塞（若 fps 极低则为性能问题）
+ * - 数字冻结 => 主线程/compositor 已停止（真卡死）
+ */
+export function tickRenderHeartbeat(): void {
+	heartbeatFrameCount += 1;
+	heartbeatTotalFrames += 1;
+	const now = performance.now();
+	if ( heartbeatWindowStart === 0 ) {
+		heartbeatWindowStart = now;
+		return;
+	}
+	const elapsed = now - heartbeatWindowStart;
+	if ( elapsed >= 500 ) {
+		const fps = Math.round( ( heartbeatFrameCount * 1000 ) / elapsed );
+		cpuDepthDebugState.frameHeartbeat = `帧循环 #${heartbeatTotalFrames} · ${fps}fps`;
+		heartbeatFrameCount = 0;
+		heartbeatWindowStart = now;
+	}
+}
+
+function resetRenderHeartbeat(): void {
+	heartbeatFrameCount = 0;
+	heartbeatWindowStart = 0;
+	heartbeatTotalFrames = 0;
+	cpuDepthDebugState.frameHeartbeat = undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +146,7 @@ export function resetDepthSensingSessionState(): void {
 	cpuDepthDebugState.depthSensingSessionEnabled = false;
 	cpuDepthDebugState.supported = 'unknown';
 	cpuDepthDebugState.active = false;
+	resetRenderHeartbeat();
 	resetDepthData();
 }
 

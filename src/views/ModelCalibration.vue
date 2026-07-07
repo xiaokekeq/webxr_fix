@@ -672,6 +672,9 @@ function setArOverlayClass(active: boolean): void {
 			@click.stop
 		>
 			<div class="log-title">Depth Session 日志</div>
+			<div v-if="cpuDepthDebugState.frameHeartbeat" class="log-heartbeat">
+				{{ cpuDepthDebugState.frameHeartbeat }}
+			</div>
 			<div v-for="(line, i) in cpuDepthDebugState.sessionLog" :key="i" class="log-line">
 				{{ line }}
 			</div>
@@ -1181,5 +1184,13 @@ function setArOverlayClass(active: boolean): void {
 	line-height: 1.6;
 	color: #d0e8f0;
 	word-break: break-all;
+}
+
+.log-heartbeat {
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 1.6;
+	color: #6ffcae;
+	margin-bottom: 4px;
 }
 </style>
