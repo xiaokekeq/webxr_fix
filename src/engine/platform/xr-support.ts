@@ -407,19 +407,10 @@ export function createXRHitTestController(
 			setStatus( '正在请求 AR 会话...' );
 
 			try {
-				// 尝试带 depth-sensing 配置，4秒超时保护防卡死
-				console.info( '[CpuDepthSessionRequested]', '尝试带 depth-sensing 的 AR 会话...' );
-				let session: XRSession;
-				try {
-					session = await Promise.race( [
-						navigator.xr.requestSession( 'immersive-ar', createSessionInitWithDepth() ),
-						new Promise<never>( ( _, rej ) => setTimeout( () => rej( new Error( 'timeout' ) ), 4000 ) )
-					] );
-					console.info( '[CpuDepthSessionEnabled]', 'depth-sensing 已启用' );
-				} catch {
-					console.warn( '[CpuDepthSessionFallbackWithoutDepth]', 'depth-sensing 不可用，回退普通 AR' );
-					session = await navigator.xr.requestSession( 'immersive-ar', createSessionInitPlain() );
-				}
+				const session = await navigator.xr.requestSession(
+					'immersive-ar',
+					createSessionInit()
+				);
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( session );
 			} catch ( error ) {
@@ -460,25 +451,11 @@ export function createXRHitTestController(
 
 }
 
-function createSessionInitWithDepth(): DepthAwareSessionInit {
+function createSessionInit(): DepthAwareSessionInit {
 
 	return {
 		requiredFeatures: [ 'hit-test' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
-		depthSensing: {
-			usagePreference: [ 'cpu-optimized' ],
-			dataFormatPreference: [ 'luminance-alpha', 'float32' ]
-		},
-		domOverlay: { root: document.body }
-	};
-
-}
-
-function createSessionInitPlain(): DepthAwareSessionInit {
-
-	return {
-		requiredFeatures: [ 'hit-test' ],
-		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		domOverlay: { root: document.body }
 	};
 
