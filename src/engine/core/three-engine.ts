@@ -99,6 +99,7 @@ import type { ArSessionContext } from '@/features/ar/types/ar-session-context.js
 import { repositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
+import { updateCpuDepthFromFrame, setCpuDepthEnabled, cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
 
 const MAX_LOG_ITEMS = 24;
 
@@ -684,6 +685,7 @@ export class ThreeEngine {
 			},
 			onFrameUpdate: ( frame ) => {
 				this.displayModeController.updateDepthState( frame );
+				updateCpuDepthFromFrame( frame, this.sceneBundle.renderer.xr.getReferenceSpace() );
 				this.inspectionMarkerWorkflow.syncHints();
 				this.placementSession.updateArPlacementAnchor( frame );
 				this.syncArSessionPhase();
@@ -1295,6 +1297,26 @@ export class ThreeEngine {
 			'已切换为手动 Marker 四角点校正：请采集控制标志四角点完成当前会话空间校正。'
 		);
 
+		this.emit();
+
+	}
+
+	toggleCpuDepthDebug(): void {
+
+		const wantEnable = ! cpuDepthDebugState.enabled;
+
+		if ( wantEnable ) {
+			if ( this.sceneBundle.renderer.xr.isPresenting === false ) {
+				cpuDepthDebugState.errorMessage = '当前未进入 AR 会话，无法开启 CPU Depth 调试。';
+				return;
+			}
+			if ( cpuDepthDebugState.depthSensingSessionEnabled === false ) {
+				cpuDepthDebugState.errorMessage = '当前 AR 会话未启用 CPU Depth，请退出 AR 后重新进入深度调试模式。';
+				return;
+			}
+		}
+
+		setCpuDepthEnabled( wantEnable );
 		this.emit();
 
 	}

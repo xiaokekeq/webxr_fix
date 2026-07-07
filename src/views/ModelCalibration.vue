@@ -5,6 +5,8 @@ import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArModelInfoPanel from '@/components/ar/ArModelInfoPanel.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
+import CpuDepthDebugOverlay from '@/components/ar/CpuDepthDebugOverlay.vue';
+import { cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
 type CalibrationPanelView = 'overview' | 'config' | 'model' | 'marker' | 'rtk' | 'save' | 'ar-check';
@@ -381,6 +383,23 @@ async function handleExitPrecisionCalibration(): Promise<void> {
 	closeDrawerIfOpen();
 }
 
+const cpuDepthButtonLabel = computed( () => {
+	if ( cpuDepthDebugState.enabled ) {
+		return '隐藏 CPU Depth 深度图';
+	}
+	if ( cpuDepthDebugState.supported === false ) {
+		return '当前设备不支持 CPU Depth';
+	}
+	if ( cpuDepthDebugState.errorMessage ) {
+		return 'CPU Depth 不可用';
+	}
+	return '显示 CPU Depth 深度图';
+} );
+
+function handleToggleCpuDepthDebug(): void {
+	store.actions.toggleCpuDepthDebug();
+}
+
 function handleSaveBaseline(): void {
 	console.info( '[EngineeringCalibrationSaveValidated]', {
 		mode: engine.value.workflowMode,
@@ -504,6 +523,9 @@ function setArOverlayClass(active: boolean): void {
 						<ArInfoGrid :items="overviewCards" />
 						<div class="runtime-banner">
 							长期工程数据来自 JSON 或后端配置；当前 AR 会话的 ENU -> AR local 解只在本次 session 内有效。
+						</div>
+						<div class="runtime-banner">
+							CPU Depth 仅用于实时深度可视化调试，不参与工程配准和模型定位。
 						</div>
 						<div class="action-row">
 							<button type="button" class="action-button primary" @click="handleSaveBaseline()">
@@ -639,6 +661,8 @@ function setArOverlayClass(active: boolean): void {
 			</div>
 		</section>
 
+		<CpuDepthDebugOverlay />
+
 		<nav
 			v-if="hasArSession && showMarkerCalibrationOverlay === false"
 			class="action-dock action-dock-compact"
@@ -649,6 +673,15 @@ function setArOverlayClass(active: boolean): void {
 			<button type="button" class="dock-item dock-item-primary" @click.stop="toggleWorkspacePanel">
 				<span class="dock-icon">板</span>
 				<span class="dock-label">校验面板</span>
+			</button>
+			<button
+				type="button"
+				class="dock-item"
+				:class="{ 'dock-item-active': cpuDepthDebugState.enabled }"
+				@click.stop="handleToggleCpuDepthDebug"
+			>
+				<span class="dock-icon">深</span>
+				<span class="dock-label">{{ cpuDepthButtonLabel }}</span>
 			</button>
 			<button type="button" class="dock-item" @click.stop="store.actions.exitAr()">
 				<span class="dock-icon">退</span>
@@ -847,7 +880,7 @@ function setArOverlayClass(active: boolean): void {
 	right: 16px;
 	bottom: max(14px, env(safe-area-inset-bottom));
 	display: grid;
-	grid-template-columns: 1.2fr 1fr;
+	grid-template-columns: 1.2fr 1fr 1fr;
 	gap: 8px;
 	padding: 8px;
 	border-radius: 22px;
@@ -868,6 +901,11 @@ function setArOverlayClass(active: boolean): void {
 .dock-item-primary {
 	background: rgba(0, 212, 255, 0.18);
 	border-color: rgba(0, 212, 255, 0.36);
+}
+
+.dock-item-active {
+	background: rgba(0, 255, 168, 0.18);
+	border-color: rgba(0, 255, 168, 0.42);
 }
 
 .dock-icon,

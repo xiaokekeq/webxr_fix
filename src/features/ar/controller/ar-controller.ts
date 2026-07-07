@@ -60,6 +60,7 @@ export interface LoadModelArController {
 		takeSnapshot(): void;
 		toggleAnnotationHelper(label: string): void;
 		exportRegistrationSnapshot(): void;
+		toggleCpuDepthDebug(): void;
 	};
 }
 
@@ -316,9 +317,15 @@ export function createLoadModelArController(): LoadModelArController {
 			},
 
 			exportRegistrationSnapshot() {
-
+			
 				engine.exportRegistrationSnapshot();
-
+			
+			},
+			
+			toggleCpuDepthDebug() {
+			
+				engine.toggleCpuDepthDebug();
+			
 			}
 		}
 	};

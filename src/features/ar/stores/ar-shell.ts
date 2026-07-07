@@ -461,6 +461,12 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 			ensureController().actions.exportRegistrationSnapshot();
 
+		},
+
+		toggleCpuDepthDebug(): void {
+
+			ensureController().actions.toggleCpuDepthDebug();
+
 		}
 	};
 

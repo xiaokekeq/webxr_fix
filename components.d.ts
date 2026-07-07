@@ -12,6 +12,7 @@ declare module 'vue' {
     ArModelInfoPanel: typeof import('./src/components/ar/ArModelInfoPanel.vue')['default']
     ArPanelSection: typeof import('./src/components/ar/ArPanelSection.vue')['default']
     ArPlacementStatusSection: typeof import('./src/components/ar/ArPlacementStatusSection.vue')['default']
+    CpuDepthDebugOverlay: typeof import('./src/components/ar/CpuDepthDebugOverlay.vue')['default']
     PatrolCard: typeof import('./src/components/PatrolCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

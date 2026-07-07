@@ -5,6 +5,10 @@ import type {
 	XRHitTestController,
 	XRHitTestQuality
 } from '@/features/ar/types/runtime-types.js';
+import {
+	markDepthSensingSessionEnabled,
+	resetDepthSensingSessionState
+} from '@/engine/visualization/cpu-depth-visualization.js';
 
 interface CreateXRHitTestControllerOptions {
 	renderer: THREE.WebGLRenderer;
@@ -100,6 +104,7 @@ export function createXRHitTestController(
 	let recentHitSamples: Array<{ position: THREE.Vector3; time: number }> = [];
 	let sessionRequestPending = false;
 	let activeSession: XRSession | null = null;
+	let depthProbePending = false;
 
 	function setup(): void {
 
@@ -129,6 +134,26 @@ export function createXRHitTestController(
 		activeSession = session;
 		session.addEventListener( 'select', handleSelect );
 
+		// Detect CPU Depth sensing availability on session start
+		resetDepthSensingSessionState();
+		try {
+			const hasDepthApi = typeof (
+				session as unknown as Record<string, unknown>
+			).hasDepthSensing === 'boolean'
+				? ( session as unknown as Record<string, boolean> ).hasDepthSensing
+				: undefined;
+
+			if ( hasDepthApi === true ) {
+				markDepthSensingSessionEnabled();
+			} else {
+				// Fallback: probe XRFrame for getDepthInformation on first frame
+				// (handled via onDepthSensingProbe in update())
+				depthProbePending = true;
+			}
+		} catch {
+			// silently ignore
+		}
+
 		const viewerSpace = await session.requestReferenceSpace( 'viewer' );
 		const requestHitTestSource = session.requestHitTestSource;
 		if ( requestHitTestSource === undefined ) {
@@ -149,6 +174,8 @@ export function createXRHitTestController(
 	function handleSessionEnd(): void {
 
 		sessionRequestPending = false;
+		depthProbePending = false;
+		resetDepthSensingSessionState();
 		activeSession?.removeEventListener( 'select', handleSelect );
 		activeSession = null;
 		reticle.visible = false;
@@ -172,6 +199,23 @@ export function createXRHitTestController(
 	}
 
 	function update(frame: XRFrame): void {
+
+		// One-shot depth probe: check getDepthInformation on first frame after session start
+		if ( depthProbePending ) {
+			depthProbePending = false;
+			try {
+				const hasGetDepth = typeof (
+					frame as unknown as Record<string, unknown>
+				).getDepthInformation === 'function';
+				if ( hasGetDepth ) {
+					markDepthSensingSessionEnabled();
+				} else {
+					console.info( '[CpuDepthSessionUnsupported]', 'getDepthInformation not available in current AR session.' );
+				}
+			} catch {
+				console.info( '[CpuDepthSessionUnsupported]', 'Depth probe failed.' );
+			}
+		}
 
 		if ( hitTestSourceRequested === false || hitTestSource === null ) {
 			return;
@@ -363,10 +407,7 @@ export function createXRHitTestController(
 			setStatus( '正在请求 AR 会话...' );
 
 			try {
-				const session = await navigator.xr.requestSession(
-					'immersive-ar',
-					createSessionInit()
-				);
+				const session = await requestArSessionWithFallback( navigator.xr );
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( session );
 			} catch ( error ) {
@@ -411,9 +452,43 @@ function createSessionInit(): DepthAwareSessionInit {
 
 	return {
 		requiredFeatures: [ 'hit-test' ],
+		optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
+		depthSensing: {
+			usagePreference: [ 'cpu-optimized' ],
+			dataFormatPreference: [ 'luminance-alpha', 'float32' ]
+		},
+		domOverlay: { root: document.body }
+	};
+
+}
+
+function createPlainSessionInit(): DepthAwareSessionInit {
+
+	return {
+		requiredFeatures: [ 'hit-test' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		domOverlay: { root: document.body }
 	};
+
+}
+
+async function requestArSessionWithFallback( xr: XRSystem ): Promise<XRSession> {
+
+	// Attempt 1: with depth-sensing
+	try {
+		console.info( '[CpuDepthSessionRequested]', 'Requesting AR session with depth-sensing...' );
+		const session = await xr.requestSession( 'immersive-ar', createSessionInit() );
+		return session;
+	} catch ( depthError ) {
+		console.warn(
+			'[CpuDepthSessionFallbackWithoutDepth]',
+			'depth-sensing request failed, falling back to plain AR session.',
+			depthError
+		);
+	}
+
+	// Attempt 2: without depth-sensing
+	return xr.requestSession( 'immersive-ar', createPlainSessionInit() );
 
 }
 
