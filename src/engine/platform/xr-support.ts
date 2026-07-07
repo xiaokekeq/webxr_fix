@@ -118,6 +118,7 @@ export function createXRHitTestController(
 
 	async function handleSessionStart(): Promise<void> {
 
+		pushDepthSessionLog( '⑤ sessionstart 事件已触发' );
 		onSessionStart?.();
 		reticle.visible = false;
 		lastSuccessfulHitTime = 0;
@@ -146,10 +147,12 @@ export function createXRHitTestController(
 				: undefined;
 
 			if ( hasDepthApi === true ) {
+				pushDepthSessionLog( '✓ session.hasDepthSensing = true' );
 				markDepthSensingSessionEnabled();
 			} else {
 				// Fallback: probe XRFrame for getDepthInformation on first frame
 				// (handled via onDepthSensingProbe in update())
+				pushDepthSessionLog( '⑥ 等待首帧探测 getDepthInformation...' );
 				depthProbePending = true;
 			}
 		} catch {
@@ -210,8 +213,10 @@ export function createXRHitTestController(
 					frame as unknown as Record<string, unknown>
 				).getDepthInformation === 'function';
 				if ( hasGetDepth ) {
+					pushDepthSessionLog( '✓ 首帧 getDepthInformation 可用，深度图开启' );
 					markDepthSensingSessionEnabled();
 				} else {
+					pushDepthSessionLog( '✗ 首帧无 getDepthInformation (会话未激活深度)' );
 					cpuDepthDebugState.supported = false;
 					console.info( '[CpuDepthSessionUnsupported]', 'getDepthInformation not available in current AR session.' );
 				}
@@ -409,13 +414,17 @@ export function createXRHitTestController(
 
 			sessionRequestPending = true;
 			setStatus( '正在请求 AR 会话...' );
+			pushDepthSessionLog( '① 开始请求 AR 会话' );
 
 			try {
-				const session = await tryMultipleDepthFormats( navigator.xr );
+				const session = await requestArSession( navigator.xr );
+				pushDepthSessionLog( '③ session 已创建，绑定渲染器...' );
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( session );
+				pushDepthSessionLog( '④ setSession 完成，等待 sessionstart' );
 			} catch ( error ) {
 				sessionRequestPending = false;
+				pushDepthSessionLog( '✗ 请求失败: ' + ( error instanceof Error ? error.message : 'unknown' ) );
 				console.error( 'XR session request failed:', error );
 				setStatus(
 					error instanceof Error
@@ -452,81 +461,41 @@ export function createXRHitTestController(
 
 }
 
-const DEPTH_TIMEOUT_MS = 3000;
+/**
+ * 单次请求 AR 会话。
+ *
+ * 关键：immersive-ar 的 requestSession 一旦调用就会让浏览器进入沉浸态，
+ * 且 WebXR 没有取消 API。因此绝不能用超时 race 去“放弃”一个请求，
+ * 否则会产生占用摄像头却无渲染循环驱动的“孤儿 session”，直接导致画面卡死。
+ *
+ * 因此这里只请求一次：优先带 depth-sensing 配置；若该配置被浏览器
+ * 同步拒绝（reject，不会创建 session），才安全降级为无 depth 的请求。
+ */
+async function requestArSession( xr: XRSystem ): Promise<XRSession> {
 
-function withTimeout<T>( p: Promise<T>, ms: number, label: string ): Promise<T> {
-	return Promise.race( [
-		p,
-		new Promise<never>( ( _, rej ) => setTimeout( () => rej( new Error( label + ' timeout' ) ), ms ) )
-	] );
-}
-
-async function tryMultipleDepthFormats( xr: XRSystem ): Promise<XRSession> {
-
-	// 配置 1: depthSensing (最新规范) + domOverlay
-	const configs: Array<{ label: string; init: Record<string, unknown> }> = [
-		{
-			label: 'depthSensing + domOverlay',
-			init: {
-				requiredFeatures: [ 'hit-test' ],
-				optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
-				depthSensing: {
-					usagePreference: [ 'cpu-optimized' ],
-					dataFormatPreference: [ 'luminance-alpha', 'float32' ]
-				},
-				domOverlay: { root: document.body }
-			}
+	const depthInit = {
+		requiredFeatures: [ 'hit-test' ],
+		optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
+		depthSensing: {
+			usagePreference: [ 'cpu-optimized' ],
+			dataFormatPreference: [ 'luminance-alpha', 'float32' ]
 		},
-		{
-			label: 'depthSensing 无 domOverlay',
-			init: {
-				requiredFeatures: [ 'hit-test' ],
-				optionalFeatures: [ 'anchors', 'depth-sensing' ],
-				depthSensing: {
-					usagePreference: [ 'cpu-optimized' ],
-					dataFormatPreference: [ 'luminance-alpha', 'float32' ]
-				}
-			}
-		},
-		{
-			label: 'depthState (旧规范) + domOverlay',
-			init: {
-				requiredFeatures: [ 'hit-test' ],
-				optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
-				depthState: {
-					usagePreference: [ 'cpu-optimized' ],
-					dataFormatPreference: [ 'luminance-alpha', 'float32' ]
-				},
-				domOverlay: { root: document.body }
-			}
-		},
-		{
-			label: 'plain (无 depth)',
-			init: {
-				requiredFeatures: [ 'hit-test' ],
-				optionalFeatures: [ 'dom-overlay', 'anchors' ],
-				domOverlay: { root: document.body }
-			}
-		}
-	];
+		domOverlay: { root: document.body }
+	};
 
-	for ( const cfg of configs ) {
-		try {
-			pushDepthSessionLog( '尝试: ' + cfg.label );
-			const session = await withTimeout(
-				xr.requestSession( 'immersive-ar', cfg.init as XRSessionInit ),
-				DEPTH_TIMEOUT_MS,
-				cfg.label
-			);
-			pushDepthSessionLog( '✓ 成功: ' + cfg.label );
-			return session;
-		} catch ( err ) {
-			pushDepthSessionLog( '✗ 失败: ' + cfg.label + ' (' + ( err instanceof Error ? err.message : 'unknown' ) + ')' );
-		}
+	try {
+		pushDepthSessionLog( '② 请求 immersive-ar (含 depth-sensing)' );
+		return await xr.requestSession( 'immersive-ar', depthInit as XRSessionInit );
+	} catch ( err ) {
+		// depth 配置被同步拒绝（不会创建 session），可安全降级重试
+		pushDepthSessionLog( '② depth 配置被拒绝，降级重试: ' + ( err instanceof Error ? err.message : 'unknown' ) );
+		const plainInit = {
+			requiredFeatures: [ 'hit-test' ],
+			optionalFeatures: [ 'dom-overlay', 'anchors' ],
+			domOverlay: { root: document.body }
+		};
+		return await xr.requestSession( 'immersive-ar', plainInit as XRSessionInit );
 	}
-
-	pushDepthSessionLog( '✗ 所有配置均失败' );
-	throw new Error( '所有 AR session 配置均失败' );
 
 }
 
