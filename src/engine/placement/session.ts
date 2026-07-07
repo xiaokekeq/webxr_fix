@@ -470,18 +470,14 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				cameraWorldPosition,
 				onPlacementBaseResolved
 			} = args;
+			void xrHitTest;
+			void cameraWorldPosition;
 
 			if (
 				autoPlacementPending === false
 				|| modelTemplate === null
 				|| registrationSolution === null
-				|| xrHitTest.hasGroundHit() === false
 			) {
-				return;
-			}
-
-			if ( xrHitTest.getHitPosition( new THREE.Vector3() ) === null ) {
-				updateRegistrationStatusDetail( '状态：等待识别平面' );
 				return;
 			}
 
@@ -496,10 +492,8 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				} );
 				usedMarkerOverride = true;
 			} else {
-				void cameraWorldPosition;
 				console.info( '[FormalLocalizationRequired]', {
 					reason: 'localized placement skipped without formal localization override',
-					hasGroundHit: xrHitTest.hasGroundHit(),
 					createdAt: Date.now()
 				} );
 				updateRegistrationStatusDetail( '状态：等待 Marker 或手动四角点定位' );
@@ -517,16 +511,13 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			const placementSource = usedMarkerOverride
 				? resolvePlacementSourceFromArLocalization( arFromEnuSolutionOverride?.source )
 				: 'unknown';
-			const usesAnchorRoot = tryActivateAnchorFromHit( xrHitTest, placementSource );
-			const finalPlacement = usesAnchorRoot
-				? resolvePlacementRelativeToAnchor( adjustedPlacement )
-				: adjustedPlacement;
+			clearActiveArAnchor();
 
 			arPlacedModel = placeAdjustedModel( {
 				modelTemplate,
 				placedModel: arPlacedModel,
 				modelAnchor: sceneBundle.arModelAnchor,
-				adjustedPlacement: finalPlacement
+				adjustedPlacement
 			} );
 			applyCurrentUndergroundPreviewOffset();
 			trackArPlacement( placementSource );
@@ -536,6 +527,14 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			updatePlacementSummary();
 
 			if ( usedMarkerOverride ) {
+				console.info( '[EngineeringPlacementApplied]', {
+					source: arFromEnuSolutionOverride?.source ?? 'unknown',
+					usesHitTestForFinalPose: false,
+					position: vector3ToObject( adjustedPlacement.position ),
+					quaternion: quaternionToObject( adjustedPlacement.orientation ),
+					scale: adjustedPlacement.scale,
+					createdAt: Date.now()
+				} );
 				setStatus( '模型已按工程坐标显示，未强制贴地。' );
 				return;
 			}
@@ -587,14 +586,12 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				manualPositionTarget,
 				manualOrientationTarget
 			);
-			const finalPlacement = usesArPlacementAnchor
-				? resolvePlacementRelativeToAnchor( adjustedPlacement )
-				: adjustedPlacement;
+			clearActiveArAnchor();
 			arPlacedModel = placeAdjustedModel( {
 				modelTemplate,
 				placedModel: arPlacedModel,
 				modelAnchor: sceneBundle.arModelAnchor,
-				adjustedPlacement: finalPlacement
+				adjustedPlacement
 			} );
 			applyCurrentUndergroundPreviewOffset();
 			trackArPlacement( resolvePlacementSourceFromArLocalization( arFromEnuSolution.source ) );
@@ -694,6 +691,27 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 function requiresCurrentSession(source: ArFromEnuSolution['source'] | undefined): boolean {
 
 	return source === 'marker';
+
+}
+
+function vector3ToObject(vector: THREE.Vector3): { x: number; y: number; z: number } {
+
+	return {
+		x: Number( vector.x.toFixed( 6 ) ),
+		y: Number( vector.y.toFixed( 6 ) ),
+		z: Number( vector.z.toFixed( 6 ) )
+	};
+
+}
+
+function quaternionToObject(quaternion: THREE.Quaternion): { x: number; y: number; z: number; w: number } {
+
+	return {
+		x: Number( quaternion.x.toFixed( 6 ) ),
+		y: Number( quaternion.y.toFixed( 6 ) ),
+		z: Number( quaternion.z.toFixed( 6 ) ),
+		w: Number( quaternion.w.toFixed( 6 ) )
+	};
 
 }
 

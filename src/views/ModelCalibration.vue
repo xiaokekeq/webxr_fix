@@ -922,7 +922,7 @@ function setArOverlayClass(active: boolean): void {
 	bottom: calc(82px + env(safe-area-inset-bottom));
 	max-height: 62vh;
 	overflow: auto;
-	padding: 14px;
+	padding: 14px 14px 96px;
 	border-radius: 24px;
 	background: rgba(8, 15, 27, 0.86);
 	border: 1px solid rgba(255, 255, 255, 0.12);

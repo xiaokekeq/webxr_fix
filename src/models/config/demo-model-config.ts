@@ -654,12 +654,13 @@ function normalizeVisualControlTargets(
 			return [];
 		}
 
-		const centerEnu = normalizeEnuTuple( target.centerEnu );
+		const cornersEnu = normalizeCornersEnu( target.cornersEnu );
+		const centerEnu = normalizeEnuTuple( target.centerEnu ) ?? deriveCenterEnuFromCorners( cornersEnu );
 		if ( centerEnu === undefined ) {
 			console.warn( '[RtkSurveyControlTargetResolved]', {
 				targetId: target.id,
 				resolved: false,
-				reason: `controlTargets[${index}].centerEnu missing`,
+				reason: `controlTargets[${index}].centerEnu missing and cornersEnu invalid`,
 				createdAt: Date.now()
 			} );
 			return [];
@@ -668,7 +669,7 @@ function normalizeVisualControlTargets(
 		console.info( '[RtkSurveyControlTargetResolved]', {
 			targetId: target.id,
 			resolved: true,
-			hasCornersEnu: normalizeCornersEnu( target.cornersEnu ) !== undefined,
+			hasCornersEnu: cornersEnu !== undefined,
 			createdAt: Date.now()
 		} );
 
@@ -676,12 +677,28 @@ function normalizeVisualControlTargets(
 			...target,
 			id: target.id.trim(),
 			centerEnu,
-			cornersEnu: normalizeCornersEnu( target.cornersEnu ),
+			cornersEnu,
 			yawDeg: typeof target.yawDeg === 'number' && Number.isFinite( target.yawDeg ) ? target.yawDeg : undefined,
 			sizeMeters: typeof target.sizeMeters === 'number' && Number.isFinite( target.sizeMeters ) ? target.sizeMeters : undefined,
 			plane: target.plane === 'vertical' ? 'vertical' : 'horizontal'
 		} ];
 	} );
+
+}
+
+function deriveCenterEnuFromCorners(
+	cornersEnu: VisualControlTarget['cornersEnu'] | undefined
+): [ number, number, number ] | undefined {
+
+	if ( cornersEnu === undefined ) {
+		return undefined;
+	}
+
+	return [
+		cornersEnu.reduce( ( sum, corner ) => sum + corner[ 0 ], 0 ) / cornersEnu.length,
+		cornersEnu.reduce( ( sum, corner ) => sum + corner[ 1 ], 0 ) / cornersEnu.length,
+		cornersEnu.reduce( ( sum, corner ) => sum + corner[ 2 ], 0 ) / cornersEnu.length
+	];
 
 }
 

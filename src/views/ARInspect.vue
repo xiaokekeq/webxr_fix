@@ -156,6 +156,35 @@ const canApplyMarkerCalibration = computed(
 		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
 		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
 );
+const canPlaceEngineeringModel = computed(
+	() => hasArSession.value
+		&& configStatus.value.hasSiteOrigin
+		&& configStatus.value.hasControlTargets
+		&& canUseMarkerCorners.value
+		&& localizationReady.value
+		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
+);
+const placementBlockedText = computed( () => {
+	if ( hasArSession.value === false ) {
+		return '请先进入 AR。';
+	}
+	if ( configStatus.value.hasSiteOrigin === false ) {
+		return '缺少工程原点 siteOrigin。';
+	}
+	if ( configStatus.value.hasControlTargets === false ) {
+		return '缺少控制标志 controlTargets。';
+	}
+	if ( canUseMarkerCorners.value === false ) {
+		return '当前控制标志缺少四角 ENU。';
+	}
+	if ( localizationReady.value === false ) {
+		return '请先完成四角点校正，再按工程坐标放置模型。';
+	}
+	if ( configStatus.value.hasMockEngineeringData && canApplyMockEngineeringCalibration() === false ) {
+		return configStatus.value.mockWarningText || '生产环境禁止使用 mock/demo 工程数据完成正式放置。';
+	}
+	return '';
+} );
 const markerApplyBlockedText = computed( () => (
 	configStatus.value.hasMockEngineeringData && canApplyMockEngineeringCalibration() === false
 		? configStatus.value.mockWarningText || '当前为示例工程坐标，请替换为 RTK 实测数据。'
@@ -332,6 +361,26 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	await nextTick();
 	markerCalibrationOverlayOpen.value = engine.value.markerCalibration.active;
 	closeDrawerIfOpen();
+}
+
+async function handlePlaceEngineeringModel(): Promise<void> {
+	if ( canPlaceEngineeringModel.value === false ) {
+		console.warn( '[EngineeringPlacementBlockedInUi]', {
+			modelId: engine.value.selectedModelId || null,
+			sessionId: engine.value.markerCalibration.currentSessionId,
+			hasSiteOrigin: configStatus.value.hasSiteOrigin,
+			hasControlTargets: configStatus.value.hasControlTargets,
+			hasCornersEnu: canUseMarkerCorners.value,
+			localizationReady: localizationReady.value,
+			localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
+			hasMockEngineeringData: configStatus.value.hasMockEngineeringData,
+			allowMockCalibration: canApplyMockEngineeringCalibration(),
+			createdAt: Date.now()
+		} );
+		return;
+	}
+
+	await store.actions.placeModel();
 }
 
 async function handleExitMarkerCalibration(): Promise<void> {
@@ -537,6 +586,19 @@ function setArOverlayClass(active: boolean): void {
 					</ArPanelSection>
 
 					<ArPlacementStatusSection :state="engine" title="AR 定位" />
+					<div class="action-row placement-action-row">
+						<button
+							type="button"
+							class="action-button primary"
+							:disabled="canPlaceEngineeringModel === false"
+							@click="handlePlaceEngineeringModel()"
+						>
+							按校正结果放置模型
+						</button>
+					</div>
+					<div v-if="placementBlockedText" class="runtime-banner warning">
+						{{ placementBlockedText }}
+					</div>
 
 					<ArPanelSection title="四角点校正">
 						<ArInfoGrid :items="calibrationStatusCards" class="compact-info-grid" />
@@ -920,6 +982,14 @@ function setArOverlayClass(active: boolean): void {
 	display: flex;
 	gap: 8px;
 	flex-wrap: wrap;
+}
+
+.placement-action-row {
+	margin: 10px 0 14px;
+}
+
+.placement-action-row .action-button {
+	flex: 1 1 180px;
 }
 
 .sheet-tab {

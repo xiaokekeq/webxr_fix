@@ -48,21 +48,16 @@ export class PlacementWorkflow {
 			return;
 		}
 
-		if ( this.options.getHitTestController().hasGroundHit() === false ) {
-			this.options.setStatus( '请先扫描地面或墙面，再开始放置。' );
-			return;
-		}
-
-		const localizationOverride = this.options.getPreferredLocalizationOverride();
-		if ( localizationOverride === null ) {
+		if ( this.options.getPreferredLocalizationOverride() === null ) {
 			console.info( '[FormalLocalizationRequired]', {
 				mode: this.options.getWorkflowMode(),
 				siteId: this.options.getSiteId(),
 				sessionId: this.options.getCurrentSessionId(),
-				reason: 'formal placement requires marker/manual/rtk localization',
+				reason: 'engineering placement requires marker ENU-to-AR localization',
+				hasHitTest: this.options.getHitTestController().hasGroundHit(),
 				createdAt: Date.now()
 			} );
-			this.options.setStatus( '请先完成控制标志四角点校正，再让模型按工程坐标显示。' );
+			this.options.setStatus( '请先完成 Marker 四角点校正后再进行工程放置。' );
 			return;
 		}
 
@@ -71,12 +66,11 @@ export class PlacementWorkflow {
 		this.options.syncArSessionPhase();
 
 		if ( this.options.placementSession.getPlacedModel() === null ) {
-			if ( this.options.placementSession.getAutoPlacementPending() ) {
-				this.options.setStatus( '正在应用当前会话定位结果...' );
-				return;
-			}
-
-			this.options.setStatus( '已识别平面，但本次放置未完成，请重试。' );
+			this.options.setStatus(
+				this.options.placementSession.getAutoPlacementPending()
+					? '正在按 Marker 校正结果放置模型...'
+					: '工程放置未完成，请重试。'
+			);
 		}
 
 	}
@@ -86,22 +80,15 @@ export class PlacementWorkflow {
 		this.options.placementSession.requestAutoPlacement( this.options.getModelTemplate() );
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
 			const localizationOverride = this.options.getPreferredLocalizationOverride();
-			console.info( '[ArInspectionAutoPlacementRequested]', {
+			console.info( '[ArInspectionEngineeringPlacementRequested]', {
 				mode: this.options.getWorkflowMode(),
 				siteId: this.options.getSiteId(),
 				sessionId: this.options.getCurrentSessionId(),
 				targetId: this.options.getInspectionTargetId(),
-				source: localizationOverride?.source ?? 'fallback',
-				trackingState: 'placement-requested',
+				source: localizationOverride?.source ?? 'missing',
 				stableFrameCount: this.options.getInspectionStableFrameCount(),
 				hasHitTest: this.options.getHitTestController().hasGroundHit(),
-				createdAt: Date.now()
-			} );
-			console.info( '[LocalizationPriorityResolved]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: this.options.getCurrentSessionId(),
-				source: localizationOverride?.source ?? 'fallback',
+				usesHitTestForFinalPose: false,
 				createdAt: Date.now()
 			} );
 		}
@@ -124,21 +111,13 @@ export class PlacementWorkflow {
 				mode: this.options.getWorkflowMode(),
 				siteId: this.options.getSiteId(),
 				sessionId: this.options.getCurrentSessionId(),
-				reason: 'no formal localization override available',
+				reason: 'no marker ENU-to-AR transform available',
 				createdAt: Date.now()
 			} );
 			return;
 		}
 
-		if ( this.options.getHitTestController().hasGroundHit() === false ) {
-			console.info( '[AutoPlacementWaitingForHitTest]', this.createPlacementLogPayload( {
-				source: localizationOverride.source,
-				localizationReady: true
-			} ) );
-			return;
-		}
-
-		console.info( '[AutoPlacementTriggeredAfterHitTestReady]', this.createPlacementLogPayload( {
+		console.info( '[EngineeringPlacementTriggered]', this.createPlacementLogPayload( {
 			source: localizationOverride.source,
 			localizationReady: true
 		} ) );
@@ -163,7 +142,7 @@ export class PlacementWorkflow {
 
 		const placedModel = this.options.placementSession.getPlacedModel();
 		if ( hadPlacedModel === false && placedModel !== null ) {
-			console.info( '[EngineeringModelAutoPlaced]', this.createPlacementLogPayload( {
+			console.info( '[EngineeringModelPlaced]', this.createPlacementLogPayload( {
 				source: localizationOverride.source,
 				localizationReady: true
 			} ) );
@@ -187,17 +166,12 @@ export class PlacementWorkflow {
 			modelId: this.options.getSiteId(),
 			sessionId: this.options.getCurrentSessionId(),
 			targetId: this.options.getInspectionTargetId(),
-			currentCorner: null,
-			capturedPointCount: null,
-			arLocalPosition: null,
-			cornersEnu: null,
 			source: args.source,
 			hasSiteOrigin: this.options.getRegistrationSolution() !== null,
 			hasModelLocalToEnu: this.options.getRegistrationSolution() !== null,
 			modelLocalToEnuSource: this.options.getRegistrationSolution() === null ? 'missing' : 'control-points',
-			hasCornersEnu: null,
-			hasRtkSurveyDataset: null,
 			hitTestReady: this.options.getHitTestController().hasGroundHit(),
+			usesHitTestForFinalPose: false,
 			localizationReady: args.localizationReady,
 			modelPlaced: this.options.placementSession.getPlacedModel() !== null,
 			createdAt: Date.now()
