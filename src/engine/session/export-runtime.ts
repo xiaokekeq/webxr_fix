@@ -14,7 +14,6 @@ interface ExportRegistrationSnapshotOptions {
 	demoModelConfig: DemoModelConfig | null;
 	registrationSolution: EngineeringRegistrationSolution | null;
 	currentStage: string;
-	manualReadout: unknown;
 	placedModel: THREE.Group | null;
 }
 
@@ -70,7 +69,6 @@ export function exportRegistrationSnapshotFile(
 		demoModelConfig: options.demoModelConfig,
 		registrationSolution: options.registrationSolution,
 		currentStage: options.currentStage,
-		manualReadout: options.manualReadout,
 		placedModel: options.placedModel
 	} );
 

@@ -1,6 +1,5 @@
 ﻿import * as THREE from 'three';
 import type { PipeRecord } from '@/models/types/pipe-record.js';
-import { createManualReadoutSync } from '@/engine/interaction/manual-readout.js';
 import { createPointerSelectionSession } from '@/engine/interaction/pointer-selection.js';
 import { createPropertySelectionController } from '@/engine/interaction/property-selection.js';
 import { createModelSession } from '@/engine/model/session.js';
@@ -40,7 +39,6 @@ import {
 	createRegistrationStore,
 	type AnnotationDetailState,
 	type ArDisplayMode,
-	type ArPlacementMode,
 	type InspectionPlacementSource,
 	type RegistrationStore,
 	type RegistrationStoreState,
@@ -59,10 +57,6 @@ import {
 	type MarkerLocalizationSolution,
 	type MarkerPoseInEnu
 } from '@/localization/marker/marker-localization.js';
-import {
-	createManualRegistrationController,
-	type ManualAdjustmentPreset
-} from '@/localization/manual/manual-registration.js';
 import {
 	clearLastStableMarkerLocalizationResult,
 	type SavedMarkerLocalizationResult
@@ -90,7 +84,6 @@ import {
 } from '@/features/ar/types/display-modes.js';
 import { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-workflow.js';
 import { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
-import { ManualRegistrationWorkflow } from '@/engine/placement/manual-registration-workflow.js';
 import { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
 import type {
 	ArWorkflowMode,
@@ -151,13 +144,6 @@ function createInitialState(): RegistrationStoreState {
 			status: '-',
 			remark: '点击模型构件后可查看属性信息与巡查说明。'
 		},
-		manualReadout: {
-			positionText: '左移 0.00m / 上移 0.00m / 前移 0.00m',
-			yawText: '0deg',
-			scaleText: '1.000x'
-		},
-		manualAdjustmentPreset: 'fine',
-		placementMode: 'localized',
 		inspectionPlacementSource: 'manual-marker',
 		registrationMetrics: {
 			gpsText: '-',
@@ -212,10 +198,7 @@ export class ThreeEngine {
 	private readonly store: RegistrationStore;
 	private readonly sceneBundle;
 	private readonly xrButtonWrap: HTMLDivElement;
-	private readonly cameraWorldPosition = new THREE.Vector3();
 	private readonly modelOrientation = new THREE.Quaternion();
-	private readonly manualPosition = new THREE.Vector3();
-	private readonly manualOrientation = new THREE.Quaternion();
 	private readonly displayModeController;
 	private readonly structureRevealController = createArXrayVisualizationController();
 	private readonly layerPeelingController = createArLayerPeelingController();
@@ -226,8 +209,6 @@ export class ThreeEngine {
 	private readonly placementSession;
 	private readonly modelSession;
 	private readonly xrRuntime;
-	private readonly manualReadoutSync;
-	private readonly manualRegistration;
 	private readonly workspaceRuntime;
 	private readonly pointerSelection;
 	private readonly arSessionStateRuntime;
@@ -238,7 +219,6 @@ export class ThreeEngine {
 	private readonly inspectionMarkerWorkflow;
 	private readonly markerCalibrationRuntime;
 	private readonly registrationStateRuntime;
-	private readonly manualRegistrationWorkflow;
 	private readonly placementWorkflow;
 	private readonly listeners = new Set<() => void>();
 
@@ -277,21 +257,6 @@ export class ThreeEngine {
 				this.currentStatus = message;
 			},
 			maxLogItems: MAX_LOG_ITEMS
-		} );
-
-		this.manualReadoutSync = createManualReadoutSync( { store: this.store } );
-		this.manualRegistration = createManualRegistrationController( {
-			setStatus: ( message ) => {
-				statusRuntime.setStatus( message );
-				this.emit();
-			},
-			onStateChange: ( state ) => {
-				this.manualReadoutSync.update( state );
-			},
-			onPresetChange: ( preset ) => {
-				this.store.patch( { manualAdjustmentPreset: preset } );
-				this.emit();
-			}
 		} );
 
 		this.propertySelection = createPropertySelectionController( {
@@ -373,7 +338,6 @@ export class ThreeEngine {
 				this.emit();
 			},
 			requestPreferredPlacement: () => {
-				this.store.patch( { placementMode: 'localized' } );
 				this.pointerSelection.suppressSelectionFor( 1200 );
 				this.placementWorkflow.requestAutoPlacement();
 			},
@@ -432,40 +396,6 @@ export class ThreeEngine {
 			}
 		} );
 
-		this.manualRegistrationWorkflow = new ManualRegistrationWorkflow( {
-			placementSession: this.placementSession,
-			manualRegistration: this.manualRegistration,
-			getWorkflowMode: () => this.workflowMode,
-			getCurrentSessionId: () => this.currentArSessionId,
-			getSiteId: () => this.demoModelConfig?.modelId ?? null,
-			getModelTemplate: () => this.modelTemplate,
-			getRegistrationSolution: () => this.registrationSolution,
-			getManualPositionTarget: () => this.manualPosition,
-			getManualOrientationTarget: () => this.manualOrientation,
-			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
-			setStatus: ( message ) => {
-				this.setStatus( message );
-			},
-			syncRegistrationChainDebug: () => {
-				this.syncRegistrationChainDebug();
-			},
-			applyModelLayerVisibility: () => {
-				this.applyModelLayerVisibility();
-			},
-			syncArSessionPhase: () => {
-				this.syncArSessionPhase();
-			},
-			syncSceneHost: () => {
-				this.syncSceneHost();
-			},
-			emit: () => {
-				this.emit();
-			},
-			markPlacementCommitted: ( committed ) => {
-				this.arSessionStateRuntime.markPlacementCommitted( committed );
-			}
-		} );
-
 		this.placementWorkflow = new PlacementWorkflow( {
 			placementSession: this.placementSession,
 			getWorkflowMode: () => this.workflowMode,
@@ -477,21 +407,12 @@ export class ThreeEngine {
 			getModelTemplate: () => this.modelTemplate,
 			getRegistrationSolution: () => this.registrationSolution,
 			getHitTestController: () => this.xrRuntime.getHitTestController(),
-			getManualApplyToPlacement: () => this.manualRegistration.applyToPlacement,
-			getManualPositionTarget: () => this.manualPosition,
-			getManualOrientationTarget: () => this.manualOrientation,
 			getModelOrientationTarget: () => this.modelOrientation,
-			getCameraWorldPositionTarget: () => this.cameraWorldPosition,
 			onBeforePlacementRequest: () => {
 				this.propertySelection.clearSelection();
 				this.pointerSelection.suppressSelectionFor( 1200 );
 			},
-			onPlacementBaseResolved: ( headingDeg ) => {
-				this.manualRegistrationWorkflow.syncForHeading( headingDeg );
-			},
-			refreshActiveManualRegistrationSitePose: () => {
-				this.manualRegistrationWorkflow.refreshActiveSitePose();
-			},
+			onPlacementBaseResolved: () => {},
 			applyModelLayerVisibility: () => {
 				this.applyModelLayerVisibility();
 			},
@@ -525,8 +446,6 @@ export class ThreeEngine {
 			getActiveMarkerArFromEnuSolution: () => this.activeMarkerArFromEnuSolution,
 			getActiveMarkerLocalizationResult: () => this.activeMarkerLocalizationResult,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
-			getModelTemplate: () => this.modelTemplate,
-			getRegistrationSolution: () => this.registrationSolution,
 			resetMarkerLocalizationCorrection: () => {
 				this.resetMarkerLocalizationCorrection();
 			},
@@ -542,14 +461,8 @@ export class ThreeEngine {
 			syncSceneHost: () => {
 				this.syncSceneHost();
 			},
-			applyModelLayerVisibility: () => {
-				this.applyModelLayerVisibility();
-			},
 			emit: () => {
 				this.emit();
-			},
-			appendLog: ( message ) => {
-				this.appendLog( message );
 			},
 			setStatus: ( message ) => {
 				this.setStatus( message );
@@ -557,19 +470,10 @@ export class ThreeEngine {
 			suppressSelection: ( durationMs ) => {
 				this.pointerSelection.suppressSelectionFor( durationMs );
 			},
-			clearSelection: () => {
-				this.propertySelection.clearSelection();
-			},
-			getHitTestController: () => this.xrRuntime.getHitTestController(),
 			placementSession: this.placementSession,
 			arSessionStateRuntime: this.arSessionStateRuntime,
-			manualRegistrationWorkflow: this.manualRegistrationWorkflow,
-			placementWorkflow: this.placementWorkflow,
 			inspectionMarkerWorkflow: this.inspectionMarkerWorkflow,
-			markerCalibrationRuntime: this.markerCalibrationRuntime,
-			manualApplyToPlacement: this.manualRegistration.applyToPlacement,
-			manualPositionTarget: this.manualPosition,
-			manualOrientationTarget: this.manualOrientation
+			markerCalibrationRuntime: this.markerCalibrationRuntime
 		} );
 
 		this.pointerSelection = createPointerSelectionSession( {
@@ -630,7 +534,6 @@ export class ThreeEngine {
 				this.siteBaselineLoadRequestId += 1;
 				this.resetMarkerLocalizationCorrection();
 				this.markerCalibrationRuntime.resetRuntimeState();
-				this.manualRegistrationWorkflow.resetRuntimeState();
 				this.pipesByName = new Map<string, PipeRecord>();
 				this.layerVisibility.reset();
 				this.visualizationStateRuntime.reset();
@@ -660,9 +563,7 @@ export class ThreeEngine {
 				this.markerCalibrationRuntime.syncState();
 				this.syncRegistrationChainDebug();
 			},
-			onLoadManualRegistration: ( modelId ) => {
-				this.manualRegistrationWorkflow.loadManualRegistration( modelId );
-			},
+			onLoadManualRegistration: () => {},
 			canRequestAutoPlacement: () => false,
 			requestAutoPlacement: () => {
 				this.placementWorkflow.requestAutoPlacement();
@@ -1140,42 +1041,6 @@ export class ThreeEngine {
 
 	}
 
-	adjustTranslation(axis: 'x' | 'y' | 'z', direction: 1 | -1): void {
-
-		this.manualRegistrationWorkflow.adjustTranslation( axis, direction );
-
-	}
-
-	adjustYaw(direction: 1 | -1): void {
-
-		this.manualRegistrationWorkflow.adjustYaw( direction );
-
-	}
-
-	adjustScale(direction: 1 | -1): void {
-
-		this.manualRegistrationWorkflow.adjustScale( direction );
-
-	}
-
-	saveManualRegistration(): void {
-
-		this.manualRegistrationWorkflow.saveCurrentRegistration();
-
-	}
-
-	resetManualRegistration(): void {
-
-		this.manualRegistrationWorkflow.resetManualRegistration();
-
-	}
-
-	clearSavedRegistration(): boolean {
-
-		return this.manualRegistrationWorkflow.clearSavedRegistration();
-
-	}
-
 	refreshSavedMarkerLocalization(): void {
 
 		this.refreshSavedMarkerLocalizationResult();
@@ -1249,10 +1114,7 @@ export class ThreeEngine {
 				modelTemplate: this.modelTemplate,
 				registrationSolution: this.registrationSolution,
 				arFromEnuSolution: fallbackSolution,
-				currentSessionId: this.currentArSessionId,
-				manualApplyToPlacement: this.manualRegistration.applyToPlacement,
-				manualPositionTarget: this.manualPosition,
-				manualOrientationTarget: this.manualOrientation
+				currentSessionId: this.currentArSessionId
 			} );
 			if ( appliedToPlacedModel ) {
 				this.applyModelLayerVisibility();
@@ -1287,29 +1149,10 @@ export class ThreeEngine {
 
 	}
 
-	setManualAdjustmentPreset(preset: ManualAdjustmentPreset): void {
-
-		this.manualRegistration.setAdjustmentPreset( preset );
-
-	}
-
-	setPlacementMode(mode: ArPlacementMode): void {
-
-		this.store.patch( { placementMode: mode } );
-		this.setStatus(
-			mode === 'hit-test-temporary'
-				? '已切换为临时放到平面。'
-				: '已切换为按定位固定。'
-		);
-		this.emit();
-
-	}
-
 	setInspectionPlacementSource(source: InspectionPlacementSource): void {
 
 		this.store.patch( {
-			inspectionPlacementSource: source,
-			placementMode: 'localized'
+			inspectionPlacementSource: source
 		} );
 
 		this.markerCalibrationRuntime.resetCurrentSessionCalibration();
@@ -1364,11 +1207,6 @@ export class ThreeEngine {
 	}
 
 	async placeModel(): Promise<void> {
-
-		if ( this.store.getState().placementMode === 'hit-test-temporary' ) {
-			this.placeModelAtHitTest();
-			return;
-		}
 
 		if ( this.sceneBundle.renderer.xr.isPresenting === false ) {
 			this.setStatus( 'AR 会话尚未开启。' );
@@ -1500,7 +1338,6 @@ export class ThreeEngine {
 			demoModelConfig: this.demoModelConfig,
 			registrationSolution: this.registrationSolution,
 			currentStage: state.timelineStages[ state.currentTimelineStageIndex ],
-			manualReadout: state.manualReadout,
 			placedModel: this.placementSession.getPlacedModel()
 		} );
 		this.setStatus( result.statusMessage );
@@ -1891,10 +1728,7 @@ export class ThreeEngine {
 			modelTemplate: this.modelTemplate,
 			registrationSolution: this.registrationSolution,
 			arFromEnuSolution: solution.arFromEnuSolution,
-			currentSessionId: this.currentArSessionId,
-			manualApplyToPlacement: this.manualRegistration.applyToPlacement,
-			manualPositionTarget: this.manualPosition,
-			manualOrientationTarget: this.manualOrientation
+			currentSessionId: this.currentArSessionId
 		} );
 
 		if ( appliedToPlacedModel ) {
@@ -2136,12 +1970,6 @@ export class ThreeEngine {
 	private syncVisualizationState(): void {
 
 		this.visualizationStateRuntime.syncVisualizationState();
-
-	}
-
-	placeModelAtHitTest(): void {
-
-		this.sessionLifecycleRuntime.placeModelAtHitTest();
 
 	}
 

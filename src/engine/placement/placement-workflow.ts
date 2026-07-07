@@ -3,7 +3,6 @@ import type { XRHitTestController } from '@/features/ar/types/runtime-types.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
-import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
 import type { PlacementSession } from './session.js';
 
 interface PlacementWorkflowOptions {
@@ -17,18 +16,9 @@ interface PlacementWorkflowOptions {
 	getModelTemplate(): THREE.Group | null;
 	getRegistrationSolution(): EngineeringRegistrationSolution | null;
 	getHitTestController(): XRHitTestController;
-	getManualApplyToPlacement(): (
-		base: ManualPlacementBase,
-		targetPosition: THREE.Vector3,
-		targetOrientation: THREE.Quaternion
-	) => { position: THREE.Vector3; orientation: THREE.Quaternion; scale: number };
-	getManualPositionTarget(): THREE.Vector3;
-	getManualOrientationTarget(): THREE.Quaternion;
 	getModelOrientationTarget(): THREE.Quaternion;
-	getCameraWorldPositionTarget(): THREE.Vector3;
 	onBeforePlacementRequest(): void;
 	onPlacementBaseResolved(headingDeg: number): void;
-	refreshActiveManualRegistrationSitePose(): void;
 	applyModelLayerVisibility(): void;
 	syncRegistrationChainDebug(): void;
 	syncArSessionPhase(): void;
@@ -123,20 +113,14 @@ export class PlacementWorkflow {
 		} ) );
 
 		this.options.placementSession.attemptLocalizedPlacement( {
-			xrHitTest: this.options.getHitTestController(),
 			modelTemplate: this.options.getModelTemplate(),
 			registrationSolution: this.options.getRegistrationSolution(),
 			arFromEnuSolutionOverride: localizationOverride,
-			manualApplyToPlacement: this.options.getManualApplyToPlacement(),
-			manualPositionTarget: this.options.getManualPositionTarget(),
-			manualOrientationTarget: this.options.getManualOrientationTarget(),
 			modelOrientationTarget: this.options.getModelOrientationTarget(),
-			cameraWorldPosition: this.options.getCameraWorldPositionTarget(),
 			onPlacementBaseResolved: ( base ) => {
 				this.options.onPlacementBaseResolved( base.siteContext?.headingDeg ?? 0 );
 			}
 		} );
-		this.options.refreshActiveManualRegistrationSitePose();
 		this.options.applyModelLayerVisibility();
 		this.options.syncRegistrationChainDebug();
 

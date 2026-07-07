@@ -1,13 +1,11 @@
 ﻿import type { PipeRecord } from '@/models/types/pipe-record.js';
 import type { ModelCatalogItem } from '@/models/catalog/model-api.js';
-import type { ManualAdjustmentPreset } from '@/localization/manual/manual-registration.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 
 export type WorkspaceMode = 'browse' | 'registration' | 'inspection';
 export type AppMode = 'pre-ar' | 'ar-session';
 export type ArSupportState = 'checking' | 'supported' | 'unsupported';
 export type ArSessionPhase = 'scanning' | 'ready-to-place' | 'placing' | 'placed';
-export type ArPlacementMode = 'localized' | 'hit-test-temporary';
 export type InspectionPlacementSource = 'manual-marker';
 export type ArDisplayMode =
 	| 'solid-overlay'
@@ -44,12 +42,6 @@ export interface PropertyPanelState {
 	depth: string;
 	status: string;
 	remark: string;
-}
-
-export interface ManualReadoutState {
-	positionText: string;
-	yawText: string;
-	scaleText: string;
 }
 
 export interface RegistrationMetricsState {
@@ -243,9 +235,6 @@ export interface RegistrationStoreState {
 	modelLayers: ModelLayerState[];
 	pipeList: PipeRecord[];
 	propertyPanel: PropertyPanelState;
-	manualReadout: ManualReadoutState;
-	manualAdjustmentPreset: ManualAdjustmentPreset;
-	placementMode: ArPlacementMode;
 	inspectionPlacementSource: InspectionPlacementSource;
 	registrationMetrics: RegistrationMetricsState;
 	modelScaleSummary: ModelScaleSummaryState;
@@ -317,16 +306,6 @@ export function createDefaultPropertyPanelState(): PropertyPanelState {
 		depth: '-',
 		status: '-',
 		remark: '点击模型构件后可查看属性、位置和备注信息。'
-	};
-
-}
-
-export function createDefaultManualReadoutState(): ManualReadoutState {
-
-	return {
-		positionText: '左移 0.00m / 上移 0.00m / 前移 0.00m',
-		yawText: '0deg',
-		scaleText: '1.000x'
 	};
 
 }

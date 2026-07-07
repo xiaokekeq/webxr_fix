@@ -1,13 +1,7 @@
-import * as THREE from 'three';
 import type { RegistrationStore } from '@/localization/core/registration-store.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
-import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
-import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import type { PlacementSession } from '@/engine/placement/session.js';
-import type { XRHitTestController } from '@/features/ar/types/runtime-types.js';
 import type { ArSessionStateRuntime } from '@/engine/session/ar-session-state-runtime.js';
-import type { ManualRegistrationWorkflow } from '@/engine/placement/manual-registration-workflow.js';
-import type { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
 import type { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-workflow.js';
 import type { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
 import type { SavedMarkerLocalizationResult } from '@/localization/marker/marker-localization-storage.js';
@@ -24,33 +18,18 @@ interface SessionLifecycleRuntimeOptions {
 	getActiveMarkerArFromEnuSolution(): ArFromEnuSolution | null;
 	getActiveMarkerLocalizationResult(): SavedMarkerLocalizationResult | null;
 	hasGroundHit(): boolean;
-	getModelTemplate(): THREE.Group | null;
-	getRegistrationSolution(): EngineeringRegistrationSolution | null;
 	resetMarkerLocalizationCorrection(): void;
 	refreshSiteCalibrationBaselineState(options?: { silentStatus?: boolean }): void;
 	syncRegistrationChainDebug(): void;
 	syncArSessionPhase(): void;
 	syncSceneHost(): void;
-	applyModelLayerVisibility(): void;
 	emit(): void;
-	appendLog(message: string): void;
 	setStatus(message: string): void;
 	suppressSelection(durationMs: number): void;
-	clearSelection(): void;
-	getHitTestController(): XRHitTestController;
 	placementSession: PlacementSession;
 	arSessionStateRuntime: ArSessionStateRuntime;
-	manualRegistrationWorkflow: ManualRegistrationWorkflow;
-	placementWorkflow: PlacementWorkflow;
 	inspectionMarkerWorkflow: InspectionMarkerWorkflow;
 	markerCalibrationRuntime: MarkerCalibrationRuntime;
-	manualApplyToPlacement(
-		base: ManualPlacementBase,
-		targetPosition: THREE.Vector3,
-		targetOrientation: THREE.Quaternion
-	): { position: THREE.Vector3; orientation: THREE.Quaternion; scale: number };
-	manualPositionTarget: THREE.Vector3;
-	manualOrientationTarget: THREE.Quaternion;
 }
 
 export class SessionLifecycleRuntime {
@@ -81,7 +60,6 @@ export class SessionLifecycleRuntime {
 		this.options.arSessionStateRuntime.handleSessionStart();
 		this.options.suppressSelection( 1200 );
 		this.options.placementSession.resetPlacement();
-		this.options.manualRegistrationWorkflow.refreshActiveSitePose();
 		this.options.refreshSiteCalibrationBaselineState( { silentStatus: true } );
 		this.options.markerCalibrationRuntime.syncState();
 		this.options.syncArSessionPhase();
@@ -123,7 +101,6 @@ export class SessionLifecycleRuntime {
 		this.options.markerCalibrationRuntime.resetRuntimeState();
 		this.options.arSessionStateRuntime.handleSessionEnd();
 		this.options.placementSession.resetPlacement();
-		this.options.manualRegistrationWorkflow.syncForHeading( 0 );
 		this.options.syncRegistrationChainDebug();
 		this.options.syncSceneHost();
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
@@ -174,58 +151,6 @@ export class SessionLifecycleRuntime {
 		}
 
 		this.options.setStatus( '模型已放置，可切换浏览模式。' );
-
-	}
-
-	placeModelAtHitTest(): void {
-
-		if ( this.options.isPresenting() === false ) {
-			this.options.setStatus( 'AR 会话尚未开启。' );
-			return;
-		}
-
-		if ( this.options.getHitTestController().hasGroundHit() === false ) {
-			this.options.setStatus( '请先完成地面检测，再继续调试路径。' );
-			return;
-		}
-
-		const modelTemplate = this.options.getModelTemplate();
-		const registrationSolution = this.options.getRegistrationSolution();
-		if ( modelTemplate === null || registrationSolution === null ) {
-			this.options.setStatus( '模型资源尚未准备完成。' );
-			return;
-		}
-
-		console.info( '[TemporaryPlacementDebugOnly]', {
-			mode: this.options.getWorkflowMode(),
-			siteId: this.options.getSiteId(),
-			sessionId: this.options.getCurrentSessionId(),
-			reason: 'hit-test temporary placement is debug-only',
-			createdAt: Date.now()
-		} );
-		this.options.clearSelection();
-		this.options.suppressSelection( 1200 );
-		const placed = this.options.placementSession.placeAtHitTest( {
-			xrHitTest: this.options.getHitTestController(),
-			modelTemplate,
-			registrationSolution,
-			manualApplyToPlacement: this.options.manualApplyToPlacement,
-			manualPositionTarget: this.options.manualPositionTarget,
-			manualOrientationTarget: this.options.manualOrientationTarget
-		} );
-		this.options.syncArSessionPhase();
-
-		if ( placed === false ) {
-			this.options.setStatus( '地面检测已完成，但调试路径未完成，请重试。' );
-			return;
-		}
-
-		this.options.manualRegistrationWorkflow.clearActiveSitePose();
-		this.options.applyModelLayerVisibility();
-		this.handlePlacementCompleted();
-		this.options.syncSceneHost();
-		this.options.setStatus( '当前为临时演示放置，模型底部已对齐地面，不代表工程真实位置。' );
-		this.options.emit();
 
 	}
 

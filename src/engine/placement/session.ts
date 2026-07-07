@@ -1,5 +1,5 @@
-﻿import * as THREE from 'three';
-import type { ARSceneBundle, XRAnchorHandle, XRHitTestController } from '@/features/ar/types/runtime-types.js';
+import * as THREE from 'three';
+import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
 import { clearPlacedModel } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
@@ -7,17 +7,12 @@ import type { ManualPlacementBase } from '@/localization/manual/manual-registrat
 import { createDefaultTargetGuidanceState } from '@/localization/core/registration-store.js';
 import { createPlacementSummaryState } from '@/engine/session/view-state.js';
 import {
-	createHitTestPlacementBase,
 	createPlacementBaseFromArLocalizationSolution,
 	placeAdjustedModel
 } from './runtime.js';
 import type { PropertySelectionController } from '@/engine/interaction/property-selection.js';
 
-type ArPlacementSource =
-	| 'hit-test'
-	| 'marker'
-	| 'manual'
-	| 'unknown';
+type ArPlacementSource = 'marker' | 'unknown';
 
 interface TrackedArPlacementTransform {
 	source: ArPlacementSource;
@@ -25,14 +20,6 @@ interface TrackedArPlacementTransform {
 	quaternion: THREE.Quaternion;
 	scale: THREE.Vector3;
 }
-
-const tempAnchorMatrix = new THREE.Matrix4();
-const tempAnchorPosition = new THREE.Vector3();
-const tempAnchorQuaternion = new THREE.Quaternion();
-const tempAnchorScale = new THREE.Vector3();
-const tempAnchorWorldQuaternion = new THREE.Quaternion();
-const tempLocalPosition = new THREE.Vector3();
-const tempLocalOrientation = new THREE.Quaternion();
 
 interface CreatePlacementSessionOptions {
 	store: {
@@ -56,32 +43,11 @@ export interface PlacementSession {
 	setUndergroundPreview(enabled: boolean, depthMeters: number): void;
 	resetPlacement(): void;
 	requestAutoPlacement(modelTemplate: THREE.Group | null): void;
-	placeAtHitTest(args: {
-		xrHitTest: XRHitTestController;
-		modelTemplate: THREE.Group | null;
-		registrationSolution: EngineeringRegistrationSolution | null;
-		manualApplyToPlacement(
-			base: ManualPlacementBase,
-			targetPosition: THREE.Vector3,
-			targetOrientation: THREE.Quaternion
-		): { position: THREE.Vector3; orientation: THREE.Quaternion; scale: number };
-		manualPositionTarget: THREE.Vector3;
-		manualOrientationTarget: THREE.Quaternion;
-	}): boolean;
 	attemptLocalizedPlacement(args: {
-		xrHitTest: XRHitTestController;
 		modelTemplate: THREE.Group | null;
 		registrationSolution: EngineeringRegistrationSolution | null;
 		arFromEnuSolutionOverride?: ArFromEnuSolution | null;
-		manualApplyToPlacement(
-			base: ManualPlacementBase,
-			targetPosition: THREE.Vector3,
-			targetOrientation: THREE.Quaternion
-		): { position: THREE.Vector3; orientation: THREE.Quaternion; scale: number };
-		manualPositionTarget: THREE.Vector3;
-		manualOrientationTarget: THREE.Quaternion;
 		modelOrientationTarget: THREE.Quaternion;
-		cameraWorldPosition: THREE.Vector3;
 		onPlacementBaseResolved?(base: ManualPlacementBase): void;
 	}): void;
 	applyArLocalizationSolution(args: {
@@ -89,25 +55,7 @@ export interface PlacementSession {
 		registrationSolution: EngineeringRegistrationSolution | null;
 		arFromEnuSolution: ArFromEnuSolution;
 		currentSessionId?: string | null;
-		manualApplyToPlacement(
-			base: ManualPlacementBase,
-			targetPosition: THREE.Vector3,
-			targetOrientation: THREE.Quaternion
-		): { position: THREE.Vector3; orientation: THREE.Quaternion; scale: number };
-		manualPositionTarget: THREE.Vector3;
-		manualOrientationTarget: THREE.Quaternion;
 	}): boolean;
-	reapplyManualRegistration(args: {
-		modelTemplate: THREE.Group | null;
-		manualApplyToPlacement(
-			base: ManualPlacementBase,
-			targetPosition: THREE.Vector3,
-			targetOrientation: THREE.Quaternion
-		): { position: THREE.Vector3; orientation: THREE.Quaternion; scale: number };
-		manualPositionTarget: THREE.Vector3;
-		manualOrientationTarget: THREE.Quaternion;
-		registrationSolution: EngineeringRegistrationSolution | null;
-	}): void;
 	updateArPlacementAnchor(frame: XRFrame): void;
 	verifyWorldLockedPlacement(caller: string): void;
 }
@@ -126,26 +74,11 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	let arPlacementBase: ManualPlacementBase | null = null;
 	let autoPlacementPending = false;
 	let trackedArPlacementTransform: TrackedArPlacementTransform | null = null;
-	let activeArAnchor: XRAnchorHandle | null = null;
-	let usesArPlacementAnchor = false;
-	let arAnchorRequestId = 0;
 	let undergroundPreviewOffsetMeters = 0;
-
-	function getActivePlacedModel(): THREE.Group | null {
-
-		return arPlacedModel;
-
-	}
-
-	function getActivePlacementBase(): ManualPlacementBase | null {
-
-		return arPlacementBase;
-
-	}
 
 	function updatePlacementSummary(): void {
 
-		store.patch( { placementSummary: createPlacementSummaryState( getActivePlacedModel() ) } );
+		store.patch( { placementSummary: createPlacementSummaryState( arPlacedModel ) } );
 
 	}
 
@@ -170,14 +103,8 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			arPlacedModel.position.y += delta;
 			arPlacedModel.updateMatrixWorld( true );
 			updatePlacementSummary();
-			trackArPlacement( 'manual' );
+			trackArPlacement( 'marker' );
 		}
-
-	}
-
-	function clearArPlacementTracking(): void {
-
-		trackedArPlacementTransform = null;
 
 	}
 
@@ -190,13 +117,9 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 	}
 
-	function clearActiveArAnchor(): void {
+	function clearArPlacementTracking(): void {
 
-		activeArAnchor?.delete?.();
-		activeArAnchor = null;
-		usesArPlacementAnchor = false;
-		arAnchorRequestId += 1;
-		resetArPlacementAnchorTransform();
+		trackedArPlacementTransform = null;
 
 	}
 
@@ -204,12 +127,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		source: ArFromEnuSolution['source'] | undefined
 	): ArPlacementSource {
 
-		switch ( source ) {
-			case 'marker':
-				return 'marker';
-			default:
-				return 'unknown';
-		}
+		return source === 'marker' ? 'marker' : 'unknown';
 
 	}
 
@@ -221,131 +139,65 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		}
 
 		arPlacedModel.updateMatrixWorld( true );
-		const position = arPlacedModel.getWorldPosition( new THREE.Vector3() );
-		const quaternion = arPlacedModel.getWorldQuaternion( new THREE.Quaternion() );
-		const scale = arPlacedModel.getWorldScale( new THREE.Vector3() );
 		trackedArPlacementTransform = {
 			source,
-			position: position.clone(),
-			quaternion: quaternion.clone(),
-			scale: scale.clone()
+			position: arPlacedModel.getWorldPosition( new THREE.Vector3() ),
+			quaternion: arPlacedModel.getWorldQuaternion( new THREE.Quaternion() ),
+			scale: arPlacedModel.getWorldScale( new THREE.Vector3() )
 		};
 
 	}
 
-	function applyAnchorTransformFromMatrix(matrix: THREE.Matrix4): void {
-
-		matrix.decompose( tempAnchorPosition, tempAnchorQuaternion, tempAnchorScale );
-		sceneBundle.arPlacementAnchor.position.copy( tempAnchorPosition );
-		sceneBundle.arPlacementAnchor.quaternion.copy( tempAnchorQuaternion );
-		sceneBundle.arPlacementAnchor.scale.set( 1, 1, 1 );
-		sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
-
-	}
-
-	function resolvePlacementRelativeToAnchor(adjustedPlacement: {
-		position: THREE.Vector3;
-		orientation: THREE.Quaternion;
-		scale: number;
-	}): {
+	function createAdjustedPlacementFromBase(base: ManualPlacementBase): {
 		position: THREE.Vector3;
 		orientation: THREE.Quaternion;
 		scale: number;
 	} {
 
-		sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
-		tempLocalPosition.copy( adjustedPlacement.position );
-		sceneBundle.arPlacementAnchor.worldToLocal( tempLocalPosition );
-		sceneBundle.arPlacementAnchor.getWorldQuaternion( tempAnchorWorldQuaternion );
-		tempLocalOrientation
-			.copy( tempAnchorWorldQuaternion )
-			.invert()
-			.multiply( adjustedPlacement.orientation );
-
 		return {
-			position: tempLocalPosition.clone(),
-			orientation: tempLocalOrientation.clone(),
-			scale: adjustedPlacement.scale
+			position: base.position.clone(),
+			orientation: base.orientation.clone(),
+			scale: base.scale
 		};
 
 	}
 
-	function tryActivateAnchorFromHit(xrHitTest: XRHitTestController, source: ArPlacementSource): boolean {
+	function placeFromPlacementBase(
+		modelTemplate: THREE.Group,
+		source: ArPlacementSource
+	): void {
 
-		const hitMatrix = xrHitTest.getHitMatrix( tempAnchorMatrix );
-		if ( hitMatrix === null ) {
-			clearActiveArAnchor();
-			console.info( '[XRAnchorPlacement]', {
-				created: false,
-				fallback: true,
-				source,
-				reason: 'hit matrix unavailable'
-			} );
-			return false;
+		if ( arPlacementBase === null ) {
+			return;
 		}
 
-		applyAnchorTransformFromMatrix( hitMatrix );
-		activeArAnchor = null;
-		usesArPlacementAnchor = true;
-		const requestId = ++ arAnchorRequestId;
-
-		if ( xrHitTest.supportsAnchors() === false ) {
-			console.info( '[XRAnchorPlacement]', {
-				created: false,
-				fallback: true,
-				source,
-				reason: 'anchors unsupported'
-			} );
-			return true;
-		}
-
-		void xrHitTest.createAnchorFromLatestHit()
-			.then( ( anchor ) => {
-				if ( requestId !== arAnchorRequestId ) {
-					anchor?.delete?.();
-					return;
-				}
-
-				if ( anchor === null ) {
-					console.info( '[XRAnchorPlacement]', {
-						created: false,
-						fallback: true,
-						source,
-						reason: 'createAnchor unavailable or failed'
-					} );
-					return;
-				}
-
-				activeArAnchor?.delete?.();
-				activeArAnchor = anchor;
-				console.info( '[XRAnchorPlacement]', {
-					created: true,
-					fallback: false,
-					source
-				} );
-			} )
-			.catch( ( error ) => {
-				if ( requestId !== arAnchorRequestId ) {
-					return;
-				}
-
-				console.warn( '[XRAnchorPlacement]', {
-					created: false,
-					fallback: true,
-					source,
-					reason: 'anchor promise rejected',
-					error
-				} );
-			} );
-
-		return true;
+		const adjustedPlacement = createAdjustedPlacementFromBase( arPlacementBase );
+		resetArPlacementAnchorTransform();
+		arPlacedModel = placeAdjustedModel( {
+			modelTemplate,
+			placedModel: arPlacedModel,
+			modelAnchor: sceneBundle.arModelAnchor,
+			adjustedPlacement
+		} );
+		applyCurrentUndergroundPreviewOffset();
+		trackArPlacement( source );
+		updateRegistrationStatusDetail( '状态：模型已按工程坐标显示' );
+		updatePlacementSummary();
+		console.info( '[EngineeringPlacementApplied]', {
+			source,
+			usedHitTestForFinalPlacement: false,
+			position: vector3ToObject( adjustedPlacement.position ),
+			quaternion: quaternionToObject( adjustedPlacement.orientation ),
+			scale: adjustedPlacement.scale,
+			createdAt: Date.now()
+		} );
 
 	}
 
 	return {
 		getPlacedModel() {
 
-			return getActivePlacedModel();
+			return arPlacedModel;
 
 		},
 
@@ -357,7 +209,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		getPlacementBase() {
 
-			return getActivePlacementBase();
+			return arPlacementBase;
 
 		},
 
@@ -380,7 +232,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
 			autoPlacementPending = false;
 			arPlacementBase = null;
-			clearActiveArAnchor();
+			resetArPlacementAnchorTransform();
 			clearArPlacementTracking();
 			propertySelection.clearSelection();
 			updatePlacementSummary();
@@ -395,83 +247,19 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			}
 
 			autoPlacementPending = true;
-			updateRegistrationStatusDetail( '状态：等待命中可用平面' );
-
-		},
-
-		placeAtHitTest(args) {
-
-			const {
-				xrHitTest,
-				modelTemplate,
-				registrationSolution,
-				manualApplyToPlacement,
-				manualPositionTarget,
-				manualOrientationTarget
-			} = args;
-
-			if (
-				sceneBundle.renderer.xr.isPresenting === false
-				|| modelTemplate === null
-				|| registrationSolution === null
-				|| xrHitTest.hasGroundHit() === false
-			) {
-				return false;
-			}
-
-			const groundPosition = xrHitTest.getHitPosition( new THREE.Vector3() );
-			if ( groundPosition === null ) {
-				updateRegistrationStatusDetail( '状态：等待识别平面' );
-				return false;
-			}
-
-			arPlacementBase = createHitTestPlacementBase( {
-				camera: sceneBundle.renderer.xr.getCamera(),
-				groundPosition,
-				modelTemplate,
-				registrationSolution
-			} );
-			const adjustedPlacement = manualApplyToPlacement(
-				arPlacementBase,
-				manualPositionTarget,
-				manualOrientationTarget
-			);
-			const usesAnchorRoot = tryActivateAnchorFromHit( xrHitTest, 'hit-test' );
-			const finalPlacement = usesAnchorRoot
-				? resolvePlacementRelativeToAnchor( adjustedPlacement )
-				: adjustedPlacement;
-
-			arPlacedModel = placeAdjustedModel( {
-				modelTemplate,
-				placedModel: arPlacedModel,
-				modelAnchor: sceneBundle.arModelAnchor,
-				adjustedPlacement: finalPlacement
-			} );
-			applyCurrentUndergroundPreviewOffset();
-			autoPlacementPending = false;
-			updateRegistrationStatusDetail( '状态：模型已放置' );
-			updatePlacementSummary();
-			trackArPlacement( 'hit-test' );
-			return true;
+			updateRegistrationStatusDetail( '状态：等待 Marker 四角点校正' );
 
 		},
 
 		attemptLocalizedPlacement(args) {
 
 			const {
-				xrHitTest,
 				modelTemplate,
 				registrationSolution,
 				arFromEnuSolutionOverride,
-				manualApplyToPlacement,
-				manualPositionTarget,
-				manualOrientationTarget,
 				modelOrientationTarget,
-				cameraWorldPosition,
 				onPlacementBaseResolved
 			} = args;
-			void xrHitTest;
-			void cameraWorldPosition;
 
 			if (
 				autoPlacementPending === false
@@ -481,63 +269,30 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return;
 			}
 
-			let usedMarkerOverride = false;
-
-			if ( arFromEnuSolutionOverride !== null && arFromEnuSolutionOverride !== undefined ) {
-				arPlacementBase = createPlacementBaseFromArLocalizationSolution( {
-					arFromEnuSolution: arFromEnuSolutionOverride,
-					modelTemplate,
-					registrationSolution,
-					modelOrientationTarget
-				} );
-				usedMarkerOverride = true;
-			} else {
+			if ( arFromEnuSolutionOverride === null || arFromEnuSolutionOverride === undefined ) {
 				console.info( '[FormalLocalizationRequired]', {
-					reason: 'localized placement skipped without formal localization override',
+					reason: 'localized placement skipped without marker ENU-to-AR transform',
 					createdAt: Date.now()
 				} );
-				updateRegistrationStatusDetail( '状态：等待 Marker 或手动四角点定位' );
-				setStatus( '请先完成控制标志四角点校正，再让模型按工程坐标显示。' );
+				updateRegistrationStatusDetail( '状态：等待 Marker 四角点定位' );
+				setStatus( '请先完成 Marker 四角点校正后再进行工程放置。' );
 				autoPlacementPending = false;
 				return;
 			}
 
-			onPlacementBaseResolved?.( arPlacementBase );
-			const adjustedPlacement = manualApplyToPlacement(
-				arPlacementBase,
-				manualPositionTarget,
-				manualOrientationTarget
-			);
-			const placementSource = usedMarkerOverride
-				? resolvePlacementSourceFromArLocalization( arFromEnuSolutionOverride?.source )
-				: 'unknown';
-			clearActiveArAnchor();
-
-			arPlacedModel = placeAdjustedModel( {
+			arPlacementBase = createPlacementBaseFromArLocalizationSolution( {
+				arFromEnuSolution: arFromEnuSolutionOverride,
 				modelTemplate,
-				placedModel: arPlacedModel,
-				modelAnchor: sceneBundle.arModelAnchor,
-				adjustedPlacement
+				registrationSolution,
+				modelOrientationTarget
 			} );
-			applyCurrentUndergroundPreviewOffset();
-			trackArPlacement( placementSource );
-
+			onPlacementBaseResolved?.( arPlacementBase );
+			placeFromPlacementBase(
+				modelTemplate,
+				resolvePlacementSourceFromArLocalization( arFromEnuSolutionOverride.source )
+			);
 			autoPlacementPending = false;
-			updateRegistrationStatusDetail( '状态：模型已放置' );
-			updatePlacementSummary();
-
-			if ( usedMarkerOverride ) {
-				console.info( '[EngineeringPlacementApplied]', {
-					source: arFromEnuSolutionOverride?.source ?? 'unknown',
-					usesHitTestForFinalPose: false,
-					position: vector3ToObject( adjustedPlacement.position ),
-					quaternion: quaternionToObject( adjustedPlacement.orientation ),
-					scale: adjustedPlacement.scale,
-					createdAt: Date.now()
-				} );
-				setStatus( '模型已按工程坐标显示，未强制贴地。' );
-				return;
-			}
+			setStatus( '模型已按工程坐标显示，未使用 hit-test 决定最终位置。' );
 
 		},
 
@@ -547,10 +302,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelTemplate,
 				registrationSolution,
 				arFromEnuSolution,
-				currentSessionId,
-				manualApplyToPlacement,
-				manualPositionTarget,
-				manualOrientationTarget
+				currentSessionId
 			} = args;
 
 			if ( modelTemplate === null || registrationSolution === null ) {
@@ -576,88 +328,17 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				registrationSolution,
 				modelOrientationTarget: new THREE.Quaternion()
 			} );
-
-			if ( arPlacedModel === null ) {
-				return false;
-			}
-
-			const adjustedPlacement = manualApplyToPlacement(
-				arPlacementBase,
-				manualPositionTarget,
-				manualOrientationTarget
-			);
-			clearActiveArAnchor();
-			arPlacedModel = placeAdjustedModel( {
+			placeFromPlacementBase(
 				modelTemplate,
-				placedModel: arPlacedModel,
-				modelAnchor: sceneBundle.arModelAnchor,
-				adjustedPlacement
-			} );
-			applyCurrentUndergroundPreviewOffset();
-			trackArPlacement( resolvePlacementSourceFromArLocalization( arFromEnuSolution.source ) );
-			updatePlacementSummary();
+				resolvePlacementSourceFromArLocalization( arFromEnuSolution.source )
+			);
 			return true;
-
-		},
-
-		reapplyManualRegistration(args) {
-
-			const {
-				modelTemplate,
-				manualApplyToPlacement,
-				manualPositionTarget,
-				manualOrientationTarget,
-				registrationSolution
-			} = args;
-
-			const activePlacedModel = getActivePlacedModel();
-			const activePlacementBase = getActivePlacementBase();
-			if ( activePlacedModel === null || modelTemplate === null || activePlacementBase === null ) {
-				return;
-			}
-
-			const adjustedPlacement = manualApplyToPlacement(
-				activePlacementBase,
-				manualPositionTarget,
-				manualOrientationTarget
-			);
-
-			if ( sceneBundle.renderer.xr.isPresenting ) {
-				const finalPlacement = usesArPlacementAnchor
-					? resolvePlacementRelativeToAnchor( adjustedPlacement )
-					: adjustedPlacement;
-				arPlacedModel = placeAdjustedModel( {
-					modelTemplate,
-					placedModel: arPlacedModel,
-					modelAnchor: sceneBundle.arModelAnchor,
-					adjustedPlacement: finalPlacement
-				} );
-				applyCurrentUndergroundPreviewOffset();
-				trackArPlacement( 'manual' );
-			}
-
-			updatePlacementSummary();
 
 		},
 
 		updateArPlacementAnchor(frame) {
 
-			if ( sceneBundle.renderer.xr.isPresenting === false || activeArAnchor === null ) {
-				return;
-			}
-
-			const referenceSpace = sceneBundle.renderer.xr.getReferenceSpace();
-			if ( referenceSpace === null ) {
-				return;
-			}
-
-			const anchorPose = frame.getPose( activeArAnchor.anchorSpace, referenceSpace );
-			if ( anchorPose == null ) {
-				return;
-			}
-
-			tempAnchorMatrix.fromArray( anchorPose.transform.matrix );
-			applyAnchorTransformFromMatrix( tempAnchorMatrix );
+			void frame;
 
 		},
 
@@ -672,15 +353,11 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			}
 
 			arPlacedModel.updateMatrixWorld( true );
-			const currentPosition = arPlacedModel.getWorldPosition( new THREE.Vector3() );
-			const currentQuaternion = arPlacedModel.getWorldQuaternion( new THREE.Quaternion() );
-			const currentScale = arPlacedModel.getWorldScale( new THREE.Vector3() );
-			const previous = trackedArPlacementTransform;
 			trackedArPlacementTransform = {
-				source: previous.source,
-				position: currentPosition.clone(),
-				quaternion: currentQuaternion.clone(),
-				scale: currentScale.clone()
+				source: trackedArPlacementTransform.source,
+				position: arPlacedModel.getWorldPosition( new THREE.Vector3() ),
+				quaternion: arPlacedModel.getWorldQuaternion( new THREE.Quaternion() ),
+				scale: arPlacedModel.getWorldScale( new THREE.Vector3() )
 			};
 
 		}
@@ -714,11 +391,3 @@ function quaternionToObject(quaternion: THREE.Quaternion): { x: number; y: numbe
 	};
 
 }
-
-
-
-
-
-
-
-

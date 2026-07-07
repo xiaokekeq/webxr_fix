@@ -51,7 +51,6 @@ export function createRegistrationSnapshot(options: {
 	demoModelConfig: DemoModelConfig;
 	registrationSolution: EngineeringRegistrationSolution;
 	currentStage: string;
-	manualReadout: unknown;
 	placedModel: THREE.Group | null;
 }) {
 
@@ -59,7 +58,6 @@ export function createRegistrationSnapshot(options: {
 		demoModelConfig,
 		registrationSolution,
 		currentStage,
-		manualReadout,
 		placedModel
 	} = options;
 
@@ -74,7 +72,6 @@ export function createRegistrationSnapshot(options: {
 			scale: registrationSolution.modelToSite.scale,
 			rmsErrorMeters: registrationSolution.modelToSite.rmsErrorMeters
 		},
-		manualRegistration: manualReadout,
 		currentPlacement: placedModel === null ? null : {
 			position: vectorToPlainObject( placedModel.position ),
 			quaternion: quaternionToPlainObject( placedModel.quaternion ),
