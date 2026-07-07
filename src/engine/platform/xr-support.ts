@@ -407,7 +407,10 @@ export function createXRHitTestController(
 			setStatus( '正在请求 AR 会话...' );
 
 			try {
-				const session = await requestArSessionWithFallback( navigator.xr );
+				const session = await navigator.xr.requestSession(
+					'immersive-ar',
+					createSessionInit()
+				);
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( session );
 			} catch ( error ) {
@@ -453,42 +456,8 @@ function createSessionInit(): DepthAwareSessionInit {
 	return {
 		requiredFeatures: [ 'hit-test' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
-		depthSensing: {
-			usagePreference: [ 'cpu-optimized' ],
-			dataFormatPreference: [ 'luminance-alpha', 'float32' ]
-		},
 		domOverlay: { root: document.body }
 	};
-
-}
-
-function createPlainSessionInit(): DepthAwareSessionInit {
-
-	return {
-		requiredFeatures: [ 'hit-test' ],
-		optionalFeatures: [ 'dom-overlay', 'anchors' ],
-		domOverlay: { root: document.body }
-	};
-
-}
-
-async function requestArSessionWithFallback( xr: XRSystem ): Promise<XRSession> {
-
-	// Attempt 1: with depth-sensing
-	try {
-		console.info( '[CpuDepthSessionRequested]', 'Requesting AR session with depth-sensing...' );
-		const session = await xr.requestSession( 'immersive-ar', createSessionInit() );
-		return session;
-	} catch ( depthError ) {
-		console.warn(
-			'[CpuDepthSessionFallbackWithoutDepth]',
-			'depth-sensing request failed, falling back to plain AR session.',
-			depthError
-		);
-	}
-
-	// Attempt 2: without depth-sensing
-	return xr.requestSession( 'immersive-ar', createPlainSessionInit() );
 
 }
 
