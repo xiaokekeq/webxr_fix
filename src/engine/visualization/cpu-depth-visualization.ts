@@ -25,21 +25,18 @@ export interface CpuDepthDebugState {
 	lastUpdatedAt?: number;
 	errorMessage?: string;
 	depthSensingSessionEnabled: boolean;
-	sessionLog: string[];
-	frameHeartbeat?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Sampling constants
 // ---------------------------------------------------------------------------
 
-const SAMPLE_WIDTH = 64;
-const SAMPLE_HEIGHT = 48;
+const SAMPLE_WIDTH = 16;
+const SAMPLE_HEIGHT = 12;
 const NEAR_METERS = 0.3;
 const FAR_METERS = 8.0;
-const UPDATE_INTERVAL_MS = 150;           // ~7 fps UI refresh
+const UPDATE_INTERVAL_MS = 500;
 const CONSECUTIVE_FAILURE_LIMIT = 60;      // auto-close after N bad frames
-const LOG_THROTTLE_MS = 3_000;
 
 // ---------------------------------------------------------------------------
 // Reactive state (imported directly by Vue components)
@@ -50,56 +47,11 @@ function buildDefaultState(): CpuDepthDebugState {
 		enabled: false,
 		supported: 'unknown',
 		active: false,
-		depthSensingSessionEnabled: false,
-		sessionLog: []
+		depthSensingSessionEnabled: false
 	};
 }
 
 export const cpuDepthDebugState = reactive<CpuDepthDebugState>( buildDefaultState() );
-
-export function pushDepthSessionLog( msg: string ): void {
-	const ts = new Date().toLocaleTimeString();
-	cpuDepthDebugState.sessionLog = [ ...cpuDepthDebugState.sessionLog, `[${ts}] ${msg}` ].slice( -12 );
-	console.info( '[CpuDepthUI]', msg );
-}
-
-// ---------------------------------------------------------------------------
-// Render-loop heartbeat (used to diagnose freeze vs. low-fps)
-// ---------------------------------------------------------------------------
-
-let heartbeatFrameCount = 0;
-let heartbeatWindowStart = 0;
-let heartbeatTotalFrames = 0;
-
-/**
- * 每帧调用。每 500ms 更新一次 frameHeartbeat，用于在无控制台的移动端
- * 判断渲染循环是否还在跑：
- * - 数字持续跳动 => 主线程未阻塞（若 fps 极低则为性能问题）
- * - 数字冻结 => 主线程/compositor 已停止（真卡死）
- */
-export function tickRenderHeartbeat(): void {
-	heartbeatFrameCount += 1;
-	heartbeatTotalFrames += 1;
-	const now = performance.now();
-	if ( heartbeatWindowStart === 0 ) {
-		heartbeatWindowStart = now;
-		return;
-	}
-	const elapsed = now - heartbeatWindowStart;
-	if ( elapsed >= 500 ) {
-		const fps = Math.round( ( heartbeatFrameCount * 1000 ) / elapsed );
-		cpuDepthDebugState.frameHeartbeat = `帧循环 #${heartbeatTotalFrames} · ${fps}fps`;
-		heartbeatFrameCount = 0;
-		heartbeatWindowStart = now;
-	}
-}
-
-function resetRenderHeartbeat(): void {
-	heartbeatFrameCount = 0;
-	heartbeatWindowStart = 0;
-	heartbeatTotalFrames = 0;
-	cpuDepthDebugState.frameHeartbeat = undefined;
-}
 
 // ---------------------------------------------------------------------------
 // Offscreen heatmap canvas
@@ -119,7 +71,6 @@ export function getHeatmapCanvas(): HTMLCanvasElement {
 // ---------------------------------------------------------------------------
 
 let lastUpdateTime = 0;
-let lastLogTime = 0;
 let consecutiveFailures = 0;
 
 // ---------------------------------------------------------------------------
@@ -139,14 +90,13 @@ export function setCpuDepthEnabled( enabled: boolean ): void {
 export function markDepthSensingSessionEnabled(): void {
 	cpuDepthDebugState.depthSensingSessionEnabled = true;
 	cpuDepthDebugState.supported = true;
-	throttledLog( 'CpuDepthSessionEnabled', 'CPU Depth sensing is active in current AR session.' );
 }
 
 export function resetDepthSensingSessionState(): void {
+	cpuDepthDebugState.enabled = false;
 	cpuDepthDebugState.depthSensingSessionEnabled = false;
 	cpuDepthDebugState.supported = 'unknown';
 	cpuDepthDebugState.active = false;
-	resetRenderHeartbeat();
 	resetDepthData();
 }
 
@@ -179,7 +129,6 @@ export function updateCpuDepthFromFrame(
 
 	const getDepthInformation = ( frame as unknown as Record<string, unknown> ).getDepthInformation;
 	if ( typeof getDepthInformation !== 'function' ) {
-		throttledLog( 'CpuDepthApiMissing', 'frame.getDepthInformation is not available.' );
 		cpuDepthDebugState.supported = false;
 		cpuDepthDebugState.errorMessage = '当前 AR 会话未提供 getDepthInformation API。';
 		return;
@@ -205,7 +154,6 @@ export function updateCpuDepthFromFrame(
 		}
 
 		if ( depthInfo === null ) {
-			throttledLog( 'CpuDepthFrameUnavailable', 'No depth information available this frame.' );
 			consecutiveFailures += 1;
 			checkFailureLimit();
 			return;
@@ -217,11 +165,7 @@ export function updateCpuDepthFromFrame(
 		cpuDepthDebugState.lastUpdatedAt = now;
 		cpuDepthDebugState.active = true;
 
-	} catch ( error ) {
-		throttledLog(
-			'CpuDepthReadFailed',
-			error instanceof Error ? error.message : 'Unknown depth read error.'
-		);
+	} catch {
 		consecutiveFailures += 1;
 		checkFailureLimit();
 	}
@@ -296,18 +240,6 @@ function sampleDepthData( depthInfo: XRCPUDepthInformation ): void {
 
 	heatmapCtx.putImageData( imageData, 0, 0 );
 
-	throttledLog(
-		'CpuDepthFrameAvailable',
-		`depth ${width}x${height}, valid=${validCount}, center=${centerDepth?.toFixed( 2 ) ?? '-'}`
-	);
-
-	if ( centerDepth !== undefined ) {
-		throttledLog(
-			'CpuDepthCenterSampled',
-			`centerDepth=${centerDepth.toFixed( 3 )}m`
-		);
-	}
-
 	cpuDepthDebugState.width = width;
 	cpuDepthDebugState.height = height;
 	cpuDepthDebugState.centerDepth = centerDepth;
@@ -366,15 +298,6 @@ function checkFailureLimit(): void {
 		cpuDepthDebugState.active = false;
 		consecutiveFailures = 0;
 	}
-}
-
-function throttledLog( tag: string, message: string ): void {
-	const now = performance.now();
-	if ( now - lastLogTime < LOG_THROTTLE_MS ) {
-		return;
-	}
-	lastLogTime = now;
-	console.info( `[${tag}]`, message );
 }
 
 // ---------------------------------------------------------------------------

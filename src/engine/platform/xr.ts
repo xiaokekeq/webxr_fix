@@ -8,7 +8,6 @@ import {
 	detectImmersiveArSupport,
 	type ImmersiveArSupportInfo
 } from './xr-support.js';
-import { tickRenderHeartbeat } from '@/engine/visualization/cpu-depth-visualization.js';
 
 interface CreateXRSessionRuntimeOptions {
 	sceneBundle: ARSceneBundle;
@@ -80,10 +79,6 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 			}
 
 			sceneBundle.renderer.render( sceneBundle.scene, sceneBundle.camera );
-
-			if ( sceneBundle.renderer.xr.isPresenting ) {
-				tickRenderHeartbeat();
-			}
 
 		},
 

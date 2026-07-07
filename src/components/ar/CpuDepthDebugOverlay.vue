@@ -84,21 +84,6 @@ onUnmounted( () => {
 			{{ cpuDepthDebugState.errorMessage }}
 		</div>
 	</div>
-
-	<!-- Unsupported state: shown when user toggles on but session has no depth -->
-	<div
-		v-else-if="cpuDepthDebugState.enabled && !cpuDepthDebugState.depthSensingSessionEnabled"
-		class="cpu-depth-overlay cpu-depth-unsupported"
-		data-ar-ui="true"
-		@pointerdown.stop
-		@click.stop
-	>
-		<div class="depth-title">CPU Depth</div>
-		<div class="depth-session-badge badge-fail">depth-sensing session 未创建</div>
-		<div class="depth-error">
-			当前 AR 会话未启用 CPU Depth。可能原因：设备不支持、requestSession 超时或不兼容。
-		</div>
-	</div>
 </template>
 
 <style scoped>
@@ -124,26 +109,6 @@ onUnmounted( () => {
 	font-weight: 900;
 	color: #00d4ff;
 	margin-bottom: 4px;
-}
-
-.depth-session-badge {
-	padding: 3px 7px;
-	border-radius: 6px;
-	font-size: 9px;
-	font-weight: 800;
-	margin-bottom: 6px;
-}
-
-.badge-ok {
-	background: rgba( 0, 255, 168, 0.16 );
-	border: 1px solid rgba( 0, 255, 168, 0.36 );
-	color: #00ffa8;
-}
-
-.badge-fail {
-	background: rgba( 245, 80, 50, 0.16 );
-	border: 1px solid rgba( 245, 80, 50, 0.36 );
-	color: #ffb4a0;
 }
 
 .depth-heatmap {
@@ -202,7 +167,4 @@ onUnmounted( () => {
 	line-height: 1.4;
 }
 
-.cpu-depth-unsupported {
-	border-color: rgba( 245, 158, 11, 0.42 );
-}
 </style>

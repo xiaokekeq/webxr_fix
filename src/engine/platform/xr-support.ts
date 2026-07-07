@@ -8,8 +8,7 @@ import type {
 import {
 	markDepthSensingSessionEnabled,
 	resetDepthSensingSessionState,
-	cpuDepthDebugState,
-	pushDepthSessionLog
+	cpuDepthDebugState
 } from '@/engine/visualization/cpu-depth-visualization.js';
 
 interface CreateXRHitTestControllerOptions {
@@ -118,7 +117,6 @@ export function createXRHitTestController(
 
 	async function handleSessionStart(): Promise<void> {
 
-		pushDepthSessionLog( '⑤ sessionstart 事件已触发' );
 		onSessionStart?.();
 		reticle.visible = false;
 		lastSuccessfulHitTime = 0;
@@ -147,12 +145,10 @@ export function createXRHitTestController(
 				: undefined;
 
 			if ( hasDepthApi === true ) {
-				pushDepthSessionLog( '✓ session.hasDepthSensing = true' );
 				markDepthSensingSessionEnabled();
 			} else {
 				// Fallback: probe XRFrame for getDepthInformation on first frame
 				// (handled via onDepthSensingProbe in update())
-				pushDepthSessionLog( '⑥ 等待首帧探测 getDepthInformation...' );
 				depthProbePending = true;
 			}
 		} catch {
@@ -213,16 +209,12 @@ export function createXRHitTestController(
 					frame as unknown as Record<string, unknown>
 				).getDepthInformation === 'function';
 				if ( hasGetDepth ) {
-					pushDepthSessionLog( '✓ 首帧 getDepthInformation 可用，深度图开启' );
 					markDepthSensingSessionEnabled();
 				} else {
-					pushDepthSessionLog( '✗ 首帧无 getDepthInformation (会话未激活深度)' );
 					cpuDepthDebugState.supported = false;
-					console.info( '[CpuDepthSessionUnsupported]', 'getDepthInformation not available in current AR session.' );
 				}
 			} catch {
 				cpuDepthDebugState.supported = false;
-				console.info( '[CpuDepthSessionUnsupported]', 'Depth probe failed.' );
 			}
 		}
 
@@ -414,17 +406,13 @@ export function createXRHitTestController(
 
 			sessionRequestPending = true;
 			setStatus( '正在请求 AR 会话...' );
-			pushDepthSessionLog( '① 开始请求 AR 会话' );
 
 			try {
 				const session = await requestArSession( navigator.xr );
-				pushDepthSessionLog( '③ session 已创建，绑定渲染器...' );
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( session );
-				pushDepthSessionLog( '④ setSession 完成，等待 sessionstart' );
 			} catch ( error ) {
 				sessionRequestPending = false;
-				pushDepthSessionLog( '✗ 请求失败: ' + ( error instanceof Error ? error.message : 'unknown' ) );
 				console.error( 'XR session request failed:', error );
 				setStatus(
 					error instanceof Error
@@ -484,11 +472,9 @@ async function requestArSession( xr: XRSystem ): Promise<XRSession> {
 	};
 
 	try {
-		pushDepthSessionLog( '② 请求 immersive-ar (含 depth-sensing)' );
 		return await xr.requestSession( 'immersive-ar', depthInit as XRSessionInit );
 	} catch ( err ) {
 		// depth 配置被同步拒绝（不会创建 session），可安全降级重试
-		pushDepthSessionLog( '② depth 配置被拒绝，降级重试: ' + ( err instanceof Error ? err.message : 'unknown' ) );
 		const plainInit = {
 			requiredFeatures: [ 'hit-test' ],
 			optionalFeatures: [ 'dom-overlay', 'anchors' ],

@@ -663,23 +663,6 @@ function setArOverlayClass(active: boolean): void {
 
 		<CpuDepthDebugOverlay />
 
-		<!-- Session 尝试日志：始终可见 -->
-		<div
-			v-if="cpuDepthDebugState.sessionLog.length > 0 && showMarkerCalibrationOverlay === false"
-			class="depth-session-log"
-			data-ar-ui="true"
-			@pointerdown.stop
-			@click.stop
-		>
-			<div class="log-title">Depth Session 日志</div>
-			<div v-if="cpuDepthDebugState.frameHeartbeat" class="log-heartbeat">
-				{{ cpuDepthDebugState.frameHeartbeat }}
-			</div>
-			<div v-for="(line, i) in cpuDepthDebugState.sessionLog" :key="i" class="log-line">
-				{{ line }}
-			</div>
-		</div>
-
 		<nav
 			v-if="hasArSession && showMarkerCalibrationOverlay === false"
 			class="action-dock action-dock-compact"
@@ -1155,42 +1138,4 @@ function setArOverlayClass(active: boolean): void {
 	}
 }
 
-.depth-session-log {
-	position: fixed;
-	z-index: 11;
-	left: 12px;
-	right: 12px;
-	bottom: calc( 90px + env(safe-area-inset-bottom) );
-	max-height: 35vh;
-	overflow: auto;
-	padding: 8px 10px;
-	border-radius: 12px;
-	background: rgba( 8, 15, 27, 0.88 );
-	border: 1px solid rgba( 0, 212, 255, 0.28 );
-	backdrop-filter: blur( 16px );
-	font-family: monospace;
-	pointer-events: auto;
-}
-
-.log-title {
-	font-size: 10px;
-	font-weight: 900;
-	color: #00d4ff;
-	margin-bottom: 4px;
-}
-
-.log-line {
-	font-size: 10px;
-	line-height: 1.6;
-	color: #d0e8f0;
-	word-break: break-all;
-}
-
-.log-heartbeat {
-	font-size: 11px;
-	font-weight: 700;
-	line-height: 1.6;
-	color: #6ffcae;
-	margin-bottom: 4px;
-}
 </style>
