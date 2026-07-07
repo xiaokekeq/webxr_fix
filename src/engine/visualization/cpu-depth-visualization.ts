@@ -7,6 +7,7 @@
  * - Does NOT participate in registration, placement, or X-Ray logic
  */
 import { reactive } from 'vue';
+import type { ArSessionRequestMode } from '@/features/ar/types/runtime-types.js';
 
 // ---------------------------------------------------------------------------
 // Public state interface
@@ -35,8 +36,9 @@ const SAMPLE_WIDTH = 16;
 const SAMPLE_HEIGHT = 12;
 const NEAR_METERS = 0.3;
 const FAR_METERS = 8.0;
-const UPDATE_INTERVAL_MS = 500;
+const UPDATE_INTERVAL_MS = 250;
 const CONSECUTIVE_FAILURE_LIMIT = 60;      // auto-close after N bad frames
+const LOG_THROTTLE_MS = 3_000;
 
 // ---------------------------------------------------------------------------
 // Reactive state (imported directly by Vue components)
@@ -61,6 +63,7 @@ const heatmapCanvas = document.createElement( 'canvas' );
 heatmapCanvas.width = SAMPLE_WIDTH;
 heatmapCanvas.height = SAMPLE_HEIGHT;
 const heatmapCtx = heatmapCanvas.getContext( '2d' )!;
+const heatmapImageData = heatmapCtx.createImageData( SAMPLE_WIDTH, SAMPLE_HEIGHT );
 
 export function getHeatmapCanvas(): HTMLCanvasElement {
 	return heatmapCanvas;
@@ -72,6 +75,7 @@ export function getHeatmapCanvas(): HTMLCanvasElement {
 
 let lastUpdateTime = 0;
 let consecutiveFailures = 0;
+const lastLogByTag = new Map<string, number>();
 
 // ---------------------------------------------------------------------------
 // Public helpers
@@ -93,7 +97,6 @@ export function markDepthSensingSessionEnabled(): void {
 }
 
 export function resetDepthSensingSessionState(): void {
-	cpuDepthDebugState.enabled = false;
 	cpuDepthDebugState.depthSensingSessionEnabled = false;
 	cpuDepthDebugState.supported = 'unknown';
 	cpuDepthDebugState.active = false;
@@ -106,14 +109,15 @@ export function resetDepthSensingSessionState(): void {
 
 export function updateCpuDepthFromFrame(
 	frame: XRFrame | undefined,
-	referenceSpace: XRReferenceSpace | null
+	referenceSpace: XRReferenceSpace | null,
+	currentSessionMode: ArSessionRequestMode = 'normal'
 ): void {
 
 	if ( cpuDepthDebugState.enabled === false ) {
 		return;
 	}
 
-	if ( cpuDepthDebugState.depthSensingSessionEnabled === false ) {
+	if ( currentSessionMode !== 'cpu-depth-debug' ) {
 		return;
 	}
 
@@ -129,7 +133,11 @@ export function updateCpuDepthFromFrame(
 
 	const getDepthInformation = ( frame as unknown as Record<string, unknown> ).getDepthInformation;
 	if ( typeof getDepthInformation !== 'function' ) {
+		throttledLog( 'CpuDepthApiMissing', 'frame.getDepthInformation is not available.' );
 		cpuDepthDebugState.supported = false;
+		cpuDepthDebugState.active = false;
+		cpuDepthDebugState.depthSensingSessionEnabled = false;
+		cpuDepthDebugState.enabled = false;
 		cpuDepthDebugState.errorMessage = '当前 AR 会话未提供 getDepthInformation API。';
 		return;
 	}
@@ -154,18 +162,24 @@ export function updateCpuDepthFromFrame(
 		}
 
 		if ( depthInfo === null ) {
+			throttledLog( 'CpuDepthFrameUnavailable', 'No depth information available this frame.' );
 			consecutiveFailures += 1;
 			checkFailureLimit();
 			return;
 		}
 
 		consecutiveFailures = 0;
+		if ( cpuDepthDebugState.depthSensingSessionEnabled === false ) {
+			markDepthSensingSessionEnabled();
+			throttledLog( 'CpuDepthSessionEnabled', 'CPU Depth information returned.' );
+		}
 		sampleDepthData( depthInfo );
 		lastUpdateTime = now;
 		cpuDepthDebugState.lastUpdatedAt = now;
 		cpuDepthDebugState.active = true;
 
 	} catch {
+		throttledLog( 'CpuDepthReadFailed', 'Failed to read CPU Depth information.' );
 		consecutiveFailures += 1;
 		checkFailureLimit();
 	}
@@ -185,7 +199,7 @@ function sampleDepthData( depthInfo: XRCPUDepthInformation ): void {
 	let centerDepth: number | undefined;
 	let validCount = 0;
 
-	const imageData = heatmapCtx.createImageData( SAMPLE_WIDTH, SAMPLE_HEIGHT );
+	const imageData = heatmapImageData;
 
 	for ( let y = 0; y < SAMPLE_HEIGHT; y++ ) {
 		for ( let x = 0; x < SAMPLE_WIDTH; x++ ) {
@@ -239,6 +253,13 @@ function sampleDepthData( depthInfo: XRCPUDepthInformation ): void {
 	}
 
 	heatmapCtx.putImageData( imageData, 0, 0 );
+	throttledLog(
+		'CpuDepthFrameAvailable',
+		`depth ${width}x${height}, valid=${validCount}, center=${centerDepth?.toFixed( 2 ) ?? '-'}`
+	);
+	if ( centerDepth !== undefined ) {
+		throttledLog( 'CpuDepthCenterSampled', `centerDepth=${centerDepth.toFixed( 3 )}m` );
+	}
 
 	cpuDepthDebugState.width = width;
 	cpuDepthDebugState.height = height;
@@ -294,10 +315,20 @@ function resetDepthData(): void {
 function checkFailureLimit(): void {
 	if ( consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT ) {
 		cpuDepthDebugState.enabled = false;
-		cpuDepthDebugState.errorMessage = `连续 ${consecutiveFailures} 帧未获取到深度数据，已自动关闭。`;
+		cpuDepthDebugState.errorMessage = '连续未获取到 CPU Depth，已关闭深度调试。';
 		cpuDepthDebugState.active = false;
 		consecutiveFailures = 0;
 	}
+}
+
+function throttledLog(tag: string, message: string): void {
+	const now = performance.now();
+	const last = lastLogByTag.get( tag ) ?? 0;
+	if ( now - last < LOG_THROTTLE_MS ) {
+		return;
+	}
+	lastLogByTag.set( tag, now );
+	console.info( `[${tag}]`, message );
 }
 
 // ---------------------------------------------------------------------------

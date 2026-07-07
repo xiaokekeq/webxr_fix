@@ -95,6 +95,7 @@ import type {
 	SiteCalibrationBaseline,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
+import type { ArSessionRequestMode } from '@/features/ar/types/runtime-types.js';
 import type { ArSessionContext } from '@/features/ar/types/ar-session-context.js';
 import { repositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
@@ -251,6 +252,7 @@ export class ThreeEngine {
 	private markerCorrectionFallbackArFromEnuSolution: ArFromEnuSolution | null = null;
 	private currentArSessionContext: ArSessionContext | null = null;
 	private currentArSessionId: string | null = null;
+	private currentArSessionRequestMode: ArSessionRequestMode = 'normal';
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
 	private arSessionEndPending = false;
 	private lastAnnotationLabelsSignature = '';
@@ -685,7 +687,11 @@ export class ThreeEngine {
 			},
 			onFrameUpdate: ( frame ) => {
 				this.displayModeController.updateDepthState( frame );
-				updateCpuDepthFromFrame( frame, this.sceneBundle.renderer.xr.getReferenceSpace() );
+				updateCpuDepthFromFrame(
+					frame,
+					this.sceneBundle.renderer.xr.getReferenceSpace(),
+					this.currentArSessionRequestMode
+				);
 				this.inspectionMarkerWorkflow.syncHints();
 				this.placementSession.updateArPlacementAnchor( frame );
 				this.syncArSessionPhase();
@@ -1307,7 +1313,9 @@ export class ThreeEngine {
 
 		if ( wantEnable ) {
 			if ( this.sceneBundle.renderer.xr.isPresenting === false ) {
-				cpuDepthDebugState.errorMessage = '当前未进入 AR 会话，无法开启 CPU Depth 调试。';
+				setCpuDepthEnabled( true );
+				this.enterAr( 'cpu-depth-debug' );
+				this.emit();
 				return;
 			}
 			if ( cpuDepthDebugState.depthSensingSessionEnabled === false ) {
@@ -1321,16 +1329,17 @@ export class ThreeEngine {
 
 	}
 
-	enterAr(): void {
+	enterAr(mode: ArSessionRequestMode = 'normal'): void {
 
 		if ( this.store.getState().arSupportState !== 'supported' ) {
 			this.setStatus( this.store.getState().arSupportMessage );
 			return;
 		}
 
+		this.currentArSessionRequestMode = mode;
 		void this.ensureArSessionContextReady().then( () => {
 			this.pointerSelection.suppressSelectionFor( 1200 );
-			this.xrRuntime.requestSession();
+			this.xrRuntime.requestSession( { mode } );
 		} );
 
 	}
@@ -2060,6 +2069,7 @@ export class ThreeEngine {
 	private handleXRSessionEnd(): void {
 
 		this.arSessionEndPending = false;
+		this.currentArSessionRequestMode = 'normal';
 		this.sessionLifecycleRuntime.handleXRSessionEnd();
 
 	}

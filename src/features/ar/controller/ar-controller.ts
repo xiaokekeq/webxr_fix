@@ -7,6 +7,7 @@
 import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
+import type { ArSessionRequestMode } from '@/features/ar/types/runtime-types.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 
 export interface InspectionDraft {
@@ -49,7 +50,7 @@ export interface LoadModelArController {
 		clearSavedMarkerLocalization(): void;
 		resetPlacement(): void;
 		setInspectionPlacementSource(source: InspectionPlacementSource): void;
-		enterAr(): void;
+		enterAr(mode?: ArSessionRequestMode): void;
 		placeModel(): Promise<void>;
 		exitAr(): void;
 		setRegistrationView(_view: RegistrationView): void;
@@ -256,9 +257,9 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			enterAr() {
+			enterAr(mode) {
 
-				engine.enterAr();
+				engine.enterAr( mode );
 
 			},
 

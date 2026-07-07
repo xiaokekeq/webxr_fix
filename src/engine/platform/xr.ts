@@ -1,5 +1,6 @@
 import type {
 	ARSceneBundle,
+	ArSessionRequestMode,
 	SetStatus,
 	XRHitTestController
 } from '@/features/ar/types/runtime-types.js';
@@ -23,7 +24,7 @@ interface CreateXRSessionRuntimeOptions {
 export interface XRSessionRuntime {
 	setup(): void;
 	detectSupport(): Promise<ImmersiveArSupportInfo>;
-	requestSession(): void;
+	requestSession(options?: { mode?: ArSessionRequestMode; cpuDepthDebug?: boolean }): void;
 	renderFrame(time: number, frame?: XRFrame): void;
 	getHitTestController(): XRHitTestController;
 }
@@ -64,9 +65,9 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 
 		},
 
-		requestSession() {
+		requestSession(options) {
 
-			xrHitTest.requestSession();
+			xrHitTest.requestSession( options );
 
 		},
 
