@@ -2204,6 +2204,9 @@ export class ThreeEngine {
 			createdAt: Date.now()
 		} );
 
+		this.logCoordinateAxisMappingCheck( solution.arFromEnuSolution );
+		this.logFootprintEnuToArCheck( solution.arFromEnuSolution, currentTarget ?? null );
+
 		let appliedToPlacedModel = this.placementSession.applyArLocalizationSolution( {
 			modelTemplate: this.modelTemplate,
 			registrationSolution: this.registrationSolution,
@@ -2219,8 +2222,6 @@ export class ThreeEngine {
 				currentTarget ?? null,
 				metadata.capturedCornersAr ?? []
 			);
-			this.logCoordinateAxisMappingCheck( solution.arFromEnuSolution );
-			this.logFootprintEnuToArCheck( solution.arFromEnuSolution, currentTarget ?? null );
 			this.logModelControlPointPlacementCheck( solution.arFromEnuSolution );
 		} else if ( this.workflowMode === 'ar-inspection' ) {
 			this.pointerSelection.suppressSelectionFor( 1200 );
@@ -2241,8 +2242,6 @@ export class ThreeEngine {
 					currentTarget ?? null,
 					metadata.capturedCornersAr ?? []
 				);
-				this.logCoordinateAxisMappingCheck( solution.arFromEnuSolution );
-				this.logFootprintEnuToArCheck( solution.arFromEnuSolution, currentTarget ?? null );
 				this.logModelControlPointPlacementCheck( solution.arFromEnuSolution );
 			}
 		}
