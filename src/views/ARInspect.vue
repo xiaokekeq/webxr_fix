@@ -28,6 +28,11 @@ const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<InspectPanelView>( 'localization' );
 const markerCalibrationOverlayOpen = ref( false );
+const markerApplyFeedback = ref<{
+	type: 'success' | 'warning' | 'error';
+	message: string;
+	createdAt: number;
+} | null>( null );
 const debugInfoOpen = ref( false );
 const registrationDiagnosticOpen = ref( false );
 
@@ -245,7 +250,9 @@ const placementBlockedText = computed( () => {
 	}
 	return '';
 } );
-const markerApplyBlockedText = computed( () => markerApplyBlockedReason.value );
+const markerApplyBlockedText = computed( () => (
+	markerApplyFeedback.value?.message ?? markerApplyBlockedReason.value
+) );
 
 const markerCornerPrompt = computed( () => {
 	if ( canUseMarkerCorners.value === false ) {
@@ -470,6 +477,7 @@ function closeDrawerIfOpen(): void {
 }
 
 async function handleStartMarkerCalibration(): Promise<void> {
+	markerApplyFeedback.value = null;
 	store.actions.startCurrentSessionMarkerCalibration();
 	await nextTick();
 	if ( engine.value.markerCalibration.active ) {
@@ -479,10 +487,12 @@ async function handleStartMarkerCalibration(): Promise<void> {
 }
 
 function handleCaptureMarkerCorner(): void {
+	markerApplyFeedback.value = null;
 	store.actions.captureCurrentSessionMarkerCorner();
 }
 
 async function handleResetMarkerCalibration(): Promise<void> {
+	markerApplyFeedback.value = null;
 	if ( engine.value.markerCalibration.active ) {
 		store.actions.cancelCurrentSessionMarkerCalibration();
 		await nextTick();
@@ -494,6 +504,7 @@ async function handleResetMarkerCalibration(): Promise<void> {
 }
 
 async function handleApplyMarkerCalibration(): Promise<void> {
+	markerApplyFeedback.value = null;
 	const blockedReason = markerApplyBlockedReason.value;
 	console.info( '[MarkerCalibrationApplyClicked]', {
 		modelId: engine.value.selectedModelId || null,
@@ -511,6 +522,11 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 		createdAt: Date.now()
 	} );
 	if ( canApplyMarkerCalibration.value === false && allowDebugMarkerApply === false ) {
+		markerApplyFeedback.value = {
+			type: 'warning',
+			message: blockedReason || '当前条件不足，无法完成 Marker 校正。',
+			createdAt: Date.now()
+		};
 		console.warn( '[MarkerCalibrationApplyBlockedInUi]', {
 			reason: blockedReason,
 			createdAt: Date.now()
@@ -528,6 +544,11 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	} );
 	await nextTick();
 	if ( applied === false ) {
+		markerApplyFeedback.value = {
+			type: 'error',
+			message: engine.value.runtimeStatus || markerApplyBlockedReason.value || 'Marker 校正失败，请查看控制台日志。',
+			createdAt: Date.now()
+		};
 		markerCalibrationOverlayOpen.value = true;
 		console.warn( '[MarkerCalibrationApplyFailedInUi]', {
 			runtimeStatus: engine.value.runtimeStatus,
@@ -536,6 +557,11 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 		} );
 		return;
 	}
+	markerApplyFeedback.value = {
+		type: 'success',
+		message: 'Marker 校正已应用，可进行工程放置。',
+		createdAt: Date.now()
+	};
 	markerCalibrationOverlayOpen.value = engine.value.markerCalibration.active;
 	closeDrawerIfOpen();
 }
@@ -561,6 +587,7 @@ async function handlePlaceEngineeringModel(): Promise<void> {
 }
 
 async function handleExitMarkerCalibration(): Promise<void> {
+	markerApplyFeedback.value = null;
 	if ( engine.value.markerCalibration.active ) {
 		store.actions.cancelCurrentSessionMarkerCalibration();
 	}
@@ -869,7 +896,11 @@ function setArOverlayClass(active: boolean): void {
 			</div>
 			<div class="marker-calibration-hint">{{ markerCornerPrompt }}</div>
 			<div class="marker-calibration-status">{{ engine.runtimeStatus }}</div>
-			<div v-if="markerApplyBlockedText" class="marker-calibration-warning">
+			<div
+				v-if="markerApplyFeedback || markerApplyBlockedText"
+				class="marker-calibration-warning"
+				:class="markerApplyFeedback?.type"
+			>
 				{{ markerApplyBlockedText }}
 			</div>
 			<div class="marker-calibration-actions">
@@ -1285,6 +1316,18 @@ function setArOverlayClass(active: boolean): void {
 	color: #ffe8b6;
 	font-size: 11px;
 	line-height: 1.4;
+}
+
+.marker-calibration-warning.success {
+	background: rgba(20, 184, 166, 0.16);
+	border-color: rgba(45, 212, 191, 0.34);
+	color: #ccfbf1;
+}
+
+.marker-calibration-warning.error {
+	background: rgba(239, 68, 68, 0.16);
+	border-color: rgba(248, 113, 113, 0.34);
+	color: #fecaca;
 }
 
 .marker-calibration-actions {
