@@ -1901,6 +1901,16 @@ export class ThreeEngine {
 				labels: footprintControlPoints.map( ( point ) => point.id ),
 				color: 0xffd84d
 			} );
+			const markerCornersEnu = ( controlTarget?.cornersEnu ?? [] ).map( tupleToVector3 );
+			if ( markerCornersEnu.length === 4 ) {
+				const markerCenterAr = averageVectors( markerCornersEnu )
+					.applyMatrix4( arFromEnuSolution.matrix );
+				const footprintCenterAr = averageVectors( footprintControlPoints.map( ( point ) => point.worldEnu ) )
+					.applyMatrix4( arFromEnuSolution.matrix );
+				this.addDebugPoint( 'marker-center', markerCenterAr, 0x00d4ff );
+				this.addDebugPoint( 'footprint-center', footprintCenterAr, 0xffd84d );
+				this.addDebugLine( 'marker-to-footprint-center', [ markerCenterAr, footprintCenterAr ], 0xffd84d );
+			}
 		}
 
 		const placedModel = this.placementSession.getArPlacedModel();
@@ -1970,6 +1980,32 @@ export class ThreeEngine {
 
 	}
 
+	private addDebugPoint(labelText: string, position: THREE.Vector3, color: number): void {
+
+		const sphere = new THREE.Mesh(
+			new THREE.SphereGeometry( 0.045, 12, 8 ),
+			new THREE.MeshBasicMaterial( { color, depthTest: false } )
+		);
+		sphere.name = labelText;
+		sphere.position.copy( position );
+		this.engineeringCornerDebugGroup.add( sphere );
+
+		const label = createDebugTextSprite( labelText, color );
+		label.position.copy( position ).add( new THREE.Vector3( 0, 0.1, 0 ) );
+		this.engineeringCornerDebugGroup.add( label );
+
+	}
+
+	private addDebugLine(name: string, points: THREE.Vector3[], color: number): void {
+
+		const material = new THREE.LineBasicMaterial( { color, depthTest: false } );
+		const geometry = new THREE.BufferGeometry().setFromPoints( points );
+		const line = new THREE.Line( geometry, material );
+		line.name = name;
+		this.engineeringCornerDebugGroup.add( line );
+
+	}
+
 	private clearEngineeringCornerDebug(): void {
 
 		while ( this.engineeringCornerDebugGroup.children.length > 0 ) {
@@ -2026,29 +2062,47 @@ export class ThreeEngine {
 		const vectorMarkerToFootprintCenterEnu = footprintCenterEnu.clone().sub( markerCenterEnu );
 		const vectorMarkerToFootprintCenterAr = footprintCenterAr.clone().sub( markerCenterAr );
 		const distanceMarkerToFootprintCenterEnu = vectorMarkerToFootprintCenterEnu.length();
-		const distanceMarkerToFootprintCenterAr = vectorMarkerToFootprintCenterAr.length();
+		const distanceMarkerToFootprintCenterAr = Math.hypot( vectorMarkerToFootprintCenterAr.x, vectorMarkerToFootprintCenterAr.z );
+		const headingMarkerToFootprintEnuDeg = normalizeSignedDegrees( radToDeg(
+			Math.atan2( vectorMarkerToFootprintCenterEnu.x, vectorMarkerToFootprintCenterEnu.y )
+		) );
+		const headingMarkerToFootprintArDeg = normalizeSignedDegrees( radToDeg(
+			Math.atan2( vectorMarkerToFootprintCenterAr.x, - vectorMarkerToFootprintCenterAr.z )
+		) );
+		const distanceDeltaMeters = Math.abs( distanceMarkerToFootprintCenterAr - distanceMarkerToFootprintCenterEnu );
+		const headingDeltaDeg = Math.abs( normalizeSignedDegrees( headingMarkerToFootprintArDeg - headingMarkerToFootprintEnuDeg ) );
+		const enuEdgeLengths = computeSideLengths( footprintCornersEnu );
+		const arEdgeLengths = computeSideLengths( footprintCornersAr );
+		const enuDiagonals = computeDiagonalLengths( footprintCornersEnu );
+		const arDiagonals = computeDiagonalLengths( footprintCornersAr );
+		const edgeLengthDelta = maxPairDelta( enuEdgeLengths, arEdgeLengths );
+		const diagonalDelta = maxPairDelta( enuDiagonals, arDiagonals );
 		const warnings: string[] = [];
-		if (
-			distanceMarkerToFootprintCenterEnu > 1e-6
-			&& Math.abs( distanceMarkerToFootprintCenterAr - distanceMarkerToFootprintCenterEnu )
-				/ distanceMarkerToFootprintCenterEnu > 0.25
-		) {
+		if ( distanceDeltaMeters > 0.2 ) {
 			warnings.push( 'marker-to-footprint distance changed after ENU->AR transform; check transform scale/direction' );
+		}
+		if ( headingDeltaDeg > 5 ) {
+			warnings.push( 'marker-to-footprint heading changed after ENU->AR transform; check east/north -> x/z mapping' );
 		}
 		if ( markerCornersEnu.length !== 4 ) {
 			warnings.push( 'controlTarget marker corners missing or not 4 points' );
 		}
+		const footprintControlPointIds = footprintPoints.map( ( point ) => point.id );
+		const configWithFootprintOrder = this.demoModelConfig as ( DemoModelConfig & { modelControlPointOrder?: string[] } ) | null;
+		const expectedFootprintControlPointIds = configWithFootprintOrder?.modelControlPointOrder?.slice( 0, 4 )
+			?? Object.keys( this.demoModelConfig?.controlPoints ?? {} ).slice( 0, 4 );
+		const wrongFootprintControlPointsUsed = footprintControlPointIds.join( '|' ) !== expectedFootprintControlPointIds.join( '|' );
 
 		console.info( '[FootprintEnuToArCheck]', {
 			modelId: this.demoModelConfig?.modelId ?? null,
-			footprintControlPointIds: footprintPoints.map( ( point ) => point.id ),
+			footprintControlPointIds,
 			footprintCornerOrder: [ 'leftTop', 'rightTop', 'rightBottom', 'leftBottom' ],
 			footprintCornersEnu: footprintCornersEnu.map( vector3ToRoundedObject ),
 			footprintCornersArExpected: footprintCornersAr.map( vector3ToRoundedObject ),
-			sideLengthsFootprintEnu: computeSideLengths( footprintCornersEnu ),
-			sideLengthsFootprintAr: computeSideLengths( footprintCornersAr ),
-			diagonalLengthsFootprintEnu: computeDiagonalLengths( footprintCornersEnu ),
-			diagonalLengthsFootprintAr: computeDiagonalLengths( footprintCornersAr ),
+			sideLengthsFootprintEnu: enuEdgeLengths,
+			sideLengthsFootprintAr: arEdgeLengths,
+			diagonalLengthsFootprintEnu: enuDiagonals,
+			diagonalLengthsFootprintAr: arDiagonals,
 			footprintCenterEnu: vector3ToRoundedObject( footprintCenterEnu ),
 			footprintCenterAr: vector3ToRoundedObject( footprintCenterAr ),
 			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
@@ -2057,10 +2111,91 @@ export class ThreeEngine {
 			vectorMarkerToFootprintCenterAr: vector3ToRoundedObject( vectorMarkerToFootprintCenterAr ),
 			distanceMarkerToFootprintCenterEnu: Number( distanceMarkerToFootprintCenterEnu.toFixed( 6 ) ),
 			distanceMarkerToFootprintCenterAr: Number( distanceMarkerToFootprintCenterAr.toFixed( 6 ) ),
-			headingMarkerToFootprintCenterEnu: Number( radToDeg( Math.atan2( vectorMarkerToFootprintCenterEnu.x, vectorMarkerToFootprintCenterEnu.y ) ).toFixed( 3 ) ),
-			headingMarkerToFootprintCenterAr: Number( radToDeg( Math.atan2( vectorMarkerToFootprintCenterAr.x, vectorMarkerToFootprintCenterAr.z ) ).toFixed( 3 ) ),
+			headingMarkerToFootprintCenterEnu: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
+			headingMarkerToFootprintCenterAr: Number( headingMarkerToFootprintArDeg.toFixed( 3 ) ),
 			warnings
 		} );
+		const relationPayload = {
+			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
+			footprintCenterEnu: vector3ToRoundedObject( footprintCenterEnu ),
+			vectorMarkerToFootprintEnu: vector3ToRoundedObject( vectorMarkerToFootprintCenterEnu ),
+			distanceMarkerToFootprintEnu: Number( distanceMarkerToFootprintCenterEnu.toFixed( 6 ) ),
+			headingMarkerToFootprintEnuDeg: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
+			markerCenterAr: vector3ToRoundedObject( markerCenterAr ),
+			footprintCenterAr: vector3ToRoundedObject( footprintCenterAr ),
+			vectorMarkerToFootprintArXZ: {
+				x: Number( vectorMarkerToFootprintCenterAr.x.toFixed( 6 ) ),
+				z: Number( vectorMarkerToFootprintCenterAr.z.toFixed( 6 ) )
+			},
+			distanceMarkerToFootprintAr: Number( distanceMarkerToFootprintCenterAr.toFixed( 6 ) ),
+			headingMarkerToFootprintArDeg: Number( headingMarkerToFootprintArDeg.toFixed( 3 ) ),
+			yawDeg: Number( arFromEnuSolution.headingDeg.toFixed( 6 ) ),
+			expectedArHeadingFromEnuDeg: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
+			headingDeltaDeg: Number( headingDeltaDeg.toFixed( 6 ) ),
+			distanceDeltaMeters: Number( distanceDeltaMeters.toFixed( 6 ) )
+		};
+		console.info( '[MarkerToFootprintRelationCheck]', relationPayload );
+		if ( distanceDeltaMeters > 0.2 ) {
+			console.error( '[MarkerToFootprintDistanceMismatch]', relationPayload );
+		}
+		if ( headingDeltaDeg > 5 ) {
+			console.error( '[MarkerToFootprintHeadingMismatch]', relationPayload );
+		}
+		console.info( '[FootprintShapeCheck]', {
+			footprintControlPointIds,
+			footprintCornersEnu: footprintCornersEnu.map( vector3ToRoundedObject ),
+			footprintCornersAr: footprintCornersAr.map( vector3ToRoundedObject ),
+			enuEdgeLengths,
+			arEdgeLengths,
+			enuDiagonals,
+			arDiagonals,
+			enuCenter: vector3ToRoundedObject( footprintCenterEnu ),
+			arCenter: vector3ToRoundedObject( footprintCenterAr ),
+			enuYawDeg: Number( headingFromEnuPoints( footprintCornersEnu ).toFixed( 3 ) ),
+			arYawDeg: Number( headingFromArPoints( footprintCornersAr ).toFixed( 3 ) ),
+			edgeLengthDelta: Number( edgeLengthDelta.toFixed( 6 ) ),
+			diagonalDelta: Number( diagonalDelta.toFixed( 6 ) ),
+			warning: edgeLengthDelta > 0.05 || diagonalDelta > 0.05
+				? 'footprint shape changed after ENU->AR; check scale/unit/matrix application'
+				: null
+		} );
+		console.info( '[FootprintControlPointConfigCheck]', footprintPoints.map( ( point, index ) => {
+			const rawPoint = this.demoModelConfig?.controlPoints[ point.id ];
+			const rawPointRecord = rawPoint as unknown as Record<string, unknown> | undefined;
+			return {
+				controlPointId: point.id,
+				cornerRole: rawPointRecord?.cornerRole ?? null,
+				source: rawPointRecord?.modelLocalSource ?? 'config.controlPoints',
+				worldEnu: vector3ToRoundedObject( point.worldEnu ),
+				modelLocal: vector3ToRoundedObject( point.modelLocal ),
+				note: rawPointRecord?.modelLocalSource ?? null,
+				isFootprintControlPoint: expectedFootprintControlPointIds.includes( point.id ),
+				roleOrder: index
+			};
+		} ) );
+		if ( wrongFootprintControlPointsUsed ) {
+			console.error( '[WrongFootprintControlPointsUsed]', {
+				usedControlPointIds: footprintControlPointIds,
+				expectedControlPointIds: expectedFootprintControlPointIds
+			} );
+		}
+		console.info( '[EnuFieldUsageCheck]', footprintPoints.map( ( point ) => {
+			const rawPoint = this.demoModelConfig?.controlPoints[ point.id ] as unknown as { enu?: [ number, number, number ] } | undefined;
+			const configuredEnu = Array.isArray( rawPoint?.enu ) ? tupleToVector3( rawPoint.enu ) : null;
+			const configuredDelta = configuredEnu === null ? 0 : configuredEnu.distanceTo( point.worldEnu );
+			return {
+				controlPointId: point.id,
+				rawConfigValue: rawPoint ?? null,
+				parsedWorldEnu: vector3ToRoundedObject( point.worldEnu ),
+				passedToApplyArFromEnu: vector3ToRoundedObject( point.worldEnu ),
+				isAlreadyEnu: true,
+				appliedSiteOriginAgain: false,
+				axisOrder: 'east,north,up -> Vector3.x,y,z',
+				warning: configuredDelta > 0.05
+					? `config enu differs from WGS-derived worldEnu by ${configuredDelta.toFixed( 3 )}m`
+					: null
+			};
+		} ) );
 
 	}
 
@@ -3449,6 +3584,35 @@ function averageVectors(vectors: THREE.Vector3[]): THREE.Vector3 {
 		new THREE.Vector3()
 	);
 	return total.multiplyScalar( 1 / vectors.length );
+
+}
+
+function maxPairDelta(left: number[], right: number[]): number {
+
+	return left.reduce(
+		(max, value, index) => Math.max( max, Math.abs( value - ( right[ index ] ?? value ) ) ),
+		0
+	);
+
+}
+
+function headingFromEnuPoints(points: THREE.Vector3[]): number {
+
+	if ( points.length < 2 ) {
+		return 0;
+	}
+	const edge = points[ 1 ].clone().sub( points[ 0 ] );
+	return normalizeSignedDegrees( radToDeg( Math.atan2( edge.x, edge.y ) ) );
+
+}
+
+function headingFromArPoints(points: THREE.Vector3[]): number {
+
+	if ( points.length < 2 ) {
+		return 0;
+	}
+	const edge = points[ 1 ].clone().sub( points[ 0 ] );
+	return normalizeSignedDegrees( radToDeg( Math.atan2( edge.x, - edge.z ) ) );
 
 }
 

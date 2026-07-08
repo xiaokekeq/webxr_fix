@@ -292,6 +292,54 @@ export class MarkerCalibrationRuntime {
 
 	}
 
+	private logGroundPlane2DSelfCheck(
+		markerId: string,
+		controlTarget: VisualControlTarget,
+		correspondences: Array<{ id: string; siteEnu: THREE.Vector3; arPosition: THREE.Vector3 }>,
+		solution: MarkerLocalizationSolution
+	): void {
+
+		const points = correspondences.map( ( correspondence ) => {
+			const predictedAr = correspondence.siteEnu.clone().applyMatrix4( solution.matrix );
+			const error2d = Math.hypot(
+				predictedAr.x - correspondence.arPosition.x,
+				predictedAr.z - correspondence.arPosition.z
+			);
+			return {
+				markerId,
+				cornerId: correspondence.id,
+				cornerRole: controlTarget.cornerOrder?.[ correspondences.indexOf( correspondence ) ] ?? correspondence.id,
+				markerCornerEnu: vector3ToObject( correspondence.siteEnu ),
+				capturedCornerAr: vector3ToObject( correspondence.arPosition ),
+				predictedAr: vector3ToObject( predictedAr ),
+				error2d: Number( error2d.toFixed( 6 ) )
+			};
+		} );
+		const errors = points.map( ( point ) => point.error2d );
+		const rms2d = Math.sqrt( errors.reduce( ( total, error ) => total + error * error, 0 ) / Math.max( errors.length, 1 ) );
+		const max2d = Math.max( ...errors, 0 );
+		const payload = {
+			markerId,
+			points,
+			rms2d: Number( rms2d.toFixed( 6 ) ),
+			max2d: Number( max2d.toFixed( 6 ) ),
+			yawDeg: Number( solution.headingDeg.toFixed( 6 ) ),
+			translationXZ: {
+				x: Number( solution.siteOriginArPosition.x.toFixed( 6 ) ),
+				z: Number( solution.siteOriginArPosition.z.toFixed( 6 ) )
+			},
+			groundY: Number( solution.siteOriginArPosition.y.toFixed( 6 ) ),
+			matrix: solution.matrix.toArray()
+		};
+
+		if ( max2d > 0.15 ) {
+			console.warn( '[GroundPlane2DSelfCheck]', payload );
+			return;
+		}
+		console.info( '[GroundPlane2DSelfCheck]', payload );
+
+	}
+
 	resetRuntimeState(): void {
 
 		this.resetCurrentSessionCalibrationState();
@@ -679,6 +727,7 @@ export class MarkerCalibrationRuntime {
 
 			const solution = this.solveMarkerCalibration( correspondences, currentSessionId, Date.now(), demoModelConfig );
 			this.currentSessionMarkerSolution = solution;
+			this.logGroundPlane2DSelfCheck( markerId, markerControlTarget, correspondences, solution );
 			const errorLimit = resolveMarkerCalibrationErrorLimit( demoModelConfig );
 			const selfCheck = createArFromEnuSelfCheckPayload( {
 				correspondences,

@@ -108,6 +108,32 @@ export function solveMarkerLocalizationGroundPlane2D(args: {
 		} ) ),
 		matrix: matrix.toArray()
 	} );
+	console.info( '[GroundPlane2DFormulaCheck]', {
+		sourceCentroid,
+		targetCentroid,
+		rotationMatrix2D: [
+			[ Number( c.toFixed( 6 ) ), Number( ( - s ).toFixed( 6 ) ) ],
+			[ Number( s.toFixed( 6 ) ), Number( c.toFixed( 6 ) ) ]
+		],
+		translationXZ: {
+			x: Number( translationX.toFixed( 6 ) ),
+			z: Number( translationZ.toFixed( 6 ) )
+		},
+		reconstructedTargetPoints: correspondences.map( ( item ) => {
+			const predicted = item.siteEnu.clone().applyMatrix4( matrix );
+			return {
+				id: item.id,
+				x: Number( predicted.x.toFixed( 6 ) ),
+				z: Number( predicted.z.toFixed( 6 ) )
+			};
+		} ),
+		actualTargetPoints: correspondences.map( ( item ) => ( {
+			id: item.id,
+			x: Number( item.arPosition.x.toFixed( 6 ) ),
+			z: Number( item.arPosition.z.toFixed( 6 ) )
+		} ) ),
+		reconstructionErrors: errors.map( ( error ) => Number( error.toFixed( 6 ) ) )
+	} );
 
 	return {
 		arFromEnuSolution: {
