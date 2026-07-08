@@ -29,6 +29,7 @@ const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<InspectPanelView>( 'localization' );
 const markerCalibrationOverlayOpen = ref( false );
 const debugInfoOpen = ref( false );
+const registrationDiagnosticOpen = ref( false );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
@@ -109,6 +110,39 @@ const debugCards = computed( () => [
 	{ label: 'mock note', value: configStatus.value.mockWarningText || '-', wide: true }
 ] );
 
+const activeControlTargetSummary = computed( () => {
+	const activeId = configStatus.value.activeControlTargetId;
+	if ( activeId !== undefined ) {
+		return configStatus.value.controlTargetSummaries.find( ( item ) => item.id === activeId )
+			?? configStatus.value.controlTargetSummaries[ 0 ];
+	}
+	return configStatus.value.controlTargetSummaries[ 0 ];
+} );
+
+const registrationDiagnosticCards = computed( () => [
+	{ label: 'modelId', value: engine.value.selectedModelId || '-', wide: true },
+	{ label: 'configUrl', value: currentConfigUrl.value, wide: true },
+	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? 'configured' : 'missing' },
+	{ label: 'controlTargets', value: `${configStatus.value.controlTargetCount}` },
+	{ label: 'activeTarget', value: configStatus.value.activeControlTargetId ?? '-' },
+	{ label: 'cornersEnu', value: configStatus.value.activeControlTargetHasCornersEnu ? '4/4' : 'missing' },
+	{ label: 'cornerOrder', value: activeControlTargetSummary.value?.cornerOrderText ?? '-' },
+	{ label: 'capturedCornersAr', value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
+	{ label: 'markerCalibration.status', value: formatMarkerCalibrationStatus() },
+	{ label: 'ENU->AR transform', value: formatEnuToArTransformStatus() },
+	{ label: 'transformSessionId', value: engine.value.markerCalibration.currentSessionId ?? '-' },
+	{ label: 'currentSessionId', value: engine.value.markerCalibration.currentSessionId ?? '-' },
+	{ label: 'placementAnchorEnu', value: configStatus.value.placementAnchorText || '-' },
+	{ label: 'modelLocalToEnu', value: configStatus.value.hasModelLocalToEnu ? 'configured' : 'missing' },
+	{ label: 'final AR position', value: engine.value.placementSummary.positionText },
+	{ label: 'final AR quaternion', value: engine.value.placementSummary.quaternionText, wide: true },
+	{ label: 'placementMode', value: 'engineering' },
+	{ label: 'placementSource', value: formatPlacementSource() },
+	{ label: 'usedHitTestForFinalPlacement', value: 'false' },
+	{ label: 'hasMockEngineeringData', value: configStatus.value.hasMockEngineeringData ? 'true' : 'false' },
+	{ label: 'mock/demo reason', value: formatMockReason(), wide: true }
+] );
+
 const configWarnings = computed( () => {
 	const warnings: string[] = [];
 	if ( configStatus.value.hasRtkSurveyDataset === false ) {
@@ -152,7 +186,8 @@ const canCaptureMarkerCorner = computed(
 	() => showMarkerCalibrationOverlay.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canApplyMarkerCalibration = computed(
-	() => canCaptureMarkerCorner.value
+	() => showMarkerCalibrationOverlay.value
+		&& canUseMarkerCorners.value
 		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
 		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
 );
@@ -259,6 +294,52 @@ watch( hasArSession, (active) => {
 		markerCalibrationOverlayOpen.value = false;
 	}
 } );
+
+function formatMarkerCalibrationStatus(): string {
+	if ( engine.value.markerCalibration.applied ) {
+		return 'applied';
+	}
+	if ( engine.value.markerCalibration.solved ) {
+		return 'solved';
+	}
+	if ( engine.value.markerCalibration.active ) {
+		return 'capturing';
+	}
+	return 'idle';
+}
+
+function formatEnuToArTransformStatus(): string {
+	if ( localizationReady.value === false ) {
+		return 'missing';
+	}
+	if ( engine.value.registrationChainDebug.arSessionLocalization.source !== 'marker' ) {
+		return `non-marker:${engine.value.registrationChainDebug.arSessionLocalization.source}`;
+	}
+	if ( hasArSession.value === false || engine.value.markerCalibration.currentSessionId === null ) {
+		return 'expired';
+	}
+	return 'generated';
+}
+
+function formatPlacementSource(): string {
+	if ( localizationReady.value && engine.value.registrationChainDebug.arSessionLocalization.source === 'marker' ) {
+		return 'marker-calibrated-enu';
+	}
+	return engine.value.registrationChainDebug.arSessionLocalization.source || 'missing';
+}
+
+function formatMockReason(): string {
+	if ( configStatus.value.hasMockEngineeringData === false ) {
+		return '-';
+	}
+	if ( configStatus.value.mockWarningText.length > 0 ) {
+		return configStatus.value.mockWarningText;
+	}
+	if ( configStatus.value.mockRtkPointIds.length > 0 ) {
+		return configStatus.value.mockRtkPointIds.join( ', ' );
+	}
+	return 'mock/demo engineering data';
+}
 
 function formatActiveMarkerText(): string {
 	const id = configStatus.value.activeControlTargetId ?? '-';
@@ -583,6 +664,10 @@ function setArOverlayClass(active: boolean): void {
 							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
 						</button>
 						<ArInfoGrid v-if="debugInfoOpen" :items="debugCards" />
+						<button type="button" class="debug-toggle" @click="registrationDiagnosticOpen = !registrationDiagnosticOpen">
+							{{ registrationDiagnosticOpen ? '收起配准诊断' : '配准诊断' }}
+						</button>
+						<ArInfoGrid v-if="registrationDiagnosticOpen" :items="registrationDiagnosticCards" />
 					</ArPanelSection>
 
 					<ArPlacementStatusSection :state="engine" title="AR 定位" />
@@ -947,9 +1032,10 @@ function setArOverlayClass(active: boolean): void {
 	left: 16px;
 	right: 16px;
 	bottom: calc(82px + env(safe-area-inset-bottom));
-	max-height: 62vh;
+	max-height: 58vh;
 	overflow: auto;
-	padding: 14px 14px 96px;
+	overscroll-behavior: contain;
+	padding: 14px 14px calc(112px + env(safe-area-inset-bottom));
 	border-radius: 24px;
 	background: rgba(8, 15, 27, 0.86);
 	border: 1px solid rgba(255, 255, 255, 0.12);

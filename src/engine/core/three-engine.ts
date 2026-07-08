@@ -101,6 +101,26 @@ const MAX_LOG_ITEMS = 24;
 
 const tempViewerArPosition = new THREE.Vector3();
 
+type EngineeringPlacementBlockReason =
+	| 'model-config-missing'
+	| 'site-origin-missing'
+	| 'control-targets-missing'
+	| 'corners-enu-missing'
+	| 'corners-not-captured'
+	| 'corners-captured-not-applied'
+	| 'transform-missing'
+	| 'transform-session-mismatch'
+	| 'mock-production-blocked'
+	| 'model-registration-missing';
+
+interface EngineeringPlacementGuardResult {
+	ok: boolean;
+	reason?: EngineeringPlacementBlockReason;
+	message?: string;
+	arFromEnuSolution?: ArFromEnuSolution;
+	controlTarget?: VisualControlTarget | null;
+}
+
 export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
@@ -1213,7 +1233,17 @@ export class ThreeEngine {
 			return;
 		}
 
+		const guard = this.validateEngineeringPlacementPreconditions();
+		if ( guard.ok === false ) {
+			this.logEngineeringPlacementBlocked( guard.reason ?? 'transform-missing' );
+			this.setStatus( guard.message ?? '请先完成 Marker 四角点校正后再进行工程放置。' );
+			return;
+		}
+
 		await this.placementWorkflow.placeLocalizedModel();
+		if ( this.placementSession.getPlacedModel() !== null ) {
+			this.logEngineeringPlacementApplied( guard.arFromEnuSolution ?? null, guard.controlTarget ?? null );
+		}
 
 	}
 
@@ -1607,6 +1637,197 @@ export class ThreeEngine {
 
 	}
 
+	private getActiveEngineeringControlTarget(): VisualControlTarget | null {
+
+		const controlTargets = this.getCurrentControlTargets();
+		const activeMarkerId = this.activeMarkerLocalizationResult?.markerId
+			?? this.store.getState().markerCalibration.markerId
+			?? null;
+		if ( activeMarkerId !== null ) {
+			return controlTargets.find(
+				(target) => target.id === activeMarkerId || target.markerId === activeMarkerId
+			) ?? null;
+		}
+
+		return controlTargets[ 0 ] ?? null;
+
+	}
+
+	private validateEngineeringPlacementPreconditions(): EngineeringPlacementGuardResult {
+
+		if ( this.demoModelConfig === null ) {
+			return {
+				ok: false,
+				reason: 'model-config-missing',
+				message: '模型工程配置尚未加载完成。'
+			};
+		}
+
+		const siteOrigin = this.demoModelConfig.siteFrame.origin;
+		const hasSiteOrigin = Number.isFinite( siteOrigin.lat )
+			&& Number.isFinite( siteOrigin.lon )
+			&& Number.isFinite( siteOrigin.alt );
+		if ( hasSiteOrigin === false ) {
+			return {
+				ok: false,
+				reason: 'site-origin-missing',
+				message: '缺少工程原点 siteOrigin，无法正式放置模型。'
+			};
+		}
+
+		if ( this.registrationSolution === null || this.modelTemplate === null ) {
+			return {
+				ok: false,
+				reason: 'model-registration-missing',
+				message: '模型工程配准尚未准备完成，无法正式放置模型。'
+			};
+		}
+
+		const controlTargets = this.getCurrentControlTargets();
+		if ( controlTargets.length === 0 ) {
+			return {
+				ok: false,
+				reason: 'control-targets-missing',
+				message: '缺少控制标志 controlTargets，无法正式放置模型。'
+			};
+		}
+
+		const controlTarget = this.getActiveEngineeringControlTarget();
+		if ( controlTarget === null || controlTarget.cornersEnu === undefined || controlTarget.cornersEnu.length !== 4 ) {
+			return {
+				ok: false,
+				reason: 'corners-enu-missing',
+				message: '当前控制标志缺少四角 ENU 坐标，无法正式放置模型。'
+			};
+		}
+
+		const markerState = this.store.getState().markerCalibration;
+		if ( markerState.capturedCornerCount < markerState.expectedCornerCount ) {
+			return {
+				ok: false,
+				reason: 'corners-not-captured',
+				message: '请先采集 Marker 四角点。'
+			};
+		}
+
+		if ( markerState.applied === false ) {
+			return {
+				ok: false,
+				reason: 'corners-captured-not-applied',
+				message: '已采集 4/4，请完成 Marker 校正。'
+			};
+		}
+
+		const arFromEnuSolution = this.activeMarkerArFromEnuSolution;
+		if ( arFromEnuSolution === null || arFromEnuSolution.source !== 'marker' ) {
+			return {
+				ok: false,
+				reason: 'transform-missing',
+				message: '请先完成 Marker 四角点校正。'
+			};
+		}
+
+		if ( arFromEnuSolution.sessionId !== this.currentArSessionId ) {
+			return {
+				ok: false,
+				reason: 'transform-session-mismatch',
+				message: 'AR 会话已变化，请重新进行 Marker 校正。'
+			};
+		}
+
+		const hasMockEngineeringData = hasMockEngineeringDataInConfig( this.demoModelConfig, controlTargets );
+		if ( hasMockEngineeringData && canApplyMockEngineeringCalibration() === false ) {
+			return {
+				ok: false,
+				reason: 'mock-production-blocked',
+				message: '当前为示例工程坐标，请替换为 RTK 实测数据。'
+			};
+		}
+
+		return {
+			ok: true,
+			arFromEnuSolution,
+			controlTarget
+		};
+
+	}
+
+	private logEngineeringPlacementBlocked(reason: EngineeringPlacementBlockReason): void {
+
+		console.warn( '[EngineeringPlacementBlocked]', {
+			...this.createEngineeringPlacementDiagnosticPayload(),
+			reason,
+			createdAt: Date.now()
+		} );
+
+	}
+
+	private logEngineeringPlacementApplied(
+		arFromEnuSolution: ArFromEnuSolution | null,
+		controlTarget: VisualControlTarget | null
+	): void {
+
+		const placedModel = this.placementSession.getArPlacedModel();
+		placedModel?.updateMatrixWorld( true );
+		const controlTargets = this.getCurrentControlTargets();
+		const hasMockEngineeringData = this.demoModelConfig !== null
+			&& hasMockEngineeringDataInConfig( this.demoModelConfig, controlTargets );
+		console.info( '[EngineeringPlacementApplied]', {
+			modelId: this.demoModelConfig?.modelId ?? this.store.getState().selectedModelId ?? null,
+			configUrl: this.modelSession.getCurrentModelDefinition()?.configUrl ?? null,
+			siteOrigin: this.demoModelConfig?.siteFrame.origin ?? null,
+			controlTargetId: controlTarget?.id ?? this.activeMarkerLocalizationResult?.markerId ?? null,
+			placementAnchorEnu: this.demoModelConfig?.placementAnchorEnu ?? null,
+			hasModelLocalToEnu: this.registrationSolution !== null,
+			hasEnuToArTransform: arFromEnuSolution !== null,
+			transformSessionId: arFromEnuSolution?.sessionId ?? null,
+			currentSessionId: this.currentArSessionId,
+			finalPosition: placedModel === null ? null : vector3ToRoundedObject( placedModel.getWorldPosition( new THREE.Vector3() ) ),
+			finalQuaternion: placedModel === null ? null : quaternionToRoundedObject( placedModel.getWorldQuaternion( new THREE.Quaternion() ) ),
+			finalScale: placedModel === null ? null : vector3ToRoundedObject( placedModel.getWorldScale( new THREE.Vector3() ) ),
+			placementMode: 'engineering',
+			placementSource: 'marker-calibrated-enu',
+			usedHitTestForFinalPlacement: false,
+			hasMockEngineeringData,
+			mockAllowedByDevEnv: hasMockEngineeringData && canApplyMockEngineeringCalibration(),
+			createdAt: Date.now()
+		} );
+
+	}
+
+	private createEngineeringPlacementDiagnosticPayload(): Record<string, unknown> {
+
+		const controlTargets = this.getCurrentControlTargets();
+		const controlTarget = this.getActiveEngineeringControlTarget();
+		const markerState = this.store.getState().markerCalibration;
+		const arFromEnuSolution = this.activeMarkerArFromEnuSolution;
+		const hasMockEngineeringData = this.demoModelConfig !== null
+			&& hasMockEngineeringDataInConfig( this.demoModelConfig, controlTargets );
+		return {
+			modelId: this.demoModelConfig?.modelId ?? this.store.getState().selectedModelId ?? null,
+			configUrl: this.modelSession.getCurrentModelDefinition()?.configUrl ?? null,
+			hasSiteOrigin: this.demoModelConfig !== null
+				&& Number.isFinite( this.demoModelConfig.siteFrame.origin.lat )
+				&& Number.isFinite( this.demoModelConfig.siteFrame.origin.lon )
+				&& Number.isFinite( this.demoModelConfig.siteFrame.origin.alt ),
+			controlTargetsCount: controlTargets.length,
+			controlTargetId: controlTarget?.id ?? null,
+			hasCornersEnu: controlTarget?.cornersEnu !== undefined && controlTarget.cornersEnu.length === 4,
+			capturedCornerCount: markerState.capturedCornerCount,
+			expectedCornerCount: markerState.expectedCornerCount,
+			markerCalibrationStatus: markerState.applied
+				? 'applied'
+				: markerState.solved ? 'solved' : markerState.active ? 'capturing' : 'idle',
+			hasEnuToArTransform: arFromEnuSolution !== null,
+			transformSessionId: arFromEnuSolution?.sessionId ?? null,
+			currentSessionId: this.currentArSessionId,
+			hasMockEngineeringData,
+			isDev: import.meta.env.DEV,
+			allowMockCalibration: canApplyMockEngineeringCalibration()
+		};
+
+	}
+
 	private applyCurrentSessionMarkerSolution(
 		solution: MarkerLocalizationSolution,
 		metadata: {
@@ -1750,6 +1971,7 @@ export class ThreeEngine {
 		}
 
 		if ( appliedToPlacedModel && this.workflowMode === 'ar-inspection' ) {
+			this.logEngineeringPlacementApplied( solution.arFromEnuSolution, currentTarget ?? null );
 			console.info( '[MarkerPlacementCompleted]', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
@@ -2319,6 +2541,27 @@ function vector3ToObject(vector: THREE.Vector3): { x: number; y: number; z: numb
 		x: vector.x,
 		y: vector.y,
 		z: vector.z
+	};
+
+}
+
+function vector3ToRoundedObject(vector: THREE.Vector3): { x: number; y: number; z: number } {
+
+	return {
+		x: Number( vector.x.toFixed( 6 ) ),
+		y: Number( vector.y.toFixed( 6 ) ),
+		z: Number( vector.z.toFixed( 6 ) )
+	};
+
+}
+
+function quaternionToRoundedObject(quaternion: THREE.Quaternion): { x: number; y: number; z: number; w: number } {
+
+	return {
+		x: Number( quaternion.x.toFixed( 6 ) ),
+		y: Number( quaternion.y.toFixed( 6 ) ),
+		z: Number( quaternion.z.toFixed( 6 ) ),
+		w: Number( quaternion.w.toFixed( 6 ) )
 	};
 
 }

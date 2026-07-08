@@ -381,12 +381,20 @@ export class MarkerCalibrationRuntime {
 				modelId: demoModelConfig.modelId,
 				sessionId: currentSessionId,
 				targetId: markerId,
+				controlTargetId: markerControlTarget.id,
+				cornerOrder: markerControlTarget.cornerOrder,
 				cornerCount: expectedCorners.length,
 				cornersEnu: markerControlTarget.cornersEnu,
 				corners: expectedCorners.map( ( item ) => ( {
 					id: item.id,
 					position: vector3ToObject( item.position )
 				} ) ),
+				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => ( {
+					id: item.id,
+					label: item.label,
+					position: vector3ToObject( item.arPosition )
+				} ) ),
+				solveStatus: 'ready',
 				createdAt: Date.now()
 			} );
 
@@ -422,8 +430,18 @@ export class MarkerCalibrationRuntime {
 				workflowMode: this.options.getWorkflowMode(),
 				sessionId: currentSessionId,
 				markerId,
+				controlTargetId: markerControlTarget.id,
+				cornerOrder: markerControlTarget.cornerOrder,
+				cornersEnu: markerControlTarget.cornersEnu,
+				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => ( {
+					id: item.id,
+					label: item.label,
+					position: vector3ToObject( item.arPosition )
+				} ) ),
+				solveStatus: 'solved',
 				correspondenceCount: solution.correspondenceCount,
 				rmsErrorMeters: solution.rmsErrorMeters,
+				residualMeters: solution.rmsErrorMeters,
 				maxErrorMeters: null,
 				scale: 1,
 				headingDeg: solution.headingDeg,
@@ -477,7 +495,21 @@ export class MarkerCalibrationRuntime {
 
 			return applied;
 		} catch ( error ) {
-			console.error( 'Current-session marker calibration solve failed:', error );
+			console.error( '[MarkerSessionCalibrationSolveFailed]', {
+				mode: MARKER_CALIBRATION_MODE,
+				workflowMode: this.options.getWorkflowMode(),
+				siteId: this.options.getSiteId(),
+				sessionId: this.options.getCurrentSessionId(),
+				targetId: this.options.store.getState().markerCalibration.markerId,
+				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => ( {
+					id: item.id,
+					label: item.label,
+					position: vector3ToObject( item.arPosition )
+				} ) ),
+				solveStatus: 'failed',
+				error: error instanceof Error ? error.message : String( error ),
+				createdAt: Date.now()
+			} );
 			this.options.setStatus(
 				error instanceof Error
 					? error.message
@@ -573,6 +605,10 @@ function validateMarkerCornersTarget(target: VisualControlTarget | undefined): s
 
 	if ( target.cornersEnu === undefined || target.cornersEnu.length !== MARKER_CORNER_SEQUENCE.length ) {
 		return '当前控制标志缺少四角点工程坐标，无法进行 Marker 四角点校正。';
+	}
+
+	if ( target.cornerOrder === undefined ) {
+		return '控制标志 cornerOrder 缺失，无法确认四角采集顺序。';
 	}
 
 	if ( target.cornerOrder !== undefined ) {

@@ -183,7 +183,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		trackArPlacement( source );
 		updateRegistrationStatusDetail( '状态：模型已按工程坐标显示' );
 		updatePlacementSummary();
-		console.info( '[EngineeringPlacementApplied]', {
+		console.info( '[EngineeringPlacementTransformApplied]', {
 			source,
 			usedHitTestForFinalPlacement: false,
 			position: vector3ToObject( adjustedPlacement.position ),
