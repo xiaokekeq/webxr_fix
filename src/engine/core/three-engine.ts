@@ -48,6 +48,7 @@ import {
 } from '@/localization/core/registration-store.js';
 import {
 	solveSimilarityTransform,
+	type EngineeringControlPoint,
 	type EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
 import {
@@ -2522,28 +2523,36 @@ export class ThreeEngine {
 		const controlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
 		const modelLocalPoints = controlPoints.map( ( point ) => point.modelLocal.clone() );
 		const worldEnuPoints = controlPoints.map( ( point ) => point.worldEnu.clone() );
+		const modelLocalEdgeLengths = computeSideLengths( modelLocalPoints );
+		const worldEnuFootprintEdgeLengths = computeSideLengths( worldEnuPoints );
+		const bestLengthMatch = findBestControlPointLengthMatch( controlPoints );
 		const modelLocalSignedArea = signedArea2D( modelLocalPoints, 'xz' );
 		const worldEnuSignedArea = signedArea2D( worldEnuPoints, 'xy' );
 		const warning: string[] = [];
 		if ( Math.sign( modelLocalSignedArea ) !== Math.sign( worldEnuSignedArea ) ) {
 			warning.push( 'modelLocal order direction differs from worldEnu order; possible mirrored control point order' );
 		}
-		if ( maxPairDelta( computeSideLengths( modelLocalPoints ), computeSideLengths( worldEnuPoints ) ) > 0.5 ) {
-			warning.push( 'modelLocal edge lengths differ from worldEnu footprint edge lengths; control point geometry may not match' );
+		if ( maxPairDelta( modelLocalEdgeLengths, worldEnuFootprintEdgeLengths ) > 0.5 ) {
+			warning.push(
+				bestLengthMatch.bestMaxEdgeDelta <= 0.2
+					? 'modelLocal/worldEnu correspondence may be swapped; another point order matches lengths better'
+					: 'modelLocal edge lengths differ from worldEnu footprint edge lengths; modelLocal geometry is likely wrong'
+			);
 		}
 		const payload = {
 			controlPointIds: controlPoints.map( ( point ) => point.id ),
 			cornerRoles: controlPoints.map( ( point ) => this.resolveControlPointCornerRole( point.id ) ),
 			modelLocal: modelLocalPoints.map( vector3ToRoundedObject ),
 			worldEnu: worldEnuPoints.map( vector3ToRoundedObject ),
-			modelLocalEdgeLengths: computeSideLengths( modelLocalPoints ),
-			worldEnuFootprintEdgeLengths: computeSideLengths( worldEnuPoints ),
+			modelLocalEdgeLengths,
+			worldEnuFootprintEdgeLengths,
 			modelLocalDiagonals: computeDiagonalLengths( modelLocalPoints ),
 			worldEnuDiagonals: computeDiagonalLengths( worldEnuPoints ),
 			modelLocalYaw: Number( headingFromModelLocalPoints( modelLocalPoints ).toFixed( 3 ) ),
 			worldEnuYaw: Number( headingFromEnuPoints( worldEnuPoints ).toFixed( 3 ) ),
 			modelLocalOrderSign: Math.sign( modelLocalSignedArea ),
 			worldEnuOrderSign: Math.sign( worldEnuSignedArea ),
+			bestLengthMatch,
 			warning
 		};
 
@@ -2552,12 +2561,17 @@ export class ThreeEngine {
 			footprintDiagnostics: {
 				...this.store.getState().footprintDiagnostics,
 				modelControlPointOrderText: warning.length > 0
-					? `异常：modelLocal 边长 ${payload.modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${payload.worldEnuFootprintEdgeLengths.join( '/' )}m；${warning.join( '；' )}`
-					: `顺序自洽；modelLocal 边长 ${payload.modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${payload.worldEnuFootprintEdgeLengths.join( '/' )}m；modelYaw ${payload.modelLocalYaw.toFixed( 1 )}° / enuYaw ${payload.worldEnuYaw.toFixed( 1 )}°`
+					? `异常：modelLocal 边长 ${modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${worldEnuFootprintEdgeLengths.join( '/' )}m；最佳换序 ${bestLengthMatch.suggestedWorldPointIds.join( '->' )}，MaxΔ ${bestLengthMatch.bestMaxEdgeDelta.toFixed( 3 )}m；${warning.join( '；' )}`
+					: `顺序自洽；modelLocal 边长 ${modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${worldEnuFootprintEdgeLengths.join( '/' )}m；modelYaw ${payload.modelLocalYaw.toFixed( 1 )}° / enuYaw ${payload.worldEnuYaw.toFixed( 1 )}°`
 			}
 		} );
 		if ( warning.length > 0 ) {
 			console.error( '[ModelControlPointOrderMismatch]', payload );
+			if ( bestLengthMatch.bestMaxEdgeDelta <= 0.2 ) {
+				console.error( '[ModelControlPointCorrespondenceLikelyWrong]', payload );
+			} else {
+				console.error( '[ModelControlPointGeometryMismatch]', payload );
+			}
 		}
 
 	}
@@ -3839,6 +3853,72 @@ function maxPairDelta(left: number[], right: number[]): number {
 		(max, value, index) => Math.max( max, Math.abs( value - ( right[ index ] ?? value ) ) ),
 		0
 	);
+
+}
+
+function findBestControlPointLengthMatch(controlPoints: EngineeringControlPoint[]): {
+	currentMaxEdgeDelta: number;
+	bestMaxEdgeDelta: number;
+	bestRmsEdgeDelta: number;
+	suggestedWorldPointIds: string[];
+	suggestedWorldEdgeLengths: number[];
+	correspondenceLikelyWrong: boolean;
+	geometryLikelyWrong: boolean;
+} {
+
+	const modelLocalEdgeLengths = computeSideLengths( controlPoints.map( ( point ) => point.modelLocal ) );
+	const currentWorldEdgeLengths = computeSideLengths( controlPoints.map( ( point ) => point.worldEnu ) );
+	let bestMaxEdgeDelta = maxPairDelta( modelLocalEdgeLengths, currentWorldEdgeLengths );
+	let bestRmsEdgeDelta = rmsPairDelta( modelLocalEdgeLengths, currentWorldEdgeLengths );
+	let suggestedWorldPointIds = controlPoints.map( ( point ) => point.id );
+	let suggestedWorldEdgeLengths = currentWorldEdgeLengths;
+
+	for ( const order of permutations( [ 0, 1, 2, 3 ] ) ) {
+		const orderedWorldPoints = order.map( ( index ) => controlPoints[ index ].worldEnu );
+		const edgeLengths = computeSideLengths( orderedWorldPoints );
+		const maxDelta = maxPairDelta( modelLocalEdgeLengths, edgeLengths );
+		if ( maxDelta < bestMaxEdgeDelta ) {
+			bestMaxEdgeDelta = maxDelta;
+			bestRmsEdgeDelta = rmsPairDelta( modelLocalEdgeLengths, edgeLengths );
+			suggestedWorldPointIds = order.map( ( index ) => controlPoints[ index ].id );
+			suggestedWorldEdgeLengths = edgeLengths;
+		}
+	}
+
+	return {
+		currentMaxEdgeDelta: Number( maxPairDelta( modelLocalEdgeLengths, currentWorldEdgeLengths ).toFixed( 6 ) ),
+		bestMaxEdgeDelta: Number( bestMaxEdgeDelta.toFixed( 6 ) ),
+		bestRmsEdgeDelta: Number( bestRmsEdgeDelta.toFixed( 6 ) ),
+		suggestedWorldPointIds,
+		suggestedWorldEdgeLengths: suggestedWorldEdgeLengths.map( ( value ) => Number( value.toFixed( 4 ) ) ),
+		correspondenceLikelyWrong: bestMaxEdgeDelta <= 0.2,
+		geometryLikelyWrong: bestMaxEdgeDelta > 0.5
+	};
+
+}
+
+function permutations(values: number[]): number[][] {
+
+	if ( values.length <= 1 ) {
+		return [ values ];
+	}
+	return values.flatMap( ( value, index ) => permutations( [
+		...values.slice( 0, index ),
+		...values.slice( index + 1 )
+	] ).map( ( tail ) => [ value, ...tail ] ) );
+
+}
+
+function rmsPairDelta(left: number[], right: number[]): number {
+
+	if ( left.length === 0 ) {
+		return 0;
+	}
+	const total = left.reduce(
+		(sum, value, index) => sum + Math.pow( value - ( right[ index ] ?? value ), 2 ),
+		0
+	);
+	return Math.sqrt( total / left.length );
 
 }
 
