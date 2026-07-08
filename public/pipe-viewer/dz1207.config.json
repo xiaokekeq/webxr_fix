@@ -37,6 +37,7 @@
   },
   "markerCalibration": {
     "maxSelfCheckErrorMeters": 0.4,
+    "solveMode": "ground-plane-2d",
     "note": "Temporary loose threshold for outdoor manual cone-base corner capture; tighten for production."
   },
   "modelControlPointOrder": [

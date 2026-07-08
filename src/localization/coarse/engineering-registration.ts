@@ -13,6 +13,7 @@ import {
 } from '@/localization/core/geodesy.js';
 import { createModelToEnuCorrespondencePayload } from '@/localization/core/corner-order-diagnostics.js';
 
+// This module owns only modelLocal -> ENU registration. Marker calibration owns ENU -> AR.
 export interface EngineeringControlPoint {
 	id: string;
 	modelLocal: THREE.Vector3;

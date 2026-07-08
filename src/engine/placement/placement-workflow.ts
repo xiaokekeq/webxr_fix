@@ -52,7 +52,32 @@ export class PlacementWorkflow {
 		}
 
 		this.options.onBeforePlacementRequest();
-		this.requestAutoPlacement();
+		const localizationOverride = this.options.getPreferredLocalizationOverride();
+		const hadPlacedModel = this.options.placementSession.getPlacedModel() !== null;
+		console.info( '[EngineeringPlacementTriggered]', this.createPlacementLogPayload( {
+			source: localizationOverride?.source ?? 'missing',
+			localizationReady: localizationOverride !== null
+		} ) );
+		const placed = this.options.placementSession.placeEngineeringModelFromCurrentArFromEnu( {
+			modelTemplate: this.options.getModelTemplate(),
+			registrationSolution: this.options.getRegistrationSolution(),
+			arFromEnuSolution: localizationOverride,
+			currentSessionId: this.options.getCurrentSessionId()
+		} );
+		if ( placed ) {
+			this.options.applyModelLayerVisibility();
+			this.options.syncRegistrationChainDebug();
+			if ( hadPlacedModel === false ) {
+				console.info( '[EngineeringModelPlaced]', this.createPlacementLogPayload( {
+					source: localizationOverride?.source ?? 'missing',
+					localizationReady: localizationOverride !== null
+				} ) );
+				this.options.onPlacementCompleted();
+			}
+			this.options.syncArSessionPhase();
+			this.options.emit();
+			return;
+		}
 		this.options.syncArSessionPhase();
 
 		if ( this.options.placementSession.getPlacedModel() === null ) {

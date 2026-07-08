@@ -100,6 +100,7 @@ export interface DemoModelConfig {
 	sensors?: unknown[];
 	riskPoints?: unknown[];
 	markerCalibration?: {
+		solveMode?: 'ground-plane-2d' | 'rigid-3d-debug';
 		maxSelfCheckErrorMeters?: number;
 		note?: string;
 	};

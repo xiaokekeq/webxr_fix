@@ -1882,12 +1882,23 @@ export class ThreeEngine {
 		}
 
 		if ( this.engineeringDebugLayers.showFootprintExpected && this.registrationSolution !== null ) {
+			const footprintControlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
+			const footprintCornersAr = footprintControlPoints
+				.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+			console.info( '[FootprintRenderDependencyCheck]', {
+				source: arFromEnuSolution.source,
+				sessionId: arFromEnuSolution.sessionId ?? null,
+				matrixChain: 'controlPoint.worldEnu -> arFromEnu',
+				usesHitTest: false,
+				usesCameraPose: false,
+				usesPlacedModelMatrix: false,
+				footprintControlPointIds: footprintControlPoints.map( ( point ) => point.id ),
+				footprintCornersAr: footprintCornersAr.map( vector3ToRoundedObject )
+			} );
 			this.addDebugQuad( {
 				name: 'footprint-enu',
-				points: this.registrationSolution.controlPoints
-					.slice( 0, 4 )
-					.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) ),
-				labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => point.id ),
+				points: footprintCornersAr,
+				labels: footprintControlPoints.map( ( point ) => point.id ),
 				color: 0xffd84d
 			} );
 		}

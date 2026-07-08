@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
-import { clearPlacedModel } from '@/engine/core/model.js';
+import { clearPlacedModel, placeModelWithMatrix } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
 import { createDefaultTargetGuidanceState } from '@/localization/core/registration-store.js';
 import { createPlacementSummaryState } from '@/engine/session/view-state.js';
 import {
+	composeModelRawLocalToArMatrix,
 	createPlacementBaseFromArLocalizationSolution,
 	placeAdjustedModel
 } from './runtime.js';
@@ -55,6 +56,12 @@ export interface PlacementSession {
 		modelTemplate: THREE.Group | null;
 		registrationSolution: EngineeringRegistrationSolution | null;
 		arFromEnuSolution: ArFromEnuSolution;
+		currentSessionId?: string | null;
+	}): boolean;
+	placeEngineeringModelFromCurrentArFromEnu(args: {
+		modelTemplate: THREE.Group | null;
+		registrationSolution: EngineeringRegistrationSolution | null;
+		arFromEnuSolution: ArFromEnuSolution | null;
 		currentSessionId?: string | null;
 	}): boolean;
 	updateArPlacementAnchor(frame: XRFrame): void;
@@ -324,13 +331,51 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		applyArLocalizationSolution(args) {
 
 			const {
+				arFromEnuSolution,
+				currentSessionId
+			} = args;
+
+			if (
+				requiresCurrentSession( arFromEnuSolution.source )
+				&& currentSessionId !== undefined
+				&& arFromEnuSolution.sessionId !== currentSessionId
+			) {
+				console.warn( '[CrossSessionSolutionRejected]', {
+					source: arFromEnuSolution.source,
+					solutionSessionId: arFromEnuSolution.sessionId ?? null,
+					currentSessionId: currentSessionId ?? null
+				} );
+				return false;
+			}
+
+			console.warn( '[ApplyArLocalizationSolutionPlacementSkipped]', {
+				source: arFromEnuSolution.source,
+				sessionId: arFromEnuSolution.sessionId ?? null,
+				currentSessionId: currentSessionId ?? null,
+				reason: 'applyArLocalizationSolution only validates/caches localization; formal placement must use placeEngineeringModelFromCurrentArFromEnu',
+				createdAt: Date.now()
+			} );
+			return false;
+
+		},
+
+		placeEngineeringModelFromCurrentArFromEnu(args) {
+
+			const {
 				modelTemplate,
 				registrationSolution,
 				arFromEnuSolution,
 				currentSessionId
 			} = args;
 
-			if ( modelTemplate === null || registrationSolution === null ) {
+			if ( modelTemplate === null || registrationSolution === null || arFromEnuSolution === null ) {
+				console.info( '[FormalLocalizationRequired]', {
+					reason: 'formal matrix placement requires model template, modelLocal-to-ENU registration, and marker ENU-to-AR transform',
+					hasModelTemplate: modelTemplate !== null,
+					hasRegistrationSolution: registrationSolution !== null,
+					hasArFromEnuSolution: arFromEnuSolution !== null,
+					createdAt: Date.now()
+				} );
 				return false;
 			}
 
@@ -347,16 +392,35 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return false;
 			}
 
-			arPlacementBase = createPlacementBaseFromArLocalizationSolution( {
+			const modelRawLocalToArMatrix = composeModelRawLocalToArMatrix( {
 				arFromEnuSolution,
-				modelTemplate,
-				registrationSolution,
-				modelOrientationTarget: new THREE.Quaternion()
+				registrationSolution
 			} );
-			placeFromPlacementBase(
+			resetArPlacementAnchorTransform();
+			arPlacementBase = null;
+			arPlacedModel = placeModelWithMatrix(
 				modelTemplate,
-				resolvePlacementSourceFromArLocalization( arFromEnuSolution.source )
+				arPlacedModel,
+				sceneBundle.arModelAnchor,
+				modelRawLocalToArMatrix
 			);
+			applyCurrentUndergroundPreviewOffset();
+			trackArPlacement( resolvePlacementSourceFromArLocalization( arFromEnuSolution.source ) );
+			updateRegistrationStatusDetail( '状态：模型已按工程矩阵显示' );
+			updatePlacementSummary();
+			console.info( '[EngineeringModelPlacedFromMatrix]', {
+				source: arFromEnuSolution.source,
+				modelId: registrationSolution.modelId,
+				matrixChain: 'modelLocal -> modelToSite -> arFromEnu',
+				usedHitTestForFinalPlacement: false,
+				usedPlacementBase: false,
+				modelToSiteMatrix: registrationSolution.modelToSite.matrix.toArray(),
+				arFromEnuMatrix: arFromEnuSolution.matrix.toArray(),
+				modelRawLocalToArMatrix: modelRawLocalToArMatrix.toArray(),
+				createdAt: Date.now()
+			} );
+			setStatus( '模型已按工程矩阵显示，未使用 hit-test 决定最终位置。' );
+			autoPlacementPending = false;
 			return true;
 
 		},

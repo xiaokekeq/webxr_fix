@@ -29,6 +29,108 @@ export interface MarkerLocalizationSolution {
 	source: 'marker';
 }
 
+export function solveMarkerLocalizationGroundPlane2D(args: {
+	correspondences: MarkerLocalizationCorrespondence[];
+	sessionId?: string | null;
+	timestamp?: number;
+}): MarkerLocalizationSolution {
+
+	const correspondences = args.correspondences.filter( isValidCorrespondence );
+	if ( correspondences.length < 2 ) {
+		throw new Error( 'Ground-plane marker localization requires at least two valid correspondences.' );
+	}
+
+	const sourceCentroid = average2D( correspondences.map( ( item ) => ( { x: item.siteEnu.x, y: item.siteEnu.y } ) ) );
+	const targetCentroid = average2D( correspondences.map( ( item ) => ( { x: item.arPosition.x, y: - item.arPosition.z } ) ) );
+	let dot = 0;
+	let cross = 0;
+	let markerAverageEnuUp = 0;
+	let groundY = 0;
+
+	for ( const item of correspondences ) {
+		const sx = item.siteEnu.x - sourceCentroid.x;
+		const sy = item.siteEnu.y - sourceCentroid.y;
+		const tx = item.arPosition.x - targetCentroid.x;
+		const ty = - item.arPosition.z - targetCentroid.y;
+		dot += sx * tx + sy * ty;
+		cross += sx * ty - sy * tx;
+		markerAverageEnuUp += item.siteEnu.z;
+		groundY += item.arPosition.y;
+	}
+
+	markerAverageEnuUp /= correspondences.length;
+	groundY /= correspondences.length;
+	const yaw = Math.atan2( cross, dot );
+	const c = Math.cos( yaw );
+	const s = Math.sin( yaw );
+	const translationX = targetCentroid.x - ( c * sourceCentroid.x - s * sourceCentroid.y );
+	const translationNorthPrime = targetCentroid.y - ( s * sourceCentroid.x + c * sourceCentroid.y );
+	const translationZ = - translationNorthPrime;
+	const translationY = groundY - markerAverageEnuUp;
+	const matrix = new THREE.Matrix4().set(
+		c, - s, 0, translationX,
+		0, 0, 1, translationY,
+		- s, - c, 0, translationZ,
+		0, 0, 0, 1
+	);
+	const orientationMatrix = matrix.clone().setPosition( 0, 0, 0 );
+	const orientation = new THREE.Quaternion().setFromRotationMatrix( orientationMatrix );
+	const headingDeg = normalizeDegrees( THREE.MathUtils.radToDeg( yaw ) );
+	const errors = correspondences.map( ( item ) => {
+		const predicted = item.siteEnu.clone().applyMatrix4( matrix );
+		return Math.hypot( predicted.x - item.arPosition.x, predicted.z - item.arPosition.z );
+	} );
+	const rms2dError = Math.sqrt( errors.reduce( ( total, error ) => total + error * error, 0 ) / errors.length );
+	const max2dError = Math.max( ...errors, 0 );
+	const siteOriginArPosition = new THREE.Vector3( translationX, translationY, translationZ );
+	const timestamp = args.timestamp ?? Date.now();
+
+	console.info( '[GroundPlane2DCalibrationSolved]', {
+		solveMode: 'ground-plane-2d',
+		yawDeg: Number( headingDeg.toFixed( 6 ) ),
+		translationXZ: {
+			x: Number( translationX.toFixed( 6 ) ),
+			z: Number( translationZ.toFixed( 6 ) )
+		},
+		groundY: Number( groundY.toFixed( 6 ) ),
+		markerAverageEnuUp: Number( markerAverageEnuUp.toFixed( 6 ) ),
+		rms2dError: Number( rms2dError.toFixed( 6 ) ),
+		max2dError: Number( max2dError.toFixed( 6 ) ),
+		inputEnu2d: correspondences.map( ( item ) => ( {
+			id: item.id,
+			x: Number( item.siteEnu.x.toFixed( 6 ) ),
+			y: Number( item.siteEnu.y.toFixed( 6 ) )
+		} ) ),
+		inputAr2d: correspondences.map( ( item ) => ( {
+			id: item.id,
+			x: Number( item.arPosition.x.toFixed( 6 ) ),
+			z: Number( item.arPosition.z.toFixed( 6 ) )
+		} ) ),
+		matrix: matrix.toArray()
+	} );
+
+	return {
+		arFromEnuSolution: {
+			matrix: matrix.clone(),
+			siteOriginArPosition: siteOriginArPosition.clone(),
+			orientation,
+			headingDeg,
+			source: 'marker',
+			sessionId: args.sessionId ?? null,
+			accuracyMeters: rms2dError,
+			timestamp
+		},
+		matrix: matrix.clone(),
+		siteOriginArPosition,
+		orientation,
+		headingDeg,
+		rmsErrorMeters: rms2dError,
+		correspondenceCount: correspondences.length,
+		source: 'marker'
+	};
+
+}
+
 export interface MarkerPoseInEnu {
 	markerId: string;
 	matrix: THREE.Matrix4;
@@ -510,6 +612,22 @@ function isValidCorrespondence(value: MarkerLocalizationCorrespondence): boolean
 	return value.id.trim().length > 0
 		&& isFiniteVector3( value.siteEnu )
 		&& isFiniteVector3( value.arPosition );
+
+}
+
+function average2D(points: Array<{ x: number; y: number }>): { x: number; y: number } {
+
+	const total = points.reduce(
+		(sum, point) => ( {
+			x: sum.x + point.x,
+			y: sum.y + point.y
+		} ),
+		{ x: 0, y: 0 }
+	);
+	return {
+		x: total.x / points.length,
+		y: total.y / points.length
+	};
 
 }
 

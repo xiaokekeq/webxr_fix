@@ -9,6 +9,7 @@ import {
 import {
 	resolveMarkerCornersInEnuFromControlTarget,
 	solveMarkerLocalization,
+	solveMarkerLocalizationGroundPlane2D,
 	type MarkerLocalizationSolution,
 	type MarkerPoseInEnu
 } from '@/localization/marker/marker-localization.js';
@@ -17,6 +18,7 @@ import {
 	createMarkerCalibrationCorrespondencePayload
 } from '@/localization/core/corner-order-diagnostics.js';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
+import { createEnuFrame, geodeticToEnu } from '@/localization/core/geodesy.js';
 import type {
 	ArWorkflowMode,
 	VisualControlTarget
@@ -81,6 +83,15 @@ interface MarkerCalibrationErrorLimit {
 	source: MarkerCalibrationErrorLimitSource;
 }
 
+interface MarkerCalibrationAttempt {
+	id: number;
+	capturedCornerIds: MarkerCornerSequenceId[];
+	capturedCornersAr: THREE.Vector3[];
+	solution: MarkerLocalizationSolution;
+	footprintCornersAr: THREE.Vector3[];
+	timestamp: number;
+}
+
 export function resolveMarkerCalibrationErrorLimitMeters(config?: DemoModelConfig): number {
 
 	return resolveMarkerCalibrationErrorLimit( config ).meters;
@@ -95,8 +106,59 @@ export class MarkerCalibrationRuntime {
 		arPosition: THREE.Vector3;
 	}> = [];
 	private currentSessionMarkerSolution: MarkerLocalizationSolution | null = null;
+	private markerCalibrationAttempts: MarkerCalibrationAttempt[] = [];
+	private nextMarkerCalibrationAttemptId = 1;
 
-	constructor(private readonly options: MarkerCalibrationRuntimeOptions) {}
+	constructor(private readonly options: MarkerCalibrationRuntimeOptions) {
+
+		if ( import.meta.env.DEV ) {
+			(
+				globalThis as typeof globalThis & {
+					replayLastMarkerCalibrationAttempt?: () => MarkerLocalizationSolution | null;
+				}
+			).replayLastMarkerCalibrationAttempt = () => this.replayLastMarkerCalibrationAttempt();
+		}
+
+	}
+
+	replayLastMarkerCalibrationAttempt(): MarkerLocalizationSolution | null {
+
+		const lastAttempt = this.markerCalibrationAttempts[ this.markerCalibrationAttempts.length - 1 ];
+		const markerId = this.options.store.getState().markerCalibration.markerId;
+		const target = this.getActiveMarkerControlTarget( markerId );
+		if ( lastAttempt === undefined || target === undefined ) {
+			console.warn( '[MarkerCalibrationReplayUnavailable]', {
+				hasAttempt: lastAttempt !== undefined,
+				hasTarget: target !== undefined
+			} );
+			return null;
+		}
+
+		const expectedCorners = resolveMarkerCornersInEnuFromControlTarget( target );
+		const cornerSequence = resolveMarkerCornerSequenceForTarget( target );
+		const correspondences = cornerSequence.map( ( cornerMeta ) => {
+			const expected = expectedCorners.find( ( item ) => item.id === cornerMeta.id );
+			const capturedIndex = lastAttempt.capturedCornerIds.findIndex( ( id: MarkerCornerSequenceId ) => id === cornerMeta.id );
+			const arPosition = lastAttempt.capturedCornersAr[ capturedIndex === -1 ? cornerSequence.indexOf( cornerMeta ) : capturedIndex ];
+			if ( expected === undefined || arPosition === undefined ) {
+				throw new Error( `Cannot replay marker corner ${cornerMeta.id}.` );
+			}
+			return {
+				id: cornerMeta.id,
+				siteEnu: expected.position.clone(),
+				arPosition: arPosition.clone()
+			};
+		} );
+		const solution = this.solveMarkerCalibration( correspondences, this.options.getCurrentSessionId(), Date.now(), this.options.getDemoModelConfig() );
+		console.info( '[MarkerCalibrationReplayResult]', {
+			replayedAttemptId: lastAttempt.id,
+			sameMatrix: matricesAlmostEqual( solution.matrix, lastAttempt.solution.matrix ),
+			originalMatrix: lastAttempt.solution.matrix.toArray(),
+			replayedMatrix: solution.matrix.toArray()
+		} );
+		return solution;
+
+	}
 
 	private getActiveMarkerControlTarget(markerId?: string | null): VisualControlTarget | undefined {
 
@@ -115,6 +177,118 @@ export class MarkerCalibrationRuntime {
 	private getMarkerCornerSequence(markerId?: string | null): MarkerCornerSequenceItem[] {
 
 		return resolveMarkerCornerSequenceForTarget( this.getActiveMarkerControlTarget( markerId ) );
+
+	}
+
+	private solveMarkerCalibration(
+		correspondences: Array<{ id: string; siteEnu: THREE.Vector3; arPosition: THREE.Vector3 }>,
+		sessionId: string | null,
+		timestamp: number,
+		config: DemoModelConfig | null
+	): MarkerLocalizationSolution {
+
+		const solveMode = config?.markerCalibration?.solveMode ?? 'rigid-3d-debug';
+		if ( solveMode === 'ground-plane-2d' ) {
+			const solution = solveMarkerLocalizationGroundPlane2D( {
+				correspondences,
+				sessionId,
+				timestamp
+			} );
+			const rigidDebug = solveMarkerLocalization( {
+				correspondences,
+				sessionId,
+				timestamp
+			} );
+			this.logRigid3DDebugComparison( solution, rigidDebug, config );
+			return solution;
+		}
+
+		return solveMarkerLocalization( {
+			correspondences,
+			sessionId,
+			timestamp
+		} );
+
+	}
+
+	private logRigid3DDebugComparison(
+		groundPlaneSolution: MarkerLocalizationSolution,
+		rigidSolution: MarkerLocalizationSolution,
+		config: DemoModelConfig | null
+	): void {
+
+		const footprintEnu = getFootprintControlPointsEnu( config );
+		const groundFootprint = footprintEnu.map( ( point ) => point.clone().applyMatrix4( groundPlaneSolution.matrix ) );
+		const rigidFootprint = footprintEnu.map( ( point ) => point.clone().applyMatrix4( rigidSolution.matrix ) );
+		const groundCenter = averageVector3( groundFootprint );
+		const rigidCenter = averageVector3( rigidFootprint );
+		console.info( '[MarkerRigid3DDebugComparison]', {
+			rigid3dRms: rigidSolution.rmsErrorMeters,
+			rigid3dHeadingDeg: rigidSolution.headingDeg,
+			groundPlane2dRms: groundPlaneSolution.rmsErrorMeters,
+			groundPlane2dHeadingDeg: groundPlaneSolution.headingDeg,
+			rigid3dFootprintCornersAr: rigidFootprint.map( vector3ToObject ),
+			groundPlane2dFootprintCornersAr: groundFootprint.map( vector3ToObject ),
+			footprintCenterDelta: rigidCenter.distanceTo( groundCenter ),
+			footprintYawDelta: Math.abs( normalizeSignedDegrees( rigidSolution.headingDeg - groundPlaneSolution.headingDeg ) ),
+			recommendation: 'dz1207 uses ground-plane-2d; rigid-3d is debug comparison only'
+		} );
+
+	}
+
+	private recordMarkerCalibrationAttempt(
+		solution: MarkerLocalizationSolution,
+		config: DemoModelConfig | null
+	): void {
+
+		const footprintCornersAr = getFootprintControlPointsEnu( config )
+			.map( ( point ) => point.clone().applyMatrix4( solution.matrix ) );
+		const previousAttempt = this.markerCalibrationAttempts[ this.markerCalibrationAttempts.length - 1 ];
+		const attempt: MarkerCalibrationAttempt = {
+			id: this.nextMarkerCalibrationAttemptId ++,
+			capturedCornerIds: this.currentSessionMarkerCornerCaptures.map( ( capture ) => capture.id ),
+			capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( capture ) => capture.arPosition.clone() ),
+			solution,
+			footprintCornersAr,
+			timestamp: Date.now()
+		};
+
+		this.markerCalibrationAttempts.push( attempt );
+		this.markerCalibrationAttempts = this.markerCalibrationAttempts.slice( -5 );
+
+		const capturedDeltas = previousAttempt === undefined
+			? []
+			: attempt.capturedCornersAr.map( ( corner, index ) => {
+				const previous = previousAttempt.capturedCornersAr[ index ];
+				return previous === undefined ? 0 : corner.distanceTo( previous );
+			} );
+		const footprintCenterDelta = previousAttempt === undefined
+			? 0
+			: averageVector3( attempt.footprintCornersAr ).distanceTo( averageVector3( previousAttempt.footprintCornersAr ) );
+		const solutionTranslationDelta = previousAttempt === undefined
+			? 0
+			: attempt.solution.siteOriginArPosition.distanceTo( previousAttempt.solution.siteOriginArPosition );
+		const solutionYawDelta = previousAttempt === undefined
+			? 0
+			: Math.abs( normalizeSignedDegrees( attempt.solution.headingDeg - previousAttempt.solution.headingDeg ) );
+		const footprintYawDelta = previousAttempt === undefined
+			? 0
+			: Math.abs( normalizeSignedDegrees(
+				computeFootprintYawDegrees( attempt.footprintCornersAr )
+				- computeFootprintYawDegrees( previousAttempt.footprintCornersAr )
+			) );
+
+		console.info( '[MarkerCalibrationAttemptDelta]', {
+			previousAttemptId: previousAttempt?.id ?? null,
+			currentAttemptId: attempt.id,
+			perCornerCapturedArDelta: capturedDeltas.map( ( value ) => Number( value.toFixed( 6 ) ) ),
+			maxCornerCapturedArDelta: Number( Math.max( ...capturedDeltas, 0 ).toFixed( 6 ) ),
+			solutionYawDelta: Number( solutionYawDelta.toFixed( 6 ) ),
+			solutionTranslationDelta: Number( solutionTranslationDelta.toFixed( 6 ) ),
+			footprintCenterDelta: Number( footprintCenterDelta.toFixed( 6 ) ),
+			footprintYawDelta: Number( footprintYawDelta.toFixed( 6 ) ),
+			attemptTimestamp: attempt.timestamp
+		} );
 
 	}
 
@@ -339,6 +513,13 @@ export class MarkerCalibrationRuntime {
 			expectedCount: cornerSequence.length,
 			cornerOrder: captureTarget?.cornerOrder ?? null
 		} );
+		console.info( '[MarkerCornerCapturedRuntime]', {
+			cornerId: cornerMeta.id,
+			capturedAr: vector3ToObject( arPosition ),
+			hasGroundHit: this.options.hasGroundHit(),
+			sessionId: currentSessionId,
+			timestamp: Date.now()
+		} );
 		console.info( '[MarkerCornerCaptureHitTestCheck]', createMarkerCornerCaptureHitTestPayload( {
 			capturedIndex,
 			expectedCornerName: cornerMeta.cornerOrderValue,
@@ -496,11 +677,7 @@ export class MarkerCalibrationRuntime {
 				capturedArPoints: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition )
 			} ) );
 
-			const solution = solveMarkerLocalization( {
-				correspondences,
-				sessionId: currentSessionId,
-				timestamp: Date.now()
-			} );
+			const solution = this.solveMarkerCalibration( correspondences, currentSessionId, Date.now(), demoModelConfig );
 			this.currentSessionMarkerSolution = solution;
 			const errorLimit = resolveMarkerCalibrationErrorLimit( demoModelConfig );
 			const selfCheck = createArFromEnuSelfCheckPayload( {
@@ -517,9 +694,11 @@ export class MarkerCalibrationRuntime {
 				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition ),
 				correspondences,
 				solution,
+				solveMode: demoModelConfig.markerCalibration?.solveMode ?? 'rigid-3d-debug',
 				selfCheck
 			} );
 			console.info( '[ArFromEnuCalibrationSolved]', calibrationPayload );
+			this.recordMarkerCalibrationAttempt( solution, demoModelConfig );
 			if ( selfCheck.acceptedByThreshold === false ) {
 				throw new Error(
 					`Marker 自检误差 ${selfCheck.maxErrorMeters.toFixed( 3 )}m 超过 ${errorLimit.meters}m，当前阈值来源：${errorLimit.source}。请重新采集三角桶底座落地点四角。`
@@ -936,6 +1115,7 @@ function createArFromEnuCalibrationSolvedPayload(args: {
 		arPosition: THREE.Vector3;
 	}>;
 	solution: MarkerLocalizationSolution;
+	solveMode: 'ground-plane-2d' | 'rigid-3d-debug';
 	selfCheck: {
 		points: Array<Record<string, unknown>>;
 		maxErrorMeters: number;
@@ -1000,6 +1180,7 @@ function createArFromEnuCalibrationSolvedPayload(args: {
 		maxSelfCheckErrorMeters: args.selfCheck.maxSelfCheckErrorMeters,
 		errorLimitSource: args.selfCheck.errorLimitSource,
 		acceptedByThreshold: args.selfCheck.acceptedByThreshold,
+		solveMode: args.solveMode,
 		sideLengthsEnu: enuQuad.sideLengths,
 		sideLengthsAr: arQuad.sideLengths,
 		diagonalLengthsEnu: enuQuad.diagonalLengths,
@@ -1007,7 +1188,7 @@ function createArFromEnuCalibrationSolvedPayload(args: {
 		enuArea: enuQuad.area,
 		arArea: arQuad.area,
 		scaleRatio: Number( scaleRatio.toFixed( 6 ) ),
-		usedRigidOrSimilarity: 'rigid',
+		usedRigidOrSimilarity: args.solveMode === 'ground-plane-2d' ? 'ground-plane-2d' : 'rigid-3d-debug',
 		warnings
 	};
 
@@ -1019,6 +1200,59 @@ function average(values: number[]): number {
 		return 0;
 	}
 	return values.reduce( ( total, value ) => total + value, 0 ) / values.length;
+
+}
+
+function getFootprintControlPointsEnu(config: DemoModelConfig | null): THREE.Vector3[] {
+
+	if ( config === null ) {
+		return [];
+	}
+
+	const frame = createEnuFrame( config.siteFrame.origin );
+	return Object.values( config.controlPoints )
+		.slice( 0, 4 )
+		.map( ( point ) => geodeticToEnu( point.world, frame ) );
+
+}
+
+function averageVector3(vectors: THREE.Vector3[]): THREE.Vector3 {
+
+	if ( vectors.length === 0 ) {
+		return new THREE.Vector3();
+	}
+
+	const total = vectors.reduce(
+		(sum, vector) => sum.add( vector ),
+		new THREE.Vector3()
+	);
+	return total.multiplyScalar( 1 / vectors.length );
+
+}
+
+function computeFootprintYawDegrees(points: THREE.Vector3[]): number {
+
+	if ( points.length < 2 ) {
+		return 0;
+	}
+
+	const edge = points[ 1 ].clone().sub( points[ 0 ] );
+	return THREE.MathUtils.radToDeg( Math.atan2( edge.x, - edge.z ) );
+
+}
+
+function normalizeSignedDegrees(value: number): number {
+
+	const normalized = ( ( value + 180 ) % 360 + 360 ) % 360 - 180;
+	return normalized === -180 ? 180 : normalized;
+
+}
+
+function matricesAlmostEqual(a: THREE.Matrix4, b: THREE.Matrix4, epsilon = 1e-9): boolean {
+
+	const ae = a.elements;
+	const be = b.elements;
+	return ae.every( ( value, index ) => Math.abs( value - be[ index ] ) <= epsilon );
 
 }
 
