@@ -193,20 +193,20 @@ const canApplyMarkerCalibration = computed(
 		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
 );
 const markerApplyBlockedReason = computed( () => {
-	if ( showMarkerCalibrationOverlay.value === false ) {
-		return 'Marker 校正面板未打开或当前校正未激活。';
-	}
 	if ( hasArSession.value === false ) {
 		return '请先进入 AR 会话。';
 	}
-	if ( canUseMarkerCorners.value === false ) {
-		return '当前控制标志缺少四角 ENU 坐标。';
+	if ( markerCalibrationOverlayOpen.value === false ) {
+		return 'Marker 校正面板未打开。';
 	}
 	if ( engine.value.markerCalibration.active === false ) {
 		return '请先开始当前会话 Marker 校正。';
 	}
 	if ( engine.value.markerCalibration.currentSessionId === null ) {
 		return '当前 Marker 校正没有绑定 AR Session。';
+	}
+	if ( canUseMarkerCorners.value === false ) {
+		return '当前控制标志缺少四角 ENU 坐标。';
 	}
 	if ( engine.value.markerCalibration.capturedCornerCount < engine.value.markerCalibration.expectedCornerCount ) {
 		return `四角点数量不足：${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}`;
@@ -521,6 +521,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	const applied = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
 	console.info( '[MarkerCalibrationApplyResult]', {
 		applied,
+		message: applied ? 'Marker 校正已应用，可进行工程放置。' : 'Marker 校正未应用，面板保持打开。',
 		runtimeStatus: engine.value.runtimeStatus,
 		markerCalibration: engine.value.markerCalibration,
 		createdAt: Date.now()
