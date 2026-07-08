@@ -4,7 +4,7 @@ import type {
 } from '@/localization/coarse/engineering-registration.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
-import { placeModelAt } from '@/engine/core/model.js';
+import { placeModelAt, placeModelWithMatrix } from '@/engine/core/model.js';
 
 const tempModelRawLocalToArMatrix = new THREE.Matrix4();
 const tempMatrixPosition = new THREE.Vector3();
@@ -75,6 +75,7 @@ export function createPlacementBaseFromArLocalizationSolution(options: {
 		position,
 		orientation: tempMatrixQuaternion.clone(),
 		scale: baseScale,
+		matrix: tempModelRawLocalToArMatrix.clone(),
 		scaleAnchor: position.clone(),
 		siteContext: {
 			siteOriginArPosition: arFromEnuSolution.siteOriginArPosition.clone(),
@@ -96,10 +97,20 @@ export function placeAdjustedModel(options: {
 		position: THREE.Vector3;
 		orientation: THREE.Quaternion;
 		scale: number;
+		matrix?: THREE.Matrix4;
 	};
 }): THREE.Group {
 
 	const { modelTemplate, placedModel, modelAnchor, adjustedPlacement } = options;
+
+	if ( adjustedPlacement.matrix !== undefined ) {
+		return placeModelWithMatrix(
+			modelTemplate,
+			placedModel,
+			modelAnchor,
+			adjustedPlacement.matrix
+		);
+	}
 
 	return placeModelAt(
 		modelTemplate,

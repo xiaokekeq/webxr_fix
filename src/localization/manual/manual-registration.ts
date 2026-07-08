@@ -5,6 +5,7 @@ export interface ManualPlacementBase {
 	position: THREE.Vector3;
 	orientation: THREE.Quaternion;
 	scale: number;
+	matrix?: THREE.Matrix4;
 	scaleAnchor?: THREE.Vector3;
 	siteContext?: {
 		siteOriginArPosition: THREE.Vector3;

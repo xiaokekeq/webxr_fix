@@ -84,6 +84,10 @@ function formatMarkerCalibrationStatus(state: RegistrationStoreState): string {
 
 function formatModelPlacementStatus(state: RegistrationStoreState): string {
 
+	if ( state.registrationStatusDetail.includes( '模型控制点未对齐' ) ) {
+		return '模型控制点未对齐';
+	}
+
 	return state.placementSummary.positionText !== '-' && state.registrationChainDebug.arSessionLocalization.available
 		? '已显示'
 		: '未显示';
@@ -94,6 +98,10 @@ function resolvePlacementHint(state: RegistrationStoreState): string {
 
 	if ( state.markerCalibration.looseThresholdAccepted ) {
 		return '当前使用调试阈值完成校正，误差较大，仅用于测试。';
+	}
+
+	if ( state.registrationStatusDetail.includes( '模型控制点未对齐' ) ) {
+		return state.registrationStatusDetail;
 	}
 
 	if ( state.engineeringConfigStatus.hasControlTargets === false ) {

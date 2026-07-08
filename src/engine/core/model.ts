@@ -697,6 +697,7 @@ export function placeModelAt(
 		parent.add( targetModel );
 	}
 
+	targetModel.matrixAutoUpdate = true;
 	targetModel.position.copy( position );
 	targetModel.quaternion.copy( orientation );
 
@@ -704,6 +705,30 @@ export function placeModelAt(
 		? targetModel.userData.__baseScale
 		: targetModel.scale.clone();
 	targetModel.scale.copy( baseScale ).multiplyScalar( uniformScale );
+
+	return targetModel;
+
+}
+
+export function placeModelWithMatrix(
+	modelTemplate: THREE.Group,
+	currentModel: THREE.Group | null,
+	parent: THREE.Group,
+	matrix: THREE.Matrix4
+): THREE.Group {
+
+	let targetModel = currentModel;
+
+	if ( targetModel === null ) {
+		targetModel = clone( modelTemplate ) as THREE.Group;
+		targetModel.userData.__baseScale = targetModel.scale.clone();
+		parent.add( targetModel );
+	}
+
+	targetModel.matrixAutoUpdate = false;
+	targetModel.matrix.copy( matrix );
+	targetModel.matrix.decompose( targetModel.position, targetModel.quaternion, targetModel.scale );
+	targetModel.updateMatrixWorld( true );
 
 	return targetModel;
 

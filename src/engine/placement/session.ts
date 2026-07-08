@@ -40,6 +40,7 @@ export interface PlacementSession {
 	getPlacementBase(): ManualPlacementBase | null;
 	getAutoPlacementPending(): boolean;
 	markAutoPlacementPending(): void;
+	cancelAutoPlacement(): void;
 	setUndergroundPreview(enabled: boolean, depthMeters: number): void;
 	resetPlacement(): void;
 	requestAutoPlacement(modelTemplate: THREE.Group | null): void;
@@ -88,7 +89,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			return;
 		}
 
-		arPlacedModel.position.y += undergroundPreviewOffsetMeters;
+		translatePlacedModelY( undergroundPreviewOffsetMeters );
 		arPlacedModel.updateMatrixWorld( true );
 
 	}
@@ -100,7 +101,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		undergroundPreviewOffsetMeters = nextOffset;
 
 		if ( arPlacedModel !== null && delta !== 0 ) {
-			arPlacedModel.position.y += delta;
+			translatePlacedModelY( delta );
 			arPlacedModel.updateMatrixWorld( true );
 			updatePlacementSummary();
 			trackArPlacement( 'marker' );
@@ -152,13 +153,31 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		position: THREE.Vector3;
 		orientation: THREE.Quaternion;
 		scale: number;
+		matrix?: THREE.Matrix4;
 	} {
 
 		return {
 			position: base.position.clone(),
 			orientation: base.orientation.clone(),
-			scale: base.scale
+			scale: base.scale,
+			matrix: base.matrix?.clone()
 		};
+
+	}
+
+	function translatePlacedModelY(delta: number): void {
+
+		if ( arPlacedModel === null ) {
+			return;
+		}
+
+		if ( arPlacedModel.matrixAutoUpdate === false ) {
+			arPlacedModel.matrix.premultiply( new THREE.Matrix4().makeTranslation( 0, delta, 0 ) );
+			arPlacedModel.matrix.decompose( arPlacedModel.position, arPlacedModel.quaternion, arPlacedModel.scale );
+			return;
+		}
+
+		arPlacedModel.position.y += delta;
 
 	}
 
@@ -222,6 +241,12 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		markAutoPlacementPending() {
 
 			autoPlacementPending = true;
+
+		},
+
+		cancelAutoPlacement() {
+
+			autoPlacementPending = false;
 
 		},
 

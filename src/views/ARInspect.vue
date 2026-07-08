@@ -141,6 +141,7 @@ const registrationDiagnosticCards = computed( () => [
 	{ label: 'modelLocalToEnu', value: configStatus.value.hasModelLocalToEnu ? 'configured' : 'missing' },
 	{ label: 'final AR position', value: engine.value.placementSummary.positionText },
 	{ label: 'final AR quaternion', value: engine.value.placementSummary.quaternionText, wide: true },
+	{ label: 'controlPointAlignment', value: engine.value.registrationStatusDetail || engine.value.runtimeStatus || '-', wide: true },
 	{ label: 'placementMode', value: 'engineering' },
 	{ label: 'placementSource', value: formatPlacementSource() },
 	{ label: 'usedHitTestForFinalPlacement', value: 'false' },
@@ -537,7 +538,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	const applied = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
 	console.info( '[MarkerCalibrationApplyResult]', {
 		applied,
-		message: applied ? 'Marker 校正已应用，可进行工程放置。' : 'Marker 校正未应用，面板保持打开。',
+		message: applied ? 'Marker 校正已完成，请点击工程放置模型。' : 'Marker 校正未应用，面板保持打开。',
 		runtimeStatus: engine.value.runtimeStatus,
 		markerCalibration: engine.value.markerCalibration,
 		createdAt: Date.now()
@@ -559,7 +560,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	}
 	markerApplyFeedback.value = {
 		type: 'success',
-		message: 'Marker 校正已应用，可进行工程放置。',
+		message: 'Marker 校正已完成，请点击“工程放置模型”。',
 		createdAt: Date.now()
 	};
 	markerCalibrationOverlayOpen.value = engine.value.markerCalibration.active;

@@ -102,8 +102,20 @@ import { validateSiteCalibrationBaselineForStorage } from '@/services/repositori
 import { updateCpuDepthFromFrame, setCpuDepthEnabled, cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
 
 const MAX_LOG_ITEMS = 24;
+const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
+const AUTO_PLACE_AFTER_MARKER_CALIBRATION = import.meta.env.VITE_AUTO_PLACE_AFTER_MARKER_CALIBRATION === 'true';
+
+interface EngineeringDebugLayerOptions {
+	showMarkerExpected: boolean;
+	showMarkerCaptured: boolean;
+	showFootprintExpected: boolean;
+	showModelActualControlPoints: boolean;
+	showModelBoundingBox: boolean;
+}
 
 const tempViewerArPosition = new THREE.Vector3();
+const tempMatrix = new THREE.Matrix4();
+const tempQuaternion = new THREE.Quaternion();
 
 type EngineeringPlacementBlockReason =
 	| 'model-config-missing'
@@ -224,6 +236,13 @@ export class ThreeEngine {
 	private readonly xrButtonWrap: HTMLDivElement;
 	private readonly modelOrientation = new THREE.Quaternion();
 	private readonly engineeringCornerDebugGroup = new THREE.Group();
+	private readonly engineeringDebugLayers: EngineeringDebugLayerOptions = {
+		showMarkerExpected: readDebugLayerFlag( 'VITE_SHOW_MARKER_EXPECTED', false ),
+		showMarkerCaptured: readDebugLayerFlag( 'VITE_SHOW_MARKER_CAPTURED', false ),
+		showFootprintExpected: readDebugLayerFlag( 'VITE_SHOW_FOOTPRINT_EXPECTED', true ),
+		showModelActualControlPoints: readDebugLayerFlag( 'VITE_SHOW_MODEL_ACTUAL_CONTROL_POINTS', true ),
+		showModelBoundingBox: readDebugLayerFlag( 'VITE_SHOW_MODEL_BOUNDING_BOX', false )
+	};
 	private readonly displayModeController;
 	private readonly structureRevealController = createArXrayVisualizationController();
 	private readonly layerPeelingController = createArLayerPeelingController();
@@ -586,6 +605,7 @@ export class ThreeEngine {
 				this.resolvedMarkerPosesInEnu = this.resolveConfiguredMarkerPoses( bundle.demoModelConfig );
 				this.rebuildModelLayers();
 				this.syncArSessionContext();
+				this.logModelLocalControlPointBoundsCheck();
 				this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
 				this.refreshSavedMarkerLocalizationResult( { silentStatus: true } );
 				this.markerCalibrationRuntime.syncState();
@@ -1248,10 +1268,7 @@ export class ThreeEngine {
 			return;
 		}
 
-		await this.placementWorkflow.placeLocalizedModel();
-		if ( this.placementSession.getPlacedModel() !== null ) {
-			this.logEngineeringPlacementApplied( guard.arFromEnuSolution ?? null, guard.controlTarget ?? null );
-		}
+		await this.placeModelFromCurrentMarkerSolution( guard );
 
 	}
 
@@ -1843,7 +1860,7 @@ export class ThreeEngine {
 	): void {
 
 		this.clearEngineeringCornerDebug();
-		if ( controlTarget?.cornersEnu !== undefined ) {
+		if ( this.engineeringDebugLayers.showMarkerExpected && controlTarget?.cornersEnu !== undefined ) {
 			this.addDebugQuad( {
 				name: 'marker-expected',
 				points: controlTarget.cornersEnu.map( ( point ) => enuTupleToArVector( point, arFromEnuSolution ) ),
@@ -1852,7 +1869,7 @@ export class ThreeEngine {
 			} );
 		}
 
-		if ( capturedCornersAr.length === 4 ) {
+		if ( this.engineeringDebugLayers.showMarkerCaptured && capturedCornersAr.length === 4 ) {
 			this.addDebugQuad( {
 				name: 'marker-captured',
 				points: capturedCornersAr.map( ( point ) => point.clone() ),
@@ -1861,7 +1878,7 @@ export class ThreeEngine {
 			} );
 		}
 
-		if ( this.registrationSolution !== null ) {
+		if ( this.engineeringDebugLayers.showFootprintExpected && this.registrationSolution !== null ) {
 			this.addDebugQuad( {
 				name: 'footprint-enu',
 				points: this.registrationSolution.controlPoints
@@ -1875,16 +1892,18 @@ export class ThreeEngine {
 		const placedModel = this.placementSession.getArPlacedModel();
 		if ( placedModel !== null && this.registrationSolution !== null ) {
 			placedModel.updateMatrixWorld( true );
-			this.addDebugQuad( {
-				name: 'model-cp-actual',
-				points: this.registrationSolution.controlPoints
-					.slice( 0, 4 )
-					.map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) ),
-				labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}` ),
-				color: 0xff4dff
-			} );
+			if ( this.engineeringDebugLayers.showModelActualControlPoints ) {
+				this.addDebugQuad( {
+					name: 'model-cp-actual',
+					points: this.registrationSolution.controlPoints
+						.slice( 0, 4 )
+						.map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) ),
+					labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}` ),
+					color: 0xff4dff
+				} );
+			}
 			const bbox = new THREE.Box3().setFromObject( placedModel );
-			if ( bbox.isEmpty() === false ) {
+			if ( this.engineeringDebugLayers.showModelBoundingBox && bbox.isEmpty() === false ) {
 				const helper = new THREE.Box3Helper( bbox, 0xffffff );
 				helper.name = 'model-bbox';
 				this.engineeringCornerDebugGroup.add( helper );
@@ -1896,13 +1915,7 @@ export class ThreeEngine {
 			markerCornerCount: controlTarget?.cornersEnu?.length ?? 0,
 			capturedCornerCount: capturedCornersAr.length,
 			modelControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
-			layers: [
-				'marker-expected',
-				'marker-captured',
-				'footprint-enu',
-				'model-cp-actual',
-				'model-bbox'
-			],
+			layers: this.engineeringDebugLayers,
 			placementMode: 'diagnostic-only',
 			affectsPlacement: false,
 			createdAt: Date.now()
@@ -2037,6 +2050,106 @@ export class ThreeEngine {
 
 	}
 
+	private logModelLocalControlPointBoundsCheck(): void {
+
+		if ( this.modelTemplate === null || this.registrationSolution === null ) {
+			return;
+		}
+
+		const bounds = new THREE.Box3().setFromObject( this.modelTemplate );
+		if ( bounds.isEmpty() ) {
+			console.warn( '[ModelLocalControlPointBoundsCheck]', {
+				modelId: this.demoModelConfig?.modelId ?? null,
+				warnings: [ 'model bounding box empty' ]
+			} );
+			return;
+		}
+
+		const size = bounds.getSize( new THREE.Vector3() );
+		const bottomTolerance = Math.max( size.y * 0.03, 0.05 );
+		const expandedBounds = bounds.clone().expandByScalar( 0.02 );
+		const points = this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
+			const distanceToBottomPlane = Math.abs( point.modelLocal.y - bounds.min.y );
+			return {
+				controlPointId: point.id,
+				cornerRole: this.resolveControlPointCornerRole( point.id ),
+				modelLocal: vector3ToRoundedObject( point.modelLocal ),
+				distanceToBottomPlane: Number( distanceToBottomPlane.toFixed( 6 ) ),
+				nearBottomPlane: distanceToBottomPlane <= bottomTolerance,
+				insideModelBounds: expandedBounds.containsPoint( point.modelLocal )
+			};
+		} );
+		const warnings: string[] = [];
+		if ( points.some( ( point ) => point.nearBottomPlane === false ) ) {
+			warnings.push( '当前 modelLocal 不是模型底面 footprint 四角，不能用于地面 footprint 配准。' );
+		}
+		if ( points.some( ( point ) => point.insideModelBounds === false ) ) {
+			warnings.push( 'some modelLocal control points are outside model bounding box' );
+		}
+		const payload = {
+			modelId: this.demoModelConfig?.modelId ?? null,
+			modelBoundingBox: {
+				min: vector3ToRoundedObject( bounds.min ),
+				max: vector3ToRoundedObject( bounds.max )
+			},
+			modelBottomY: Number( bounds.min.y.toFixed( 6 ) ),
+			modelTopY: Number( bounds.max.y.toFixed( 6 ) ),
+			points,
+			warnings
+		};
+
+		if ( warnings.length > 0 ) {
+			console.warn( '[ModelLocalControlPointBoundsCheck]', payload );
+			return;
+		}
+		console.info( '[ModelLocalControlPointBoundsCheck]', payload );
+
+	}
+
+	private logModelAxisMappingCheck(arFromEnuSolution: ArFromEnuSolution): void {
+
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel === null || this.registrationSolution === null ) {
+			return;
+		}
+
+		placedModel.updateMatrixWorld( true );
+		const modelDefinition = this.modelSession.getCurrentModelDefinition();
+		const primaryAsset = modelDefinition?.assets.find( ( asset ) => asset.id === modelDefinition.primaryAssetId );
+		const arFromEnuRotation = tempQuaternion.setFromRotationMatrix(
+			tempMatrix.copy( arFromEnuSolution.matrix ).extractRotation( arFromEnuSolution.matrix )
+		);
+		const finalModelQuaternion = placedModel.getWorldQuaternion( new THREE.Quaternion() );
+		const determinant = placedModel.matrixWorld.determinant();
+		const finalUp = new THREE.Vector3( 0, 1, 0 ).transformDirection( placedModel.matrixWorld );
+		const possibleFlipOrMirror = determinant < 0 || finalUp.y < 0;
+		const payload = {
+			modelId: this.demoModelConfig?.modelId ?? null,
+			modelUpAxis: this.modelTemplate?.userData.__modelUpAxis ?? 'asset-transform-normalized',
+			configuredUpAxis: primaryAsset?.assetTransform?.upAxis ?? 'y',
+			gltfSceneUpAssumption: 'Three.js +Y after assetTransform normalization',
+			enuUpAxis: '+Z',
+			arUpAxis: '+Y',
+			modelToSiteRotation: quaternionToRoundedObject( this.registrationSolution.modelToSite.rotation ),
+			arFromEnuRotation: quaternionToRoundedObject( arFromEnuRotation ),
+			finalModelQuaternion: quaternionToRoundedObject( finalModelQuaternion ),
+			determinantSign: determinant < 0 ? 'negative' : 'positive',
+			determinant: Number( determinant.toFixed( 6 ) ),
+			finalUp: vector3ToRoundedObject( finalUp ),
+			possibleFlipOrMirror
+		};
+
+		if ( possibleFlipOrMirror ) {
+			console.warn( '[ModelAxisMappingCheck]', {
+				...payload,
+				warning: '模型最终矩阵存在翻转 / 镜像 / up 轴朝下'
+			} );
+			return;
+		}
+		console.info( '[ModelAxisMappingCheck]', payload );
+
+	}
+
 	private logModelControlPointPlacementCheck(arFromEnuSolution: ArFromEnuSolution): void {
 
 		const placedModel = this.placementSession.getArPlacedModel();
@@ -2055,10 +2168,9 @@ export class ThreeEngine {
 			const actualAr = placedModel.localToWorld( point.modelLocal.clone() );
 			const error = expectedAr.distanceTo( actualAr );
 			errors.push( error );
-			const rawPoint = point as unknown as Record<string, unknown>;
 			return {
 				controlPointId: point.id,
-				cornerRole: rawPoint.cornerRole ?? null,
+				cornerRole: this.resolveControlPointCornerRole( point.id ),
 				modelLocal: vector3ToRoundedObject( point.modelLocal ),
 				targetEnu: vector3ToRoundedObject( point.worldEnu ),
 				expectedAr: vector3ToRoundedObject( expectedAr ),
@@ -2072,21 +2184,55 @@ export class ThreeEngine {
 			/ Math.max( errors.length, 1 )
 		);
 		const warnings: string[] = [];
-		if ( maxError > 0.05 ) {
-			warnings.push( `model control point placement error ${maxError.toFixed( 3 )}m exceeds 0.05m` );
+		if ( rmsError > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
+			warnings.push( `model control point placement RMS ${rmsError.toFixed( 3 )}m exceeds ${MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS}m` );
+		}
+		const roundedMaxError = Number( maxError.toFixed( 6 ) );
+		const roundedRmsError = Number( rmsError.toFixed( 6 ) );
+		const payload = {
+			modelId: this.demoModelConfig?.modelId ?? null,
+			points: points.map( ( point ) => ( {
+				...point,
+				maxError: roundedMaxError,
+				rmsError: roundedRmsError
+			} ) ),
+			maxError: roundedMaxError,
+			rmsError: roundedRmsError,
+			warnings
+		};
+
+		console.info( '[ModelControlPointPlacementCheck]', payload );
+		if ( rmsError > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
+			const message = `模型控制点未对齐 footprint，当前 RMS=${rmsError.toFixed( 3 )}m`;
+			console.error( '[ModelControlPointPlacementMismatch]', payload );
+			this.setStatus( message );
+			this.store.patch( { registrationStatusDetail: message } );
 		}
 
-		console.info( '[ModelControlPointPlacementCheck]', {
-			modelId: this.demoModelConfig?.modelId ?? null,
-			points,
-			maxError: Number( maxError.toFixed( 6 ) ),
-			rmsError: Number( rmsError.toFixed( 6 ) ),
-			warnings
-		} );
+	}
+
+	private resolveControlPointCornerRole(controlPointId: string): unknown {
+
+		const rawPoint = this.demoModelConfig?.controlPoints[ controlPointId ] as unknown as Record<string, unknown> | undefined;
+		return rawPoint?.cornerRole ?? null;
 
 	}
 
 	private applyCurrentSessionMarkerSolution(
+		solution: MarkerLocalizationSolution,
+		metadata: {
+			markerId: string;
+			markerConfigId: string;
+			source?: 'marker';
+			capturedCornersAr?: THREE.Vector3[];
+		}
+	): boolean {
+
+		return this.applyCurrentSessionMarkerSolutionOnly( solution, metadata );
+
+	}
+
+	private applyCurrentSessionMarkerSolutionOnly(
 		solution: MarkerLocalizationSolution,
 		metadata: {
 			markerId: string;
@@ -2206,56 +2352,32 @@ export class ThreeEngine {
 
 		this.logCoordinateAxisMappingCheck( solution.arFromEnuSolution );
 		this.logFootprintEnuToArCheck( solution.arFromEnuSolution, currentTarget ?? null );
-
-		let appliedToPlacedModel = this.placementSession.applyArLocalizationSolution( {
-			modelTemplate: this.modelTemplate,
-			registrationSolution: this.registrationSolution,
-			arFromEnuSolution: solution.arFromEnuSolution,
-			currentSessionId: this.currentArSessionId
+		const autoPlacementPendingBefore = this.placementSession.getAutoPlacementPending();
+		const modelPlacedBefore = this.placementSession.getPlacedModel() !== null;
+		this.placementSession.cancelAutoPlacement();
+		this.renderEngineeringCornerDebug(
+			solution.arFromEnuSolution,
+			currentTarget ?? null,
+			metadata.capturedCornersAr ?? []
+		);
+		const appliedToPlacedModel = false;
+		const autoPlacementPendingAfter = this.placementSession.getAutoPlacementPending();
+		const modelWasPlacedAutomatically = modelPlacedBefore === false
+			&& this.placementSession.getPlacedModel() !== null;
+		console.info( '[MarkerCalibrationApplyFlow]', {
+			clickedApplyCalibration: true,
+			solveAndApplyCalled: true,
+			applyCurrentSessionMarkerSolutionCalled: true,
+			applyArLocalizationSolutionCalled: false,
+			attemptLocalizedPlacementCalled: false,
+			autoPlacementPendingBefore,
+			autoPlacementPendingAfter,
+			placeFromPlacementBaseCalled: false,
+			modelWasPlacedAutomatically,
+			autoPlaceAfterMarkerCalibration: AUTO_PLACE_AFTER_MARKER_CALIBRATION
 		} );
-
-		if ( appliedToPlacedModel ) {
-			this.applyModelLayerVisibility();
-			this.arSessionStateRuntime.markPlacementCommitted( true );
-			this.renderEngineeringCornerDebug(
-				solution.arFromEnuSolution,
-				currentTarget ?? null,
-				metadata.capturedCornersAr ?? []
-			);
-			this.logModelControlPointPlacementCheck( solution.arFromEnuSolution );
-		} else if ( this.workflowMode === 'ar-inspection' ) {
-			this.pointerSelection.suppressSelectionFor( 1200 );
-			console.info( '[MarkerPlacementRequested]', {
-				mode: this.workflowMode,
-				siteId: this.demoModelConfig?.modelId ?? null,
-				sessionId: this.currentArSessionId,
-				source: solution.arFromEnuSolution.source,
-				targetId: metadata.markerId,
-				hasHitTest: this.xrRuntime.getHitTestController().hasGroundHit(),
-				createdAt: Date.now()
-			} );
-			this.placementWorkflow.requestAutoPlacement();
-			appliedToPlacedModel = this.placementSession.getPlacedModel() !== null;
-			if ( appliedToPlacedModel ) {
-				this.renderEngineeringCornerDebug(
-					solution.arFromEnuSolution,
-					currentTarget ?? null,
-					metadata.capturedCornersAr ?? []
-				);
-				this.logModelControlPointPlacementCheck( solution.arFromEnuSolution );
-			}
-		}
-
-		if ( appliedToPlacedModel && this.workflowMode === 'ar-inspection' ) {
-			this.logEngineeringPlacementApplied( solution.arFromEnuSolution, currentTarget ?? null );
-			console.info( '[MarkerPlacementCompleted]', {
-				mode: this.workflowMode,
-				siteId: this.demoModelConfig?.modelId ?? null,
-				sessionId: this.currentArSessionId,
-				source: solution.arFromEnuSolution.source,
-				targetId: metadata.markerId,
-				createdAt: Date.now()
-			} );
+		if ( modelWasPlacedAutomatically ) {
+			this.logUnexpectedAutoPlacementAfterCalibration( 'applyCurrentSessionMarkerSolutionOnly', metadata.markerId );
 		}
 
 		this.syncRegistrationChainDebug();
@@ -2296,16 +2418,47 @@ export class ThreeEngine {
 		} );
 		this.logRegistrationFinal();
 		this.setStatus(
-			appliedToPlacedModel
-				? this.workflowMode === 'ar-inspection'
-					? '空间校正完成，模型已自动放置。'
-					: '当前会话 Marker 校正已应用到模型。'
-				: this.workflowMode === 'ar-inspection' && this.placementSession.getAutoPlacementPending()
-					? '空间校正完成，请继续扫描平面，模型将自动放置。'
-					: '当前会话 Marker 校正已生成，但尚未应用到模型。'
+			'Marker 校正已完成，工程坐标已对齐，请点击“工程放置模型”。'
 		);
 		this.emit();
 		return true;
+
+	}
+
+	private logUnexpectedAutoPlacementAfterCalibration(caller: string, markerId: string): void {
+
+		console.error( '[UnexpectedAutoPlacementAfterCalibration]', {
+			caller,
+			markerId,
+			sessionId: this.currentArSessionId,
+			autoPlacementPending: this.placementSession.getAutoPlacementPending(),
+			hasArFromEnuSolution: this.activeMarkerArFromEnuSolution !== null,
+			stack: new Error().stack
+		} );
+
+	}
+
+	private async placeModelFromCurrentMarkerSolution(guard: EngineeringPlacementGuardResult): Promise<void> {
+
+		const arFromEnuSolution = guard.arFromEnuSolution ?? this.getActiveMarkerArFromEnuSolutionForCurrentSession();
+		if ( arFromEnuSolution === null ) {
+			this.setStatus( '请先完成 Marker 四角点校正后再进行工程放置。' );
+			return;
+		}
+
+		await this.placementWorkflow.placeLocalizedModel();
+		if ( this.placementSession.getPlacedModel() === null ) {
+			return;
+		}
+
+		this.renderEngineeringCornerDebug(
+			arFromEnuSolution,
+			guard.controlTarget ?? this.getActiveEngineeringControlTarget(),
+			[]
+		);
+		this.logModelAxisMappingCheck( arFromEnuSolution );
+		this.logModelControlPointPlacementCheck( arFromEnuSolution );
+		this.logEngineeringPlacementApplied( arFromEnuSolution, guard.controlTarget ?? null );
 
 	}
 
@@ -2855,6 +3008,19 @@ function enuTupleToArVector(
 function tupleToVector3(tuple: [ number, number, number ]): THREE.Vector3 {
 
 	return new THREE.Vector3( tuple[ 0 ], tuple[ 1 ], tuple[ 2 ] );
+
+}
+
+function readDebugLayerFlag(name: string, defaultValue: boolean): boolean {
+
+	const value = import.meta.env[ name ];
+	if ( value === 'true' ) {
+		return true;
+	}
+	if ( value === 'false' ) {
+		return false;
+	}
+	return defaultValue;
 
 }
 

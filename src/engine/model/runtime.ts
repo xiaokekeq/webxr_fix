@@ -50,7 +50,8 @@ export async function loadModelRuntimeBundle(
 	}
 
 	const primaryTemplateTransform = readPlaceableTemplateTransform( primaryTemplate );
-	const registrationSolution = solveEngineeringRegistration( demoModelConfig, {
+	const registrationConfig = resolveRegistrationConfig( demoModelConfig, primaryTemplate );
+	const registrationSolution = solveEngineeringRegistration( registrationConfig, {
 		modelPivotOffset: primaryTemplateTransform?.pivotOffset,
 		modelUnitScale: primaryTemplateTransform?.unitScale
 	} );
@@ -70,6 +71,60 @@ export async function loadModelRuntimeBundle(
 		modelPlacementReport,
 		registrationSolution,
 		modelDefinition
+	};
+
+}
+
+function resolveRegistrationConfig(
+	config: DemoModelConfig,
+	primaryTemplate: THREE.Group
+): DemoModelConfig {
+
+	if ( import.meta.env.VITE_USE_MODEL_BBOX_FOOTPRINT_CONTROL_POINTS !== 'true' ) {
+		return config;
+	}
+
+	const controlPointIds = Object.keys( config.controlPoints ).slice( 0, 4 );
+	const bounds = new THREE.Box3().setFromObject( primaryTemplate );
+	if ( controlPointIds.length < 4 || bounds.isEmpty() ) {
+		return config;
+	}
+
+	const y = bounds.min.y;
+	const bboxCorners = [
+		new THREE.Vector3( bounds.min.x, y, bounds.max.z ),
+		new THREE.Vector3( bounds.max.x, y, bounds.max.z ),
+		new THREE.Vector3( bounds.max.x, y, bounds.min.z ),
+		new THREE.Vector3( bounds.min.x, y, bounds.min.z )
+	];
+	console.warn( '[ModelBboxFootprintControlPointsUsed]', {
+		modelId: config.modelId,
+		controlPointIds,
+		reason: 'temporary dev option; using model bbox footprint, not surveyed control points'
+	} );
+
+	return {
+		...config,
+		controlPoints: {
+			...config.controlPoints,
+			...Object.fromEntries( controlPointIds.map( ( id, index ) => [
+				id,
+				{
+					...config.controlPoints[ id ],
+					modelLocal: vectorToModelLocal( bboxCorners[ index ] )
+				}
+			] ) )
+		}
+	};
+
+}
+
+function vectorToModelLocal(vector: THREE.Vector3): { x: number; y: number; z: number } {
+
+	return {
+		x: vector.x,
+		y: vector.y,
+		z: vector.z
 	};
 
 }
