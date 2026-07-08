@@ -92,9 +92,12 @@ export interface FootprintDiagnosticsState {
 	groundPlaneSelfCheckText: string;
 	markerToFootprintDistanceText: string;
 	markerToFootprintHeadingText: string;
+	markerToFootprintHeadingCheckText: string;
 	footprintShapeText: string;
 	footprintControlPointIdsText: string;
 	enuUsageText: string;
+	physicalRelationText: string;
+	markerPhysicalText: string;
 	verdictText: string;
 	updatedAtText: string;
 }
@@ -391,9 +394,12 @@ export function createDefaultFootprintDiagnosticsState(): FootprintDiagnosticsSt
 		groundPlaneSelfCheckText: '-',
 		markerToFootprintDistanceText: '-',
 		markerToFootprintHeadingText: '-',
+		markerToFootprintHeadingCheckText: '-',
 		footprintShapeText: '-',
 		footprintControlPointIdsText: '-',
 		enuUsageText: '-',
+		physicalRelationText: '-',
+		markerPhysicalText: '-',
 		verdictText: '等待 Marker 校正',
 		updatedAtText: '-'
 	};

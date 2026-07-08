@@ -1882,6 +1882,29 @@ export class ThreeEngine {
 				color: 0x32ff8f
 			} );
 		}
+		if ( controlTarget?.cornersEnu !== undefined ) {
+			const markerCornersEnu = controlTarget.cornersEnu.map( tupleToVector3 );
+			const markerPhysicalText = capturedCornersAr.length === 4
+				? `RTK marker 边长 ${computeSideLengths( markerCornersEnu ).map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m；采集边长 ${computeSideLengths( capturedCornersAr ).map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m。请确认 RTK marker 四角和当前采集的三角桶底座四角是同一组物理点。`
+				: '请确认 RTK 测量的 marker 四角和当前采集的三角桶底座四角是同一组物理点。三角桶如果被移动或旋转，校正会稳定但整体偏移。';
+			console.info( '[MarkerCornerPhysicalDefinitionCheck]', {
+				markerCornerIds: controlTarget.cornerOrder ?? [],
+				cornerRoles: controlTarget.cornerOrder ?? [],
+				cornersEnu: markerCornersEnu.map( vector3ToRoundedObject ),
+				expectedEdgeLengths: computeSideLengths( markerCornersEnu ),
+				expectedDiagonals: computeDiagonalLengths( markerCornersEnu ),
+				capturedEdgeLengths: capturedCornersAr.length === 4 ? computeSideLengths( capturedCornersAr ) : [],
+				capturedDiagonals: capturedCornersAr.length === 4 ? computeDiagonalLengths( capturedCornersAr ) : [],
+				note: markerPhysicalText
+			} );
+			this.store.patch( {
+				footprintDiagnostics: {
+					...this.store.getState().footprintDiagnostics,
+					markerPhysicalText,
+					updatedAtText: new Date().toLocaleTimeString( 'zh-CN', { hour12: false } )
+				}
+			} );
+		}
 
 		if ( this.engineeringDebugLayers.showFootprintExpected && this.registrationSolution !== null ) {
 			const footprintControlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
@@ -2072,7 +2095,11 @@ export class ThreeEngine {
 			Math.atan2( vectorMarkerToFootprintCenterAr.x, - vectorMarkerToFootprintCenterAr.z )
 		) );
 		const distanceDeltaMeters = Math.abs( distanceMarkerToFootprintCenterAr - distanceMarkerToFootprintCenterEnu );
-		const headingDeltaDeg = Math.abs( normalizeSignedDegrees( headingMarkerToFootprintArDeg - headingMarkerToFootprintEnuDeg ) );
+		const previousRawHeadingDeltaDeg = Math.abs( normalizeSignedDegrees( headingMarkerToFootprintArDeg - headingMarkerToFootprintEnuDeg ) );
+		const yawDegFromGroundPlane2D = arFromEnuSolution.headingDeg;
+		const expectedHeadingInArDeg = normalizeSignedDegrees( headingMarkerToFootprintEnuDeg + yawDegFromGroundPlane2D );
+		const actualHeadingInArDeg = headingMarkerToFootprintArDeg;
+		const headingDeltaDeg = Math.abs( normalizeSignedDegrees( expectedHeadingInArDeg - actualHeadingInArDeg ) );
 		const enuEdgeLengths = computeSideLengths( footprintCornersEnu );
 		const arEdgeLengths = computeSideLengths( footprintCornersAr );
 		const enuDiagonals = computeDiagonalLengths( footprintCornersEnu );
@@ -2131,12 +2158,22 @@ export class ThreeEngine {
 			},
 			distanceMarkerToFootprintAr: Number( distanceMarkerToFootprintCenterAr.toFixed( 6 ) ),
 			headingMarkerToFootprintArDeg: Number( headingMarkerToFootprintArDeg.toFixed( 3 ) ),
-			yawDeg: Number( arFromEnuSolution.headingDeg.toFixed( 6 ) ),
-			expectedArHeadingFromEnuDeg: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
+			yawDeg: Number( yawDegFromGroundPlane2D.toFixed( 6 ) ),
+			expectedArHeadingFromEnuDeg: Number( expectedHeadingInArDeg.toFixed( 3 ) ),
 			headingDeltaDeg: Number( headingDeltaDeg.toFixed( 6 ) ),
 			distanceDeltaMeters: Number( distanceDeltaMeters.toFixed( 6 ) )
 		};
 		console.info( '[MarkerToFootprintRelationCheck]', relationPayload );
+		const headingPayload = {
+			headingMarkerToFootprintEnuDeg: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
+			yawDegFromGroundPlane2D: Number( yawDegFromGroundPlane2D.toFixed( 3 ) ),
+			expectedHeadingInArDeg: Number( expectedHeadingInArDeg.toFixed( 3 ) ),
+			actualHeadingInArDeg: Number( actualHeadingInArDeg.toFixed( 3 ) ),
+			headingDeltaDeg: Number( headingDeltaDeg.toFixed( 6 ) ),
+			previousRawHeadingDeltaDeg: Number( previousRawHeadingDeltaDeg.toFixed( 6 ) ),
+			diagnosticWasRawHeadingComparison: previousRawHeadingDeltaDeg !== headingDeltaDeg
+		};
+		console.info( '[MarkerToFootprintHeadingCheck]', headingPayload );
 		if ( distanceDeltaMeters > 0.2 ) {
 			console.error( '[MarkerToFootprintDistanceMismatch]', relationPayload );
 		}
@@ -2181,6 +2218,16 @@ export class ThreeEngine {
 				expectedControlPointIds: expectedFootprintControlPointIds
 			} );
 		}
+		console.info( '[PhysicalMarkerFootprintRelationReminder]', {
+			markerId: controlTarget?.id ?? controlTarget?.markerId ?? null,
+			markerControlPointIds: controlTarget?.cornerOrder ?? [],
+			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
+			footprintControlPointIds,
+			footprintCenterEnu: vector3ToRoundedObject( footprintCenterEnu ),
+			distanceMarkerToFootprintEnu: Number( distanceMarkerToFootprintCenterEnu.toFixed( 6 ) ),
+			headingMarkerToFootprintEnuDeg: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
+			note: `当前数据认为：marker 中心到 footprint 中心距离为 ${distanceMarkerToFootprintCenterEnu.toFixed( 3 )}m，方向为 ENU ${headingMarkerToFootprintEnuDeg.toFixed( 1 )}°。请现场确认三角桶中心到真实黄框中心是否确实约 ${distanceMarkerToFootprintCenterEnu.toFixed( 2 )}m，且方向一致。`
+		} );
 		console.info( '[EnuFieldUsageCheck]', footprintPoints.map( ( point ) => {
 			const rawPoint = this.demoModelConfig?.controlPoints[ point.id ] as unknown as { enu?: [ number, number, number ] } | undefined;
 			const configuredEnu = Array.isArray( rawPoint?.enu ) ? tupleToVector3( rawPoint.enu ) : null;
@@ -2202,15 +2249,17 @@ export class ThreeEngine {
 			footprintDiagnostics: {
 				...this.store.getState().footprintDiagnostics,
 				markerToFootprintDistanceText: `ENU ${distanceMarkerToFootprintCenterEnu.toFixed( 3 )}m / AR ${distanceMarkerToFootprintCenterAr.toFixed( 3 )}m / Δ ${distanceDeltaMeters.toFixed( 3 )}m`,
-				markerToFootprintHeadingText: `ENU ${headingMarkerToFootprintEnuDeg.toFixed( 1 )}° / AR ${headingMarkerToFootprintArDeg.toFixed( 1 )}° / Δ ${headingDeltaDeg.toFixed( 1 )}°`,
+				markerToFootprintHeadingText: `ENU ${headingMarkerToFootprintEnuDeg.toFixed( 1 )}° + yaw ${yawDegFromGroundPlane2D.toFixed( 1 )}° => expected AR ${expectedHeadingInArDeg.toFixed( 1 )}° / actual AR ${actualHeadingInArDeg.toFixed( 1 )}° / Δ ${headingDeltaDeg.toFixed( 1 )}°`,
+				markerToFootprintHeadingCheckText: `raw Δ ${previousRawHeadingDeltaDeg.toFixed( 1 )}°；已改用 ENU heading + yaw 后对比`,
 				footprintShapeText: `边长 ${enuEdgeLengths.map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m，对角 ${enuDiagonals.map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m`,
 				footprintControlPointIdsText: footprintControlPointIds.join( ' / ' ),
 				enuUsageText: wrongFootprintControlPointsUsed
 					? 'footprint 控制点不是预期 707-1~4'
 					: 'worldEnu 已是 ENU；未重复套 siteOrigin；轴序 east,north,up -> x,y,z',
+				physicalRelationText: `当前数据认为：marker 中心到 footprint 中心 ${distanceMarkerToFootprintCenterEnu.toFixed( 3 )}m，方向 ENU ${headingMarkerToFootprintEnuDeg.toFixed( 1 )}°。请现场确认三角桶中心到真实黄框中心是否约 ${distanceMarkerToFootprintCenterEnu.toFixed( 2 )}m 且方向一致。`,
 				verdictText: distanceDeltaMeters > 0.2 || headingDeltaDeg > 5
 					? 'marker->footprint ENU/AR 关系不一致：查 applyArFromEnu / worldEnu / siteOrigin / 轴映射'
-					: 'marker 和 footprint 关系一致：若仍不贴现场黄线，优先查 707-1~4 数据语义',
+					: '变换关系自洽；若仍不贴真实黄线，请检查 707-1~707-4 或 marker 物理点位语义。',
 				updatedAtText: new Date().toLocaleTimeString( 'zh-CN', { hour12: false } )
 			}
 		} );
