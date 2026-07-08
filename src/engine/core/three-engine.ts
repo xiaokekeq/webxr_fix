@@ -107,7 +107,6 @@ const MAX_LOG_ITEMS = 24;
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
 const AUTO_PLACE_AFTER_MARKER_CALIBRATION = import.meta.env.VITE_AUTO_PLACE_AFTER_MARKER_CALIBRATION === 'true';
 const DIRECT_CONTROL_POINT_PLACEMENT_ENABLED = import.meta.env.VITE_USE_DIRECT_CONTROL_POINT_PLACEMENT === 'true';
-const FORCE_MODEL_UPWARD = import.meta.env.VITE_FORCE_MODEL_UPWARD === 'true';
 
 interface EngineeringDebugLayerOptions {
 	showMarkerExpected: boolean;
@@ -2492,12 +2491,22 @@ export class ThreeEngine {
 		};
 		if ( dotWithArUp < 0 ) {
 			console.error( '[ModelUpsideDownDetected]', payload );
-			if ( FORCE_MODEL_UPWARD ) {
-				const correction = new THREE.Quaternion().setFromUnitVectors( modelWorldUp, new THREE.Vector3( 0, 1, 0 ) );
-				const correctionMatrix = new THREE.Matrix4().makeRotationFromQuaternion( correction );
-				this.applyPlacedRootWorldMatrix( placedModel, correctionMatrix.multiply( placedModel.matrixWorld.clone() ) );
-				console.warn( '[ForceModelUpwardApplied]', { reason: 'temporary dev verification only' } );
-			}
+			const rootPosition = placedModel.getWorldPosition( new THREE.Vector3() );
+			const rootQuaternion = placedModel.getWorldQuaternion( new THREE.Quaternion() );
+			const rootScale = placedModel.getWorldScale( new THREE.Vector3() );
+			const correction = new THREE.Quaternion().setFromUnitVectors( modelWorldUp, new THREE.Vector3( 0, 1, 0 ) );
+			const correctedQuaternion = correction.multiply( rootQuaternion );
+			const correctedMatrix = new THREE.Matrix4().compose( rootPosition, correctedQuaternion, rootScale );
+			this.applyPlacedRootWorldMatrix( placedModel, correctedMatrix );
+			placedModel.updateMatrixWorld( true );
+			const correctedUp = new THREE.Vector3( 0, 1, 0 ).transformDirection( placedModel.matrixWorld ).normalize();
+			console.warn( '[ModelUpwardCorrectionApplied]', {
+				reason: 'model local up was facing down after engineering placement',
+				beforeDotWithArUp: Number( dotWithArUp.toFixed( 6 ) ),
+				afterDotWithArUp: Number( correctedUp.dot( new THREE.Vector3( 0, 1, 0 ) ).toFixed( 6 ) ),
+				rootPosition: vector3ToRoundedObject( rootPosition ),
+				finalQuaternion: quaternionToRoundedObject( placedModel.getWorldQuaternion( new THREE.Quaternion() ) )
+			} );
 			return;
 		}
 		if ( determinant < 0 ) {
