@@ -2098,9 +2098,12 @@ export class ThreeEngine {
 		const distanceDeltaMeters = Math.abs( distanceMarkerToFootprintCenterAr - distanceMarkerToFootprintCenterEnu );
 		const previousRawHeadingDeltaDeg = Math.abs( normalizeSignedDegrees( headingMarkerToFootprintArDeg - headingMarkerToFootprintEnuDeg ) );
 		const yawDegFromGroundPlane2D = arFromEnuSolution.headingDeg;
-		const expectedHeadingInArDeg = normalizeSignedDegrees( headingMarkerToFootprintEnuDeg + yawDegFromGroundPlane2D );
+		const expectedHeadingInArDeg = normalizeSignedDegrees( headingMarkerToFootprintEnuDeg - yawDegFromGroundPlane2D );
 		const actualHeadingInArDeg = headingMarkerToFootprintArDeg;
 		const headingDeltaDeg = Math.abs( normalizeSignedDegrees( expectedHeadingInArDeg - actualHeadingInArDeg ) );
+		const reversedVectorWouldHeadingDeg = normalizeSignedDegrees( radToDeg(
+			Math.atan2( - vectorMarkerToFootprintCenterAr.x, vectorMarkerToFootprintCenterAr.z )
+		) );
 		const enuEdgeLengths = computeSideLengths( footprintCornersEnu );
 		const arEdgeLengths = computeSideLengths( footprintCornersAr );
 		const enuDiagonals = computeDiagonalLengths( footprintCornersEnu );
@@ -2116,6 +2119,14 @@ export class ThreeEngine {
 		}
 		if ( markerCornersEnu.length !== 4 ) {
 			warnings.push( 'controlTarget marker corners missing or not 4 points' );
+		}
+		if ( distanceDeltaMeters < 0.05 && previousRawHeadingDeltaDeg > 150 ) {
+			console.warn( '[MarkerToFootprintHeadingAlmostReversed]', {
+				distanceDeltaMeters: Number( distanceDeltaMeters.toFixed( 6 ) ),
+				previousRawHeadingDeltaDeg: Number( previousRawHeadingDeltaDeg.toFixed( 6 ) ),
+				correctedHeadingDeltaDeg: Number( headingDeltaDeg.toFixed( 6 ) ),
+				note: '距离和形状正确，但 raw heading 接近反向。当前诊断已按 AR z 轴符号和 yaw 约定修正。'
+			} );
 		}
 		const footprintControlPointIds = footprintPoints.map( ( point ) => point.id );
 		const configWithFootprintOrder = this.demoModelConfig as ( DemoModelConfig & { modelControlPointOrder?: string[] } ) | null;
@@ -2145,6 +2156,31 @@ export class ThreeEngine {
 			headingMarkerToFootprintCenterAr: Number( headingMarkerToFootprintArDeg.toFixed( 3 ) ),
 			warnings
 		} );
+		console.info( '[MarkerToFootprintVectorDirectionCheck]', {
+			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
+			footprintCenterEnu: vector3ToRoundedObject( footprintCenterEnu ),
+			vectorMarkerToFootprintEnu: vector3ToRoundedObject( vectorMarkerToFootprintCenterEnu ),
+			markerCenterAr: vector3ToRoundedObject( markerCenterAr ),
+			footprintCenterAr: vector3ToRoundedObject( footprintCenterAr ),
+			vectorMarkerToFootprintAr: vector3ToRoundedObject( vectorMarkerToFootprintCenterAr ),
+			reversedVectorWouldHeadingDeg: Number( reversedVectorWouldHeadingDeg.toFixed( 3 ) ),
+			warning: null
+		} );
+		console.info( '[HeadingConventionCheck]', {
+			convention: 'ar-x-minus-z',
+			enuHeadingFormula: 'atan2(deltaEast, deltaNorth)',
+			arHeadingFormula: 'atan2(deltaX, -deltaZ)',
+			deltaEast: Number( vectorMarkerToFootprintCenterEnu.x.toFixed( 6 ) ),
+			deltaNorth: Number( vectorMarkerToFootprintCenterEnu.y.toFixed( 6 ) ),
+			deltaX: Number( vectorMarkerToFootprintCenterAr.x.toFixed( 6 ) ),
+			deltaZ: Number( vectorMarkerToFootprintCenterAr.z.toFixed( 6 ) ),
+			headingEnuDeg: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
+			yawDeg: Number( yawDegFromGroundPlane2D.toFixed( 3 ) ),
+			expectedHeadingInArDeg: Number( expectedHeadingInArDeg.toFixed( 3 ) ),
+			actualHeadingInArDeg: Number( actualHeadingInArDeg.toFixed( 3 ) ),
+			correctedHeadingDeltaDeg: Number( headingDeltaDeg.toFixed( 6 ) )
+		} );
+		console.info( '[GroundPlaneYawConventionCheck]', createGroundPlaneYawConventionPayload( arFromEnuSolution ) );
 		const relationPayload = {
 			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
 			footprintCenterEnu: vector3ToRoundedObject( footprintCenterEnu ),
@@ -2250,8 +2286,8 @@ export class ThreeEngine {
 			footprintDiagnostics: {
 				...this.store.getState().footprintDiagnostics,
 				markerToFootprintDistanceText: `ENU ${distanceMarkerToFootprintCenterEnu.toFixed( 3 )}m / AR ${distanceMarkerToFootprintCenterAr.toFixed( 3 )}m / Δ ${distanceDeltaMeters.toFixed( 3 )}m`,
-				markerToFootprintHeadingText: `ENU ${headingMarkerToFootprintEnuDeg.toFixed( 1 )}° + yaw ${yawDegFromGroundPlane2D.toFixed( 1 )}° => expected AR ${expectedHeadingInArDeg.toFixed( 1 )}° / actual AR ${actualHeadingInArDeg.toFixed( 1 )}° / Δ ${headingDeltaDeg.toFixed( 1 )}°`,
-				markerToFootprintHeadingCheckText: `raw Δ ${previousRawHeadingDeltaDeg.toFixed( 1 )}°；已改用 ENU heading + yaw 后对比`,
+				markerToFootprintHeadingText: `ENU ${headingMarkerToFootprintEnuDeg.toFixed( 1 )}° - yaw ${yawDegFromGroundPlane2D.toFixed( 1 )}° => expected AR ${expectedHeadingInArDeg.toFixed( 1 )}° / actual AR ${actualHeadingInArDeg.toFixed( 1 )}° / Δ ${headingDeltaDeg.toFixed( 1 )}°`,
+				markerToFootprintHeadingCheckText: `raw Δ ${previousRawHeadingDeltaDeg.toFixed( 1 )}°；AR 平面约定为 atan2(deltaX, -deltaZ)，已改用 ENU heading - yaw 后对比`,
 				footprintShapeText: `边长 ${enuEdgeLengths.map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m，对角 ${enuDiagonals.map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m`,
 				footprintControlPointIdsText: footprintControlPointIds.join( ' / ' ),
 				enuUsageText: wrongFootprintControlPointsUsed
@@ -3787,6 +3823,34 @@ function headingFromArPoints(points: THREE.Vector3[]): number {
 	}
 	const edge = points[ 1 ].clone().sub( points[ 0 ] );
 	return normalizeSignedDegrees( radToDeg( Math.atan2( edge.x, - edge.z ) ) );
+
+}
+
+function createGroundPlaneYawConventionPayload(arFromEnuSolution: ArFromEnuSolution): Record<string, unknown> {
+
+	const mappedOrigin = new THREE.Vector3( 0, 0, 0 ).applyMatrix4( arFromEnuSolution.matrix );
+	const mappedEast = new THREE.Vector3( 1, 0, 0 ).applyMatrix4( arFromEnuSolution.matrix ).sub( mappedOrigin );
+	const mappedNorth = new THREE.Vector3( 0, 1, 0 ).applyMatrix4( arFromEnuSolution.matrix ).sub( mappedOrigin );
+	return {
+		yawDeg: Number( arFromEnuSolution.headingDeg.toFixed( 6 ) ),
+		rotationMatrix2D: {
+			eastToArX: Number( mappedEast.x.toFixed( 6 ) ),
+			eastToArMinusZ: Number( ( - mappedEast.z ).toFixed( 6 ) ),
+			northToArX: Number( mappedNorth.x.toFixed( 6 ) ),
+			northToArMinusZ: Number( ( - mappedNorth.z ).toFixed( 6 ) )
+		},
+		sourceBasisEastMappedToAr: vector3ToRoundedObject( mappedEast ),
+		sourceBasisNorthMappedToAr: vector3ToRoundedObject( mappedNorth ),
+		headingOfMappedEastInAr: Number( headingFromArDelta( mappedEast ).toFixed( 3 ) ),
+		headingOfMappedNorthInAr: Number( headingFromArDelta( mappedNorth ).toFixed( 3 ) ),
+		note: 'With ar-x-minus-z convention, mapped heading = ENU heading - yawDeg.'
+	};
+
+}
+
+function headingFromArDelta(delta: THREE.Vector3): number {
+
+	return normalizeSignedDegrees( radToDeg( Math.atan2( delta.x, - delta.z ) ) );
 
 }
 
