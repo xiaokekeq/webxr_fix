@@ -2555,14 +2555,19 @@ export class ThreeEngine {
 			bestLengthMatch,
 			warning
 		};
+		const correspondenceVerdict = bestLengthMatch.bestMaxEdgeDelta <= 0.2
+			? '疑似 707 点对应关系错，换序可匹配'
+			: bestLengthMatch.bestMaxEdgeDelta > 0.5
+				? '不是换序问题，modelLocal 几何尺寸不匹配'
+				: '点对应关系不确定，需复核';
 
 		console.info( '[ModelControlPointOrderCheck]', payload );
 		this.store.patch( {
 			footprintDiagnostics: {
 				...this.store.getState().footprintDiagnostics,
 				modelControlPointOrderText: warning.length > 0
-					? `异常：modelLocal 边长 ${modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${worldEnuFootprintEdgeLengths.join( '/' )}m；最佳换序 ${bestLengthMatch.suggestedWorldPointIds.join( '->' )}，MaxΔ ${bestLengthMatch.bestMaxEdgeDelta.toFixed( 3 )}m；${warning.join( '；' )}`
-					: `顺序自洽；modelLocal 边长 ${modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${worldEnuFootprintEdgeLengths.join( '/' )}m；modelYaw ${payload.modelLocalYaw.toFixed( 1 )}° / enuYaw ${payload.worldEnuYaw.toFixed( 1 )}°`
+					? `结论：${correspondenceVerdict}；modelLocal 边长 ${modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${worldEnuFootprintEdgeLengths.join( '/' )}m；最佳换序 ${bestLengthMatch.suggestedWorldPointIds.join( '->' )}，MaxΔ ${bestLengthMatch.bestMaxEdgeDelta.toFixed( 3 )}m`
+					: `结论：当前顺序自洽；modelLocal 边长 ${modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${worldEnuFootprintEdgeLengths.join( '/' )}m；modelYaw ${payload.modelLocalYaw.toFixed( 1 )}° / enuYaw ${payload.worldEnuYaw.toFixed( 1 )}°`
 			}
 		} );
 		if ( warning.length > 0 ) {
