@@ -2552,8 +2552,8 @@ export class ThreeEngine {
 			footprintDiagnostics: {
 				...this.store.getState().footprintDiagnostics,
 				modelControlPointOrderText: warning.length > 0
-					? `异常：${warning.join( '；' )}`
-					: `顺序自洽；modelYaw ${payload.modelLocalYaw.toFixed( 1 )}° / enuYaw ${payload.worldEnuYaw.toFixed( 1 )}°`
+					? `异常：modelLocal 边长 ${payload.modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${payload.worldEnuFootprintEdgeLengths.join( '/' )}m；${warning.join( '；' )}`
+					: `顺序自洽；modelLocal 边长 ${payload.modelLocalEdgeLengths.join( '/' )}m；ENU 边长 ${payload.worldEnuFootprintEdgeLengths.join( '/' )}m；modelYaw ${payload.modelLocalYaw.toFixed( 1 )}° / enuYaw ${payload.worldEnuYaw.toFixed( 1 )}°`
 			}
 		} );
 		if ( warning.length > 0 ) {
