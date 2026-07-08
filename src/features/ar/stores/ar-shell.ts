@@ -215,7 +215,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 	}
 
-	function handleSolveAndApplyCurrentSessionMarkerCalibration(): void {
+	function handleSolveAndApplyCurrentSessionMarkerCalibration(): boolean {
 
 		const applied = ensureController().actions.solveAndApplyCurrentSessionMarkerCalibration();
 		if ( applied ) {
@@ -224,6 +224,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 				registrationView: 'overview'
 			} );
 		}
+		return applied;
 
 	}
 
@@ -355,9 +356,9 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		solveAndApplyCurrentSessionMarkerCalibration(): void {
+		solveAndApplyCurrentSessionMarkerCalibration(): boolean {
 
-			handleSolveAndApplyCurrentSessionMarkerCalibration();
+			return handleSolveAndApplyCurrentSessionMarkerCalibration();
 
 		},
 

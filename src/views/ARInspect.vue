@@ -185,12 +185,37 @@ const canStartMarkerCalibration = computed(
 const canCaptureMarkerCorner = computed(
 	() => showMarkerCalibrationOverlay.value && hitTestReady.value && canUseMarkerCorners.value
 );
+const allowDebugMarkerApply = import.meta.env.DEV || import.meta.env.VITE_DEBUG_MARKER_APPLY === 'true';
 const canApplyMarkerCalibration = computed(
 	() => showMarkerCalibrationOverlay.value
 		&& canUseMarkerCorners.value
 		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
 		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
 );
+const markerApplyBlockedReason = computed( () => {
+	if ( showMarkerCalibrationOverlay.value === false ) {
+		return 'Marker 校正面板未打开或当前校正未激活。';
+	}
+	if ( hasArSession.value === false ) {
+		return '请先进入 AR 会话。';
+	}
+	if ( canUseMarkerCorners.value === false ) {
+		return '当前控制标志缺少四角 ENU 坐标。';
+	}
+	if ( engine.value.markerCalibration.active === false ) {
+		return '请先开始当前会话 Marker 校正。';
+	}
+	if ( engine.value.markerCalibration.currentSessionId === null ) {
+		return '当前 Marker 校正没有绑定 AR Session。';
+	}
+	if ( engine.value.markerCalibration.capturedCornerCount < engine.value.markerCalibration.expectedCornerCount ) {
+		return `四角点数量不足：${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}`;
+	}
+	if ( configStatus.value.hasMockEngineeringData && canApplyMockEngineeringCalibration() === false ) {
+		return configStatus.value.mockWarningText || '当前为示例工程坐标，请替换为 RTK 实测数据。';
+	}
+	return '';
+} );
 const canPlaceEngineeringModel = computed(
 	() => hasArSession.value
 		&& configStatus.value.hasSiteOrigin
@@ -220,11 +245,7 @@ const placementBlockedText = computed( () => {
 	}
 	return '';
 } );
-const markerApplyBlockedText = computed( () => (
-	configStatus.value.hasMockEngineeringData && canApplyMockEngineeringCalibration() === false
-		? configStatus.value.mockWarningText || '当前为示例工程坐标，请替换为 RTK 实测数据。'
-		: ''
-) );
+const markerApplyBlockedText = computed( () => markerApplyBlockedReason.value );
 
 const markerCornerPrompt = computed( () => {
 	if ( canUseMarkerCorners.value === false ) {
@@ -473,8 +494,47 @@ async function handleResetMarkerCalibration(): Promise<void> {
 }
 
 async function handleApplyMarkerCalibration(): Promise<void> {
-	store.actions.solveAndApplyCurrentSessionMarkerCalibration();
+	const blockedReason = markerApplyBlockedReason.value;
+	console.info( '[MarkerCalibrationApplyClicked]', {
+		modelId: engine.value.selectedModelId || null,
+		currentSessionId: engine.value.markerCalibration.currentSessionId,
+		markerCalibrationActive: engine.value.markerCalibration.active,
+		capturedCornerCount: engine.value.markerCalibration.capturedCornerCount,
+		expectedCornerCount: engine.value.markerCalibration.expectedCornerCount,
+		canApplyMarkerCalibration: canApplyMarkerCalibration.value,
+		markerApplyBlockedReason: blockedReason,
+		hasMockEngineeringData: configStatus.value.hasMockEngineeringData,
+		allowMockCalibration: canApplyMockEngineeringCalibration(),
+		allowDebugMarkerApply,
+		canUseMarkerCorners: canUseMarkerCorners.value,
+		showMarkerCalibrationOverlay: showMarkerCalibrationOverlay.value,
+		createdAt: Date.now()
+	} );
+	if ( canApplyMarkerCalibration.value === false && allowDebugMarkerApply === false ) {
+		console.warn( '[MarkerCalibrationApplyBlockedInUi]', {
+			reason: blockedReason,
+			createdAt: Date.now()
+		} );
+		return;
+	}
+
+	const applied = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
+	console.info( '[MarkerCalibrationApplyResult]', {
+		applied,
+		runtimeStatus: engine.value.runtimeStatus,
+		markerCalibration: engine.value.markerCalibration,
+		createdAt: Date.now()
+	} );
 	await nextTick();
+	if ( applied === false ) {
+		markerCalibrationOverlayOpen.value = true;
+		console.warn( '[MarkerCalibrationApplyFailedInUi]', {
+			runtimeStatus: engine.value.runtimeStatus,
+			markerCalibration: engine.value.markerCalibration,
+			createdAt: Date.now()
+		} );
+		return;
+	}
 	markerCalibrationOverlayOpen.value = engine.value.markerCalibration.active;
 	closeDrawerIfOpen();
 }
@@ -823,7 +883,7 @@ function setArOverlayClass(active: boolean): void {
 				<button
 					type="button"
 					class="marker-action success"
-					:disabled="canApplyMarkerCalibration === false"
+					:disabled="canApplyMarkerCalibration === false && allowDebugMarkerApply === false"
 					@click="handleApplyMarkerCalibration()"
 				>
 					完成校正

@@ -545,6 +545,18 @@ export class MarkerCalibrationRuntime {
 					lastUpdatedAt: Date.now()
 				} );
 			}
+			if ( applied === false ) {
+				console.warn( '[MarkerLocalizationApplyReturnedFalse]', {
+					markerId,
+					currentSessionId,
+					solutionSessionId: solution.arFromEnuSolution.sessionId ?? null,
+					markerState: this.options.store.getState().markerCalibration,
+					hasAppliedMarkerSolutionForCurrentSession: this.options.hasAppliedMarkerSolutionForCurrentSession(),
+					reason: 'applyCurrentSessionMarkerSolution returned false',
+					createdAt: Date.now()
+				} );
+				this.options.setStatus( 'Marker 校正已求解，但应用到当前 AR 会话失败。' );
+			}
 
 			return applied;
 		} catch ( error ) {
