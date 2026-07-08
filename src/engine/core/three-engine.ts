@@ -46,6 +46,7 @@ import {
 	type WorkspaceMode
 } from '@/localization/core/registration-store.js';
 import {
+	solveSimilarityTransform,
 	type EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
 import {
@@ -100,10 +101,13 @@ import { repositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
 import { updateCpuDepthFromFrame, setCpuDepthEnabled, cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
+import { readPlaceableTemplateReport } from '@/engine/core/model.js';
 
 const MAX_LOG_ITEMS = 24;
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
 const AUTO_PLACE_AFTER_MARKER_CALIBRATION = import.meta.env.VITE_AUTO_PLACE_AFTER_MARKER_CALIBRATION === 'true';
+const DIRECT_CONTROL_POINT_PLACEMENT_ENABLED = import.meta.env.VITE_USE_DIRECT_CONTROL_POINT_PLACEMENT === 'true';
+const FORCE_MODEL_UPWARD = import.meta.env.VITE_FORCE_MODEL_UPWARD === 'true';
 
 interface EngineeringDebugLayerOptions {
 	showMarkerExpected: boolean;
@@ -2162,52 +2166,351 @@ export class ThreeEngine {
 		}
 
 		placedModel.updateMatrixWorld( true );
-		const errors: number[] = [];
+		const modelContent = this.getModelContentObject( placedModel );
+		modelContent?.updateMatrixWorld( true );
+		const rootErrors: number[] = [];
+		const contentErrors: number[] = [];
 		const points = this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
 			const expectedAr = point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
-			const actualAr = placedModel.localToWorld( point.modelLocal.clone() );
-			const error = expectedAr.distanceTo( actualAr );
-			errors.push( error );
+			const actualArUsingPlacedRoot = placedModel.localToWorld( point.modelLocal.clone() );
+			const actualArUsingModelContent = modelContent === null
+				? null
+				: modelContent.localToWorld( point.modelLocal.clone() );
+			const errorRoot = expectedAr.distanceTo( actualArUsingPlacedRoot );
+			const errorContent = actualArUsingModelContent === null
+				? null
+				: expectedAr.distanceTo( actualArUsingModelContent );
+			rootErrors.push( errorRoot );
+			if ( errorContent !== null ) {
+				contentErrors.push( errorContent );
+			}
 			return {
 				controlPointId: point.id,
 				cornerRole: this.resolveControlPointCornerRole( point.id ),
 				modelLocal: vector3ToRoundedObject( point.modelLocal ),
 				targetEnu: vector3ToRoundedObject( point.worldEnu ),
 				expectedAr: vector3ToRoundedObject( expectedAr ),
-				actualAr: vector3ToRoundedObject( actualAr ),
-				error: Number( error.toFixed( 6 ) )
+				actualArUsingPlacedRoot: vector3ToRoundedObject( actualArUsingPlacedRoot ),
+				actualArUsingModelContent: actualArUsingModelContent === null ? null : vector3ToRoundedObject( actualArUsingModelContent ),
+				errorRoot: Number( errorRoot.toFixed( 6 ) ),
+				errorContent: errorContent === null ? null : Number( errorContent.toFixed( 6 ) )
 			};
 		} );
-		const maxError = Math.max( ...errors, 0 );
-		const rmsError = Math.sqrt(
-			errors.reduce( ( total, error ) => total + error * error, 0 )
-			/ Math.max( errors.length, 1 )
-		);
+		const maxErrorRoot = Math.max( ...rootErrors, 0 );
+		const rmsErrorRoot = computeRms( rootErrors );
+		const maxErrorContent = Math.max( ...contentErrors, 0 );
+		const rmsErrorContent = computeRms( contentErrors );
 		const warnings: string[] = [];
-		if ( rmsError > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
-			warnings.push( `model control point placement RMS ${rmsError.toFixed( 3 )}m exceeds ${MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS}m` );
+		if ( rmsErrorRoot > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
+			warnings.push( `root-space RMS ${rmsErrorRoot.toFixed( 3 )}m exceeds ${MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS}m` );
 		}
-		const roundedMaxError = Number( maxError.toFixed( 6 ) );
-		const roundedRmsError = Number( rmsError.toFixed( 6 ) );
+		if ( contentErrors.length > 0 && rmsErrorContent + 0.02 < rmsErrorRoot ) {
+			warnings.push( 'modelLocal appears closer in model content local space than placed root local space' );
+		}
+		const roundedMaxErrorRoot = Number( maxErrorRoot.toFixed( 6 ) );
+		const roundedRmsErrorRoot = Number( rmsErrorRoot.toFixed( 6 ) );
+		const roundedMaxErrorContent = contentErrors.length === 0 ? null : Number( maxErrorContent.toFixed( 6 ) );
+		const roundedRmsErrorContent = contentErrors.length === 0 ? null : Number( rmsErrorContent.toFixed( 6 ) );
 		const payload = {
 			modelId: this.demoModelConfig?.modelId ?? null,
+			placedRootName: placedModel.name || placedModel.type,
+			contentObjectName: modelContent?.name || modelContent?.type || null,
+			placedRootMatrixWorld: matrixToRoundedArray( placedModel.matrixWorld ),
+			contentMatrixWorld: modelContent === null ? null : matrixToRoundedArray( modelContent.matrixWorld ),
 			points: points.map( ( point ) => ( {
 				...point,
-				maxError: roundedMaxError,
-				rmsError: roundedRmsError
+				maxErrorRoot: roundedMaxErrorRoot,
+				rmsErrorRoot: roundedRmsErrorRoot,
+				maxErrorContent: roundedMaxErrorContent,
+				rmsErrorContent: roundedRmsErrorContent
 			} ) ),
-			maxError: roundedMaxError,
-			rmsError: roundedRmsError,
-			warnings
+			maxErrorRoot: roundedMaxErrorRoot,
+			rmsErrorRoot: roundedRmsErrorRoot,
+			maxErrorContent: roundedMaxErrorContent,
+			rmsErrorContent: roundedRmsErrorContent,
+			warning: warnings
 		};
 
 		console.info( '[ModelControlPointPlacementCheck]', payload );
-		if ( rmsError > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
-			const message = `模型控制点未对齐 footprint，当前 RMS=${rmsError.toFixed( 3 )}m`;
+		const severity = maxErrorRoot > 0.5
+			? '模型控制点严重不对齐，请检查 modelLocal 坐标空间 / upAxis / 放置矩阵。'
+			: rmsErrorRoot > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS
+				? '模型控制点偏差较大'
+				: '控制点基本对齐';
+		const message = `模型控制点误差：RMS ${rmsErrorRoot.toFixed( 3 )}m / Max ${maxErrorRoot.toFixed( 3 )}m，状态：${severity}`;
+		this.store.patch( { registrationStatusDetail: message } );
+		if ( rmsErrorRoot > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
 			console.error( '[ModelControlPointPlacementMismatch]', payload );
 			this.setStatus( message );
-			this.store.patch( { registrationStatusDetail: message } );
 		}
+
+	}
+
+	private logModelHierarchyCoordinateSpaceCheck(): void {
+
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel === null || this.registrationSolution === null ) {
+			return;
+		}
+
+		placedModel.updateMatrixWorld( true );
+		const modelContent = this.getModelContentObject( placedModel );
+		modelContent?.updateMatrixWorld( true );
+		const rootBounds = computeBoundsInLocalSpace( placedModel, placedModel );
+		const contentBounds = modelContent === null ? null : computeBoundsInLocalSpace( modelContent, modelContent );
+		const report = readPlaceableTemplateReport( this.modelTemplate ?? placedModel );
+		console.info( '[ModelHierarchyCoordinateSpaceCheck]', {
+			loadedModelRootName: placedModel.name || placedModel.type,
+			contentObjectName: modelContent?.name || modelContent?.type || null,
+			rootChildren: placedModel.children.map( ( child ) => child.name || child.type ),
+			rootMatrix: matrixToRoundedArray( placedModel.matrix ),
+			rootMatrixWorld: matrixToRoundedArray( placedModel.matrixWorld ),
+			contentMatrix: modelContent === null ? null : matrixToRoundedArray( modelContent.matrix ),
+			contentMatrixWorld: modelContent === null ? null : matrixToRoundedArray( modelContent.matrixWorld ),
+			modelUpAxisConfig: this.modelTemplate?.userData.__modelUpAxis ?? 'asset-transform-normalized',
+			unitScale: report?.unitScale ?? null,
+			pivotOffset: report === null ? null : vector3ToRoundedObject( report.pivotOffset ),
+			assetCorrectionRotation: modelContent === null ? null : {
+				rotation: {
+					x: Number( modelContent.rotation.x.toFixed( 6 ) ),
+					y: Number( modelContent.rotation.y.toFixed( 6 ) ),
+					z: Number( modelContent.rotation.z.toFixed( 6 ) )
+				}
+			},
+			bboxRoot: boxToRoundedObject( rootBounds ),
+			bboxContent: contentBounds === null ? null : boxToRoundedObject( contentBounds ),
+			controlPoints: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => ( {
+				controlPointId: point.id,
+				modelLocal: vector3ToRoundedObject( point.modelLocal ),
+				insideRootBBox: rootBounds.containsPoint( point.modelLocal ),
+				insideContentBBox: contentBounds?.containsPoint( point.modelLocal ) ?? null,
+				nearRootBottom: Math.abs( point.modelLocal.y - rootBounds.min.y ) <= 0.05,
+				nearContentBottom: contentBounds === null ? null : Math.abs( point.modelLocal.y - contentBounds.min.y ) <= 0.05
+			} ) )
+		} );
+
+	}
+
+	private logModelLocalFootprintCheck(): void {
+
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel === null || this.registrationSolution === null ) {
+			return;
+		}
+
+		const modelContent = this.getModelContentObject( placedModel );
+		const bboxRoot = computeBoundsInLocalSpace( placedModel, placedModel );
+		const bboxContent = modelContent === null ? null : computeBoundsInLocalSpace( modelContent, modelContent );
+		const toleranceRoot = Math.max( bboxRoot.getSize( new THREE.Vector3() ).y * 0.03, 0.05 );
+		const toleranceContent = bboxContent === null ? 0 : Math.max( bboxContent.getSize( new THREE.Vector3() ).y * 0.03, 0.05 );
+		let rootHits = 0;
+		let contentHits = 0;
+		const points = this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
+			const distanceToBottomPlaneRoot = Math.abs( point.modelLocal.y - bboxRoot.min.y );
+			const distanceToBottomPlaneContent = bboxContent === null ? null : Math.abs( point.modelLocal.y - bboxContent.min.y );
+			const isInsideBBoxRoot = bboxRoot.containsPoint( point.modelLocal );
+			const isInsideBBoxContent = bboxContent?.containsPoint( point.modelLocal ) ?? false;
+			if ( isInsideBBoxRoot && distanceToBottomPlaneRoot <= toleranceRoot ) {
+				rootHits += 1;
+			}
+			if ( isInsideBBoxContent && distanceToBottomPlaneContent !== null && distanceToBottomPlaneContent <= toleranceContent ) {
+				contentHits += 1;
+			}
+			return {
+				controlPointId: point.id,
+				modelLocal: vector3ToRoundedObject( point.modelLocal ),
+				distanceToBottomPlaneRoot: Number( distanceToBottomPlaneRoot.toFixed( 6 ) ),
+				distanceToBottomPlaneContent: distanceToBottomPlaneContent === null ? null : Number( distanceToBottomPlaneContent.toFixed( 6 ) ),
+				isInsideBBoxRoot,
+				isInsideBBoxContent
+			};
+		} );
+		const likelySpace = contentHits > rootHits ? 'content' : rootHits > 0 ? 'root' : 'unknown';
+		const warning = likelySpace === 'unknown'
+			? '707-1~707-4.modelLocal 不是模型底面 footprint 四角，模型无法落入黄色框。请重新量取模型底面四角或启用 bbox footprint 临时测试。'
+			: null;
+		const payload = {
+			bboxRoot: boxToRoundedObject( bboxRoot ),
+			bboxContent: bboxContent === null ? null : boxToRoundedObject( bboxContent ),
+			bottomYRoot: Number( bboxRoot.min.y.toFixed( 6 ) ),
+			bottomYContent: bboxContent === null ? null : Number( bboxContent.min.y.toFixed( 6 ) ),
+			points,
+			likelySpace,
+			warning
+		};
+
+		if ( warning !== null ) {
+			console.warn( '[ModelLocalFootprintCheck]', payload );
+			return;
+		}
+		console.info( '[ModelLocalFootprintCheck]', payload );
+
+	}
+
+	private applyDirectControlPointPlacementIfEnabled(arFromEnuSolution: ArFromEnuSolution): void {
+
+		if ( DIRECT_CONTROL_POINT_PLACEMENT_ENABLED === false ) {
+			return;
+		}
+
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel === null || this.registrationSolution === null ) {
+			return;
+		}
+
+		const modelContent = this.getModelContentObject( placedModel );
+		const controlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
+		const targetAr = controlPoints.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+		const contentLocalToRootMatrix = modelContent === null
+			? null
+			: getRelativeMatrix( modelContent, placedModel );
+		const rootCandidate = this.createDirectPlacementCandidate(
+			'root',
+			controlPoints.map( ( point ) => point.modelLocal.clone() ),
+			targetAr,
+			placedModel,
+			null
+		);
+		const contentCandidate = contentLocalToRootMatrix === null
+			? null
+			: this.createDirectPlacementCandidate(
+				'content',
+				controlPoints.map( ( point ) => point.modelLocal.clone() ),
+				targetAr,
+				placedModel,
+				contentLocalToRootMatrix
+			);
+		const candidate = contentCandidate !== null && contentCandidate.rmsError + 0.02 < rootCandidate.rmsError
+			? contentCandidate
+			: rootCandidate;
+
+		console.warn( '[DirectControlPointPlacementEnabled]', {
+			reason: 'dev verification only; fitting modelLocal control points to expected AR footprint',
+			modelId: this.demoModelConfig?.modelId ?? null,
+			chosenControlPointSpace: candidate.controlPointSpace,
+			rootRmsError: Number( rootCandidate.rmsError.toFixed( 6 ) ),
+			contentRmsError: contentCandidate === null ? null : Number( contentCandidate.rmsError.toFixed( 6 ) )
+		} );
+
+		this.applyPlacedRootWorldMatrix( placedModel, candidate.placedRootMatrixWorld );
+		if ( candidate.controlPointSpace === 'content' && contentLocalToRootMatrix !== null ) {
+			console.info( '[ContentSpacePlacementMatrixComputed]', {
+				controlPointSpace: 'content',
+				contentLocalToRootMatrix: matrixToRoundedArray( contentLocalToRootMatrix ),
+				inverseContentLocalToRootMatrix: matrixToRoundedArray( contentLocalToRootMatrix.clone().invert() ),
+				contentLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
+				placedRootMatrixWorld: matrixToRoundedArray( candidate.placedRootMatrixWorld ),
+				verificationRmsError: Number( candidate.rmsError.toFixed( 6 ) )
+			} );
+			return;
+		}
+		console.info( '[RootSpacePlacementMatrixComputed]', {
+			controlPointSpace: 'root',
+			rootLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
+			placedRootMatrixWorld: matrixToRoundedArray( candidate.placedRootMatrixWorld ),
+			verificationRmsError: Number( candidate.rmsError.toFixed( 6 ) )
+		} );
+
+	}
+
+	private createDirectPlacementCandidate(
+		controlPointSpace: 'root' | 'content',
+		sourceLocalPoints: THREE.Vector3[],
+		targetArPoints: THREE.Vector3[],
+		placedModel: THREE.Group,
+		contentLocalToRootMatrix: THREE.Matrix4 | null
+	): {
+		controlPointSpace: 'root' | 'content';
+		sourceLocalToArMatrix: THREE.Matrix4;
+		placedRootMatrixWorld: THREE.Matrix4;
+		rmsError: number;
+	} {
+
+		const fit = solveSimilarityTransform( sourceLocalPoints, targetArPoints, 'similarity' );
+		const sourceLocalToArMatrix = fit.matrix.clone();
+		const placedRootMatrixWorld = controlPointSpace === 'content' && contentLocalToRootMatrix !== null
+			? sourceLocalToArMatrix.clone().multiply( contentLocalToRootMatrix.clone().invert() )
+			: sourceLocalToArMatrix.clone();
+		const verificationErrors = this.registrationSolution?.controlPoints.slice( 0, 4 ).map( ( point, index ) => {
+			const rootLocal = controlPointSpace === 'content' && contentLocalToRootMatrix !== null
+				? point.modelLocal.clone().applyMatrix4( contentLocalToRootMatrix )
+				: point.modelLocal.clone();
+			return rootLocal.applyMatrix4( placedRootMatrixWorld ).distanceTo( targetArPoints[ index ] );
+		} ) ?? [];
+
+		void placedModel;
+		return {
+			controlPointSpace,
+			sourceLocalToArMatrix,
+			placedRootMatrixWorld,
+			rmsError: computeRms( verificationErrors )
+		};
+
+	}
+
+	private applyPlacedRootWorldMatrix(placedModel: THREE.Group, rootWorldMatrix: THREE.Matrix4): void {
+
+		const parentInverse = placedModel.parent === null
+			? new THREE.Matrix4()
+			: placedModel.parent.matrixWorld.clone().invert();
+		const localMatrix = rootWorldMatrix.clone().premultiply( parentInverse );
+		placedModel.matrixAutoUpdate = false;
+		placedModel.matrix.copy( localMatrix );
+		placedModel.matrix.decompose( placedModel.position, placedModel.quaternion, placedModel.scale );
+		placedModel.updateMatrixWorld( true );
+
+	}
+
+	private logModelFinalAxisCheck(): void {
+
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel === null ) {
+			return;
+		}
+
+		placedModel.updateMatrixWorld( true );
+		const modelContent = this.getModelContentObject( placedModel );
+		const origin = placedModel.localToWorld( new THREE.Vector3() );
+		const upPoint = placedModel.localToWorld( new THREE.Vector3( 0, 1, 0 ) );
+		const modelWorldUp = upPoint.sub( origin ).normalize();
+		const dotWithArUp = modelWorldUp.dot( new THREE.Vector3( 0, 1, 0 ) );
+		const determinant = placedModel.matrixWorld.determinant();
+		const payload = {
+			finalQuaternion: quaternionToRoundedObject( placedModel.getWorldQuaternion( new THREE.Quaternion() ) ),
+			modelWorldUp: vector3ToRoundedObject( modelWorldUp ),
+			dotWithArUp: Number( dotWithArUp.toFixed( 6 ) ),
+			determinant: Number( determinant.toFixed( 6 ) ),
+			modelUpAxis: this.modelTemplate?.userData.__modelUpAxis ?? 'asset-transform-normalized',
+			contentRotation: modelContent === null ? null : {
+				x: Number( modelContent.rotation.x.toFixed( 6 ) ),
+				y: Number( modelContent.rotation.y.toFixed( 6 ) ),
+				z: Number( modelContent.rotation.z.toFixed( 6 ) )
+			},
+			warning: dotWithArUp < 0 || determinant < 0
+				? '模型最终 up 轴朝下，检查 upAxis、content.rotation、modelLocal 坐标空间和矩阵乘法顺序。'
+				: null
+		};
+		if ( dotWithArUp < 0 ) {
+			console.error( '[ModelUpsideDownDetected]', payload );
+			if ( FORCE_MODEL_UPWARD ) {
+				const correction = new THREE.Quaternion().setFromUnitVectors( modelWorldUp, new THREE.Vector3( 0, 1, 0 ) );
+				const correctionMatrix = new THREE.Matrix4().makeRotationFromQuaternion( correction );
+				this.applyPlacedRootWorldMatrix( placedModel, correctionMatrix.multiply( placedModel.matrixWorld.clone() ) );
+				console.warn( '[ForceModelUpwardApplied]', { reason: 'temporary dev verification only' } );
+			}
+			return;
+		}
+		if ( determinant < 0 ) {
+			console.warn( '[ModelFinalAxisCheck]', payload );
+			return;
+		}
+		console.info( '[ModelFinalAxisCheck]', payload );
+
+	}
+
+	private getModelContentObject(root: THREE.Group): THREE.Object3D | null {
+
+		return root.children.find( ( child ) => child.userData.__nonSelectableHelper !== true ) ?? root.children[ 0 ] ?? null;
 
 	}
 
@@ -2486,6 +2789,10 @@ export class ThreeEngine {
 			return;
 		}
 
+		this.logModelHierarchyCoordinateSpaceCheck();
+		this.logModelLocalFootprintCheck();
+		this.applyDirectControlPointPlacementIfEnabled( arFromEnuSolution );
+		this.logModelFinalAxisCheck();
 		this.renderEngineeringCornerDebug(
 			arFromEnuSolution,
 			guard.controlTarget ?? this.getActiveEngineeringControlTarget(),
@@ -3028,6 +3335,59 @@ function quaternionToRoundedObject(quaternion: THREE.Quaternion): { x: number; y
 		z: Number( quaternion.z.toFixed( 6 ) ),
 		w: Number( quaternion.w.toFixed( 6 ) )
 	};
+
+}
+
+function matrixToRoundedArray(matrix: THREE.Matrix4): number[] {
+
+	return matrix.toArray().map( ( value ) => Number( value.toFixed( 6 ) ) );
+
+}
+
+function boxToRoundedObject(box: THREE.Box3): {
+	min: { x: number; y: number; z: number };
+	max: { x: number; y: number; z: number };
+} {
+
+	return {
+		min: vector3ToRoundedObject( box.min ),
+		max: vector3ToRoundedObject( box.max )
+	};
+
+}
+
+function computeRms(errors: number[]): number {
+
+	if ( errors.length === 0 ) {
+		return 0;
+	}
+	return Math.sqrt( errors.reduce( ( total, error ) => total + error * error, 0 ) / errors.length );
+
+}
+
+function getRelativeMatrix(object: THREE.Object3D, root: THREE.Object3D): THREE.Matrix4 {
+
+	root.updateMatrixWorld( true );
+	object.updateMatrixWorld( true );
+	return root.matrixWorld.clone().invert().multiply( object.matrixWorld );
+
+}
+
+function computeBoundsInLocalSpace(object: THREE.Object3D, localRoot: THREE.Object3D): THREE.Box3 {
+
+	const bounds = new THREE.Box3();
+	const inverseRoot = localRoot.matrixWorld.clone().invert();
+	object.updateMatrixWorld( true );
+	object.traverse( ( child ) => {
+		if ( child instanceof THREE.Mesh && child.geometry !== undefined ) {
+			child.geometry.computeBoundingBox();
+			if ( child.geometry.boundingBox !== null ) {
+				const relativeMatrix = inverseRoot.clone().multiply( child.matrixWorld );
+				bounds.union( child.geometry.boundingBox.clone().applyMatrix4( relativeMatrix ) );
+			}
+		}
+	} );
+	return bounds;
 
 }
 

@@ -14,7 +14,7 @@ import {
 	transformSiteEnuToModelLocal,
 	type EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
-import { geodeticToEnu } from '@/localization/core/geodesy.js';
+import { createEnuFrame, geodeticToEnu } from '@/localization/core/geodesy.js';
 import type { SetStatus } from '@/features/ar/types/runtime-types.js';
 import { attachInfoBoardToAttachment } from '@/engine/core/attachment-info-board.js';
 import {
@@ -97,9 +97,13 @@ function resolveRegistrationConfig(
 		new THREE.Vector3( bounds.max.x, y, bounds.min.z ),
 		new THREE.Vector3( bounds.min.x, y, bounds.min.z )
 	];
-	console.warn( '[ModelBboxFootprintControlPointsUsed]', {
+	const siteEnuFrame = createEnuFrame( config.siteFrame.origin );
+	console.warn( '[UsingModelBoundingBoxFootprintControlPoints]', {
 		modelId: config.modelId,
 		controlPointIds,
+		oldModelLocalPoints: controlPointIds.map( ( id ) => config.controlPoints[ id ].modelLocal ),
+		bboxFootprintPoints: bboxCorners.map( vectorToModelLocal ),
+		targetEnuPoints: controlPointIds.map( ( id ) => vectorToModelLocal( geodeticToEnu( config.controlPoints[ id ].world, siteEnuFrame ) ) ),
 		reason: 'temporary dev option; using model bbox footprint, not surveyed control points'
 	} );
 
