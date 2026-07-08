@@ -548,6 +548,16 @@ export class MarkerCalibrationRuntime {
 
 			return applied;
 		} catch ( error ) {
+			this.syncState( {
+				active: true,
+				solved: false,
+				applied: false,
+				canCapture: false,
+				canSolve: this.currentSessionMarkerCornerCaptures.length === MARKER_CORNER_SEQUENCE.length,
+				rmsErrorMeters: undefined,
+				headingDeg: undefined,
+				lastUpdatedAt: Date.now()
+			} );
 			console.error( '[MarkerSessionCalibrationSolveFailed]', {
 				mode: MARKER_CALIBRATION_MODE,
 				workflowMode: this.options.getWorkflowMode(),

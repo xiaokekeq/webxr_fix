@@ -807,6 +807,7 @@ function setArOverlayClass(active: boolean): void {
 				<span>{{ engine.markerCalibration.nextCornerLabel || '-' }}</span>
 			</div>
 			<div class="marker-calibration-hint">{{ markerCornerPrompt }}</div>
+			<div class="marker-calibration-status">{{ engine.runtimeStatus }}</div>
 			<div v-if="markerApplyBlockedText" class="marker-calibration-warning">
 				{{ markerApplyBlockedText }}
 			</div>
@@ -1207,6 +1208,12 @@ function setArOverlayClass(active: boolean): void {
 	font-size: 12px;
 	line-height: 1.45;
 	color: rgba(226, 232, 240, 0.86);
+}
+
+.marker-calibration-status {
+	font-size: 11px;
+	line-height: 1.4;
+	color: rgba(125, 211, 252, 0.94);
 }
 
 .marker-calibration-warning {
