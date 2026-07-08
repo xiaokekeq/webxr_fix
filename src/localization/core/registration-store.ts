@@ -93,6 +93,10 @@ export interface FootprintDiagnosticsState {
 	markerToFootprintDistanceText: string;
 	markerToFootprintHeadingText: string;
 	markerToFootprintHeadingCheckText: string;
+	modelControlPointPlacementText: string;
+	modelControlPointOrderText: string;
+	modelLocalFootprintText: string;
+	modelAxisText: string;
 	footprintShapeText: string;
 	footprintControlPointIdsText: string;
 	enuUsageText: string;
@@ -395,6 +399,10 @@ export function createDefaultFootprintDiagnosticsState(): FootprintDiagnosticsSt
 		markerToFootprintDistanceText: '-',
 		markerToFootprintHeadingText: '-',
 		markerToFootprintHeadingCheckText: '-',
+		modelControlPointPlacementText: '-',
+		modelControlPointOrderText: '-',
+		modelLocalFootprintText: '-',
+		modelAxisText: '-',
 		footprintShapeText: '-',
 		footprintControlPointIdsText: '-',
 		enuUsageText: '-',

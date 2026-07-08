@@ -2497,7 +2497,15 @@ export class ThreeEngine {
 				? '模型控制点偏差较大'
 				: '控制点基本对齐';
 		const message = `模型控制点误差：RMS ${rmsErrorRoot.toFixed( 3 )}m / Max ${maxErrorRoot.toFixed( 3 )}m，状态：${severity}`;
-		this.store.patch( { registrationStatusDetail: message } );
+		this.store.patch( {
+			registrationStatusDetail: message,
+			footprintDiagnostics: {
+				...this.store.getState().footprintDiagnostics,
+				modelControlPointPlacementText: `wrapper RMS ${rmsErrorRoot.toFixed( 3 )}m / Max ${maxErrorRoot.toFixed( 3 )}m；content RMS ${
+					roundedRmsErrorContent === null ? '-' : `${roundedRmsErrorContent.toFixed( 3 )}m`
+				}；likely ${likelyModelLocalSpace}${warnings.length > 0 ? `；${warnings.join( '；' )}` : ''}`
+			}
+		} );
 		if ( rmsErrorRoot > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
 			console.error( '[ModelControlPointPlacementMismatch]', payload );
 			this.setStatus( message );
@@ -2540,6 +2548,14 @@ export class ThreeEngine {
 		};
 
 		console.info( '[ModelControlPointOrderCheck]', payload );
+		this.store.patch( {
+			footprintDiagnostics: {
+				...this.store.getState().footprintDiagnostics,
+				modelControlPointOrderText: warning.length > 0
+					? `异常：${warning.join( '；' )}`
+					: `顺序自洽；modelYaw ${payload.modelLocalYaw.toFixed( 1 )}° / enuYaw ${payload.worldEnuYaw.toFixed( 1 )}°`
+			}
+		} );
 		if ( warning.length > 0 ) {
 			console.error( '[ModelControlPointOrderMismatch]', payload );
 		}
@@ -2640,9 +2656,21 @@ export class ThreeEngine {
 		};
 
 		if ( warning !== null ) {
+			this.store.patch( {
+				footprintDiagnostics: {
+					...this.store.getState().footprintDiagnostics,
+					modelLocalFootprintText: `likely ${likelySpace}；${warning}`
+				}
+			} );
 			console.warn( '[ModelLocalFootprintCheck]', payload );
 			return;
 		}
+		this.store.patch( {
+			footprintDiagnostics: {
+				...this.store.getState().footprintDiagnostics,
+				modelLocalFootprintText: `likely ${likelySpace}；wrapperHits ${wrapperHits}/4；contentHits ${contentHits}/4`
+			}
+		} );
 		console.info( '[ModelLocalFootprintCheck]', payload );
 
 	}
@@ -2829,6 +2857,7 @@ export class ThreeEngine {
 				? '模型最终 up 轴朝下，检查 upAxis、content.rotation、modelLocal 坐标空间和矩阵乘法顺序。'
 				: null
 		};
+		let headingText = 'heading -';
 		if ( this.registrationSolution !== null ) {
 			const controlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
 			const expectedAr = controlPoints.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
@@ -2836,6 +2865,7 @@ export class ThreeEngine {
 			const expectedFootprintYawDeg = headingFromArPoints( expectedAr );
 			const actualModelFootprintYawDeg = headingFromArPoints( actualWrapperAr );
 			const headingDeltaDeg = Math.abs( normalizeSignedDegrees( actualModelFootprintYawDeg - expectedFootprintYawDeg ) );
+			headingText = `expectedYaw ${expectedFootprintYawDeg.toFixed( 1 )}° / actualYaw ${actualModelFootprintYawDeg.toFixed( 1 )}° / Δ ${headingDeltaDeg.toFixed( 1 )}°`;
 			if ( headingDeltaDeg > 5 ) {
 				console.error( '[ModelHeadingMismatch]', {
 					expectedFootprintYawDeg: Number( expectedFootprintYawDeg.toFixed( 3 ) ),
@@ -2844,6 +2874,12 @@ export class ThreeEngine {
 				} );
 			}
 		}
+		this.store.patch( {
+			footprintDiagnostics: {
+				...this.store.getState().footprintDiagnostics,
+				modelAxisText: `upDot ${dotWithArUp.toFixed( 3 )}；det ${determinant.toFixed( 3 )}；${headingText}${payload.warning === null ? '' : `；${payload.warning}`}`
+			}
+		} );
 		if ( dotWithArUp < 0 ) {
 			console.error( '[ModelUpsideDownDetected]', payload );
 			const rootPosition = placedModel.getWorldPosition( new THREE.Vector3() );
