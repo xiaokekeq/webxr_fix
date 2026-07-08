@@ -28,6 +28,7 @@ import {
 } from '@/models/catalog/model-api.js';
 import {
 	createDefaultAnnotationDetailState,
+	createDefaultFootprintDiagnosticsState,
 	createDefaultMarkerCalibrationState,
 	createDefaultRegistrationMetricsState,
 	createDefaultRegistrationChainDebugState,
@@ -193,6 +194,7 @@ function createInitialState(): RegistrationStoreState {
 		},
 		modelScaleSummary: createDefaultModelScaleSummaryState(),
 		registrationChainDebug: createDefaultRegistrationChainDebugState(),
+		footprintDiagnostics: createDefaultFootprintDiagnosticsState(),
 		siteCalibrationBaseline: createDefaultSiteCalibrationBaselineState(),
 		engineeringConfigStatus: createDefaultEngineeringConfigStatusState(),
 		savedMarkerLocalization: createDefaultSavedMarkerLocalizationState(),
@@ -2196,6 +2198,22 @@ export class ThreeEngine {
 					: null
 			};
 		} ) );
+		this.store.patch( {
+			footprintDiagnostics: {
+				...this.store.getState().footprintDiagnostics,
+				markerToFootprintDistanceText: `ENU ${distanceMarkerToFootprintCenterEnu.toFixed( 3 )}m / AR ${distanceMarkerToFootprintCenterAr.toFixed( 3 )}m / Δ ${distanceDeltaMeters.toFixed( 3 )}m`,
+				markerToFootprintHeadingText: `ENU ${headingMarkerToFootprintEnuDeg.toFixed( 1 )}° / AR ${headingMarkerToFootprintArDeg.toFixed( 1 )}° / Δ ${headingDeltaDeg.toFixed( 1 )}°`,
+				footprintShapeText: `边长 ${enuEdgeLengths.map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m，对角 ${enuDiagonals.map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m`,
+				footprintControlPointIdsText: footprintControlPointIds.join( ' / ' ),
+				enuUsageText: wrongFootprintControlPointsUsed
+					? 'footprint 控制点不是预期 707-1~4'
+					: 'worldEnu 已是 ENU；未重复套 siteOrigin；轴序 east,north,up -> x,y,z',
+				verdictText: distanceDeltaMeters > 0.2 || headingDeltaDeg > 5
+					? 'marker->footprint ENU/AR 关系不一致：查 applyArFromEnu / worldEnu / siteOrigin / 轴映射'
+					: 'marker 和 footprint 关系一致：若仍不贴现场黄线，优先查 707-1~4 数据语义',
+				updatedAtText: new Date().toLocaleTimeString( 'zh-CN', { hour12: false } )
+			}
+		} );
 
 	}
 

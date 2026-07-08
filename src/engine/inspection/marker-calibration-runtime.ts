@@ -333,9 +333,25 @@ export class MarkerCalibrationRuntime {
 		};
 
 		if ( max2d > 0.15 ) {
+			this.options.store.patch( {
+				footprintDiagnostics: {
+					...this.options.store.getState().footprintDiagnostics,
+					groundPlaneSelfCheckText: `RMS ${rms2d.toFixed( 3 )}m / Max ${max2d.toFixed( 3 )}m`,
+					verdictText: 'Marker self-check 未通过：先查 ground-plane-2d 公式/轴映射/采集点对应',
+					updatedAtText: new Date().toLocaleTimeString( 'zh-CN', { hour12: false } )
+				}
+			} );
 			console.warn( '[GroundPlane2DSelfCheck]', payload );
 			return;
 		}
+		this.options.store.patch( {
+			footprintDiagnostics: {
+				...this.options.store.getState().footprintDiagnostics,
+				groundPlaneSelfCheckText: `RMS ${rms2d.toFixed( 3 )}m / Max ${max2d.toFixed( 3 )}m`,
+				verdictText: 'Marker self-check 已通过，继续看 marker->footprint 关系',
+				updatedAtText: new Date().toLocaleTimeString( 'zh-CN', { hour12: false } )
+			}
+		} );
 		console.info( '[GroundPlane2DSelfCheck]', payload );
 
 	}

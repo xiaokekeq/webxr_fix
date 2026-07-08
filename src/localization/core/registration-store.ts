@@ -88,6 +88,17 @@ export interface RegistrationChainDebugState {
 	};
 }
 
+export interface FootprintDiagnosticsState {
+	groundPlaneSelfCheckText: string;
+	markerToFootprintDistanceText: string;
+	markerToFootprintHeadingText: string;
+	footprintShapeText: string;
+	footprintControlPointIdsText: string;
+	enuUsageText: string;
+	verdictText: string;
+	updatedAtText: string;
+}
+
 export interface SiteCalibrationBaselineState {
 	available: boolean;
 	siteId?: string;
@@ -240,6 +251,7 @@ export interface RegistrationStoreState {
 	registrationMetrics: RegistrationMetricsState;
 	modelScaleSummary: ModelScaleSummaryState;
 	registrationChainDebug: RegistrationChainDebugState;
+	footprintDiagnostics: FootprintDiagnosticsState;
 	siteCalibrationBaseline: SiteCalibrationBaselineState;
 	engineeringConfigStatus: EngineeringConfigStatusState;
 	savedMarkerLocalization: SavedMarkerLocalizationState;
@@ -369,6 +381,21 @@ export function createDefaultRegistrationChainDebugState(): RegistrationChainDeb
 			markerCount: 0,
 			markers: []
 		}
+	};
+
+}
+
+export function createDefaultFootprintDiagnosticsState(): FootprintDiagnosticsState {
+
+	return {
+		groundPlaneSelfCheckText: '-',
+		markerToFootprintDistanceText: '-',
+		markerToFootprintHeadingText: '-',
+		footprintShapeText: '-',
+		footprintControlPointIdsText: '-',
+		enuUsageText: '-',
+		verdictText: '等待 Marker 校正',
+		updatedAtText: '-'
 	};
 
 }
