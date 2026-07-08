@@ -3,13 +3,27 @@ import type {
 	EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
-import { composeModelQuaternionInAr } from '@/localization/coarse/engineering-registration.js';
 import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
 import { placeModelAt } from '@/engine/core/model.js';
-import { getPlacementResidualScale } from './camera-fit.js';
 
-const tempEuler = new THREE.Euler();
-const tempSiteOffset = new THREE.Vector3();
+const tempModelRawLocalToArMatrix = new THREE.Matrix4();
+const tempMatrixPosition = new THREE.Vector3();
+const tempMatrixQuaternion = new THREE.Quaternion();
+const tempMatrixScale = new THREE.Vector3();
+
+export function composeModelRawLocalToArMatrix(options: {
+	arFromEnuSolution: ArFromEnuSolution;
+	registrationSolution: EngineeringRegistrationSolution;
+	target?: THREE.Matrix4;
+}): THREE.Matrix4 {
+
+	const target = options.target ?? new THREE.Matrix4();
+	return target.multiplyMatrices(
+		options.arFromEnuSolution.matrix,
+		options.registrationSolution.modelToSite.matrix
+	);
+
+}
 
 export function createPlacementBaseFromArLocalizationSolution(options: {
 	arFromEnuSolution: ArFromEnuSolution;
@@ -24,20 +38,30 @@ export function createPlacementBaseFromArLocalizationSolution(options: {
 		registrationSolution,
 		modelOrientationTarget
 	} = options;
-	const baseScale = getPlacementResidualScale( modelTemplate, registrationSolution.modelToSite.scale );
-	const position = composeAnchoredPlacementPosition(
-		arFromEnuSolution.siteOriginArPosition,
-		arFromEnuSolution.orientation,
-		registrationSolution.modelToSite.translation,
-		tempSiteOffset
-	).clone();
+	void modelTemplate;
+	composeModelRawLocalToArMatrix( {
+		arFromEnuSolution,
+		registrationSolution,
+		target: tempModelRawLocalToArMatrix
+	} ).decompose( tempMatrixPosition, tempMatrixQuaternion, tempMatrixScale );
+	modelOrientationTarget.copy( tempMatrixQuaternion );
+	const baseScale = ( tempMatrixScale.x + tempMatrixScale.y + tempMatrixScale.z ) / 3;
+	const position = tempMatrixPosition.clone();
 	console.info( '[FormalPlacementUsesModelLocalToEnu]', {
 		source: arFromEnuSolution.source,
 		modelId: registrationSolution.modelId,
+		placementMode: 'full-matrix',
+		matrixChain: 'modelLocal -> modelToSite -> arFromEnu',
 		modelToSiteTranslation: serializeVector3( registrationSolution.modelToSite.translation ),
 		modelToSiteScale: registrationSolution.modelToSite.scale,
 		siteOriginArPosition: serializeVector3( arFromEnuSolution.siteOriginArPosition ),
 		placementPosition: serializeVector3( position ),
+		placementQuaternion: quaternionToObject( tempMatrixQuaternion ),
+		placementScaleVector: serializeVector3( tempMatrixScale ),
+		appliedUniformScale: baseScale,
+		flattenYawApplied: false,
+		residualScaleOverrideApplied: false,
+		matrix: tempModelRawLocalToArMatrix.toArray(),
 		createdAt: Date.now()
 	} );
 	console.info( '[FormalPlacementGroundSnapSkipped]', {
@@ -49,14 +73,7 @@ export function createPlacementBaseFromArLocalizationSolution(options: {
 
 	return {
 		position,
-		orientation: flattenQuaternionToYaw(
-			composeModelQuaternionInAr(
-				arFromEnuSolution.orientation,
-				registrationSolution,
-				modelOrientationTarget
-			),
-			modelOrientationTarget
-		).clone(),
+		orientation: tempMatrixQuaternion.clone(),
 		scale: baseScale,
 		scaleAnchor: position.clone(),
 		siteContext: {
@@ -68,20 +85,6 @@ export function createPlacementBaseFromArLocalizationSolution(options: {
 			accuracyMeters: arFromEnuSolution.accuracyMeters
 		}
 	};
-
-}
-
-function composeAnchoredPlacementPosition(
-	placementAnchor: THREE.Vector3,
-	siteToArQuaternion: THREE.Quaternion,
-	modelSiteOffset: THREE.Vector3,
-	target: THREE.Vector3
-): THREE.Vector3 {
-
-	return target
-		.copy( modelSiteOffset )
-		.applyQuaternion( siteToArQuaternion )
-		.add( placementAnchor );
 
 }
 
@@ -109,23 +112,23 @@ export function placeAdjustedModel(options: {
 
 }
 
-function flattenQuaternionToYaw(
-	source: THREE.Quaternion,
-	target: THREE.Quaternion
-): THREE.Quaternion {
-
-	tempEuler.setFromQuaternion( source, 'YXZ' );
-	target.setFromEuler( new THREE.Euler( 0, tempEuler.y, 0, 'YXZ' ) );
-	return target;
-
-}
-
 function serializeVector3(vector: THREE.Vector3): { x: number; y: number; z: number } {
 
 	return {
 		x: Number( vector.x.toFixed( 6 ) ),
 		y: Number( vector.y.toFixed( 6 ) ),
 		z: Number( vector.z.toFixed( 6 ) )
+	};
+
+}
+
+function quaternionToObject(quaternion: THREE.Quaternion): { x: number; y: number; z: number; w: number } {
+
+	return {
+		x: Number( quaternion.x.toFixed( 6 ) ),
+		y: Number( quaternion.y.toFixed( 6 ) ),
+		z: Number( quaternion.z.toFixed( 6 ) ),
+		w: Number( quaternion.w.toFixed( 6 ) )
 	};
 
 }

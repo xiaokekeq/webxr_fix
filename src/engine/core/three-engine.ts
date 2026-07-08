@@ -58,6 +58,10 @@ import {
 	type MarkerPoseInEnu
 } from '@/localization/marker/marker-localization.js';
 import {
+	computeDiagonalLengths,
+	computeSideLengths
+} from '@/localization/core/corner-order-diagnostics.js';
+import {
 	clearLastStableMarkerLocalizationResult,
 	type SavedMarkerLocalizationResult
 } from '@/localization/marker/marker-localization-storage.js';
@@ -374,6 +378,7 @@ export class ThreeEngine {
 			store: this.store,
 			getWorkflowMode: () => this.workflowMode,
 			getSiteId: () => this.demoModelConfig?.modelId ?? null,
+			getConfigUrl: () => this.modelSession.getCurrentModelDefinition()?.configUrl ?? null,
 			getCurrentSessionId: () => this.currentArSessionId,
 			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
@@ -1833,22 +1838,32 @@ export class ThreeEngine {
 
 	private renderEngineeringCornerDebug(
 		arFromEnuSolution: ArFromEnuSolution,
-		controlTarget: VisualControlTarget | null
+		controlTarget: VisualControlTarget | null,
+		capturedCornersAr: THREE.Vector3[] = []
 	): void {
 
 		this.clearEngineeringCornerDebug();
 		if ( controlTarget?.cornersEnu !== undefined ) {
 			this.addDebugQuad( {
-				name: 'marker/controlTarget',
+				name: 'marker-expected',
 				points: controlTarget.cornersEnu.map( ( point ) => enuTupleToArVector( point, arFromEnuSolution ) ),
 				labels: [ 'leftTop', 'rightTop', 'rightBottom', 'leftBottom' ],
 				color: 0x00d4ff
 			} );
 		}
 
+		if ( capturedCornersAr.length === 4 ) {
+			this.addDebugQuad( {
+				name: 'marker-captured',
+				points: capturedCornersAr.map( ( point ) => point.clone() ),
+				labels: [ 'captured-LT', 'captured-RT', 'captured-RB', 'captured-LB' ],
+				color: 0x32ff8f
+			} );
+		}
+
 		if ( this.registrationSolution !== null ) {
 			this.addDebugQuad( {
-				name: 'model footprint',
+				name: 'footprint-enu',
 				points: this.registrationSolution.controlPoints
 					.slice( 0, 4 )
 					.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) ),
@@ -1857,10 +1872,37 @@ export class ThreeEngine {
 			} );
 		}
 
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel !== null && this.registrationSolution !== null ) {
+			placedModel.updateMatrixWorld( true );
+			this.addDebugQuad( {
+				name: 'model-cp-actual',
+				points: this.registrationSolution.controlPoints
+					.slice( 0, 4 )
+					.map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) ),
+				labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}` ),
+				color: 0xff4dff
+			} );
+			const bbox = new THREE.Box3().setFromObject( placedModel );
+			if ( bbox.isEmpty() === false ) {
+				const helper = new THREE.Box3Helper( bbox, 0xffffff );
+				helper.name = 'model-bbox';
+				this.engineeringCornerDebugGroup.add( helper );
+			}
+		}
+
 		console.info( '[EngineeringCornerDebugDrawn]', {
 			controlTargetId: controlTarget?.id ?? null,
 			markerCornerCount: controlTarget?.cornersEnu?.length ?? 0,
+			capturedCornerCount: capturedCornersAr.length,
 			modelControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
+			layers: [
+				'marker-expected',
+				'marker-captured',
+				'footprint-enu',
+				'model-cp-actual',
+				'model-bbox'
+			],
 			placementMode: 'diagnostic-only',
 			affectsPlacement: false,
 			createdAt: Date.now()
@@ -1912,12 +1954,145 @@ export class ThreeEngine {
 
 	}
 
+	private logCoordinateAxisMappingCheck(arFromEnuSolution: ArFromEnuSolution): void {
+
+		const sampleEnuPoint = new THREE.Vector3( 1, 1, 1 );
+		console.info( '[CoordinateAxisMappingCheck]', {
+			enuToThreeMapping: {
+				beforeArFromEnu: '[east,north,up] stored as Vector3(x=east,y=north,z=up)',
+				afterArFromEnu: 'solution.matrix maps ENU meters into WebXR AR local coordinates'
+			},
+			arWorldUpAxis: 'WebXR/Three.js +Y',
+			modelUpAxis: this.modelTemplate?.userData.__modelUpAxis ?? 'asset-transform-normalized',
+			siteOrigin: this.demoModelConfig?.siteFrame.origin ?? null,
+			sampleEnuPoint: vector3ToRoundedObject( sampleEnuPoint ),
+			sampleArPoint: vector3ToRoundedObject( sampleEnuPoint.clone().applyMatrix4( arFromEnuSolution.matrix ) ),
+			warningIfUpAxisMismatch: 'Do not render raw ENU [east,north,up] directly as AR [x,y,z]; apply arFromEnuSolution.matrix first.'
+		} );
+
+	}
+
+	private logFootprintEnuToArCheck(
+		arFromEnuSolution: ArFromEnuSolution,
+		controlTarget: VisualControlTarget | null
+	): void {
+
+		if ( this.registrationSolution === null ) {
+			console.warn( '[FootprintEnuToArCheck]', {
+				modelId: this.demoModelConfig?.modelId ?? null,
+				warnings: [ 'registrationSolution missing' ]
+			} );
+			return;
+		}
+
+		const footprintPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
+		const footprintCornersEnu = footprintPoints.map( ( point ) => point.worldEnu.clone() );
+		const footprintCornersAr = footprintCornersEnu.map( ( point ) => point.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+		const markerCornersEnu = ( controlTarget?.cornersEnu ?? [] ).map( tupleToVector3 );
+		const markerCornersAr = markerCornersEnu.map( ( point ) => point.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+		const footprintCenterEnu = averageVectors( footprintCornersEnu );
+		const footprintCenterAr = averageVectors( footprintCornersAr );
+		const markerCenterEnu = controlTarget?.centerEnu === undefined
+			? averageVectors( markerCornersEnu )
+			: tupleToVector3( controlTarget.centerEnu );
+		const markerCenterAr = markerCenterEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
+		const vectorMarkerToFootprintCenterEnu = footprintCenterEnu.clone().sub( markerCenterEnu );
+		const vectorMarkerToFootprintCenterAr = footprintCenterAr.clone().sub( markerCenterAr );
+		const distanceMarkerToFootprintCenterEnu = vectorMarkerToFootprintCenterEnu.length();
+		const distanceMarkerToFootprintCenterAr = vectorMarkerToFootprintCenterAr.length();
+		const warnings: string[] = [];
+		if (
+			distanceMarkerToFootprintCenterEnu > 1e-6
+			&& Math.abs( distanceMarkerToFootprintCenterAr - distanceMarkerToFootprintCenterEnu )
+				/ distanceMarkerToFootprintCenterEnu > 0.25
+		) {
+			warnings.push( 'marker-to-footprint distance changed after ENU->AR transform; check transform scale/direction' );
+		}
+		if ( markerCornersEnu.length !== 4 ) {
+			warnings.push( 'controlTarget marker corners missing or not 4 points' );
+		}
+
+		console.info( '[FootprintEnuToArCheck]', {
+			modelId: this.demoModelConfig?.modelId ?? null,
+			footprintControlPointIds: footprintPoints.map( ( point ) => point.id ),
+			footprintCornerOrder: [ 'leftTop', 'rightTop', 'rightBottom', 'leftBottom' ],
+			footprintCornersEnu: footprintCornersEnu.map( vector3ToRoundedObject ),
+			footprintCornersArExpected: footprintCornersAr.map( vector3ToRoundedObject ),
+			sideLengthsFootprintEnu: computeSideLengths( footprintCornersEnu ),
+			sideLengthsFootprintAr: computeSideLengths( footprintCornersAr ),
+			diagonalLengthsFootprintEnu: computeDiagonalLengths( footprintCornersEnu ),
+			diagonalLengthsFootprintAr: computeDiagonalLengths( footprintCornersAr ),
+			footprintCenterEnu: vector3ToRoundedObject( footprintCenterEnu ),
+			footprintCenterAr: vector3ToRoundedObject( footprintCenterAr ),
+			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
+			markerCenterAr: vector3ToRoundedObject( markerCenterAr ),
+			vectorMarkerToFootprintCenterEnu: vector3ToRoundedObject( vectorMarkerToFootprintCenterEnu ),
+			vectorMarkerToFootprintCenterAr: vector3ToRoundedObject( vectorMarkerToFootprintCenterAr ),
+			distanceMarkerToFootprintCenterEnu: Number( distanceMarkerToFootprintCenterEnu.toFixed( 6 ) ),
+			distanceMarkerToFootprintCenterAr: Number( distanceMarkerToFootprintCenterAr.toFixed( 6 ) ),
+			headingMarkerToFootprintCenterEnu: Number( radToDeg( Math.atan2( vectorMarkerToFootprintCenterEnu.x, vectorMarkerToFootprintCenterEnu.y ) ).toFixed( 3 ) ),
+			headingMarkerToFootprintCenterAr: Number( radToDeg( Math.atan2( vectorMarkerToFootprintCenterAr.x, vectorMarkerToFootprintCenterAr.z ) ).toFixed( 3 ) ),
+			warnings
+		} );
+
+	}
+
+	private logModelControlPointPlacementCheck(arFromEnuSolution: ArFromEnuSolution): void {
+
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel === null || this.registrationSolution === null ) {
+			console.warn( '[ModelControlPointPlacementCheck]', {
+				modelId: this.demoModelConfig?.modelId ?? null,
+				warnings: [ 'placed model or registrationSolution missing' ]
+			} );
+			return;
+		}
+
+		placedModel.updateMatrixWorld( true );
+		const errors: number[] = [];
+		const points = this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
+			const expectedAr = point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
+			const actualAr = placedModel.localToWorld( point.modelLocal.clone() );
+			const error = expectedAr.distanceTo( actualAr );
+			errors.push( error );
+			const rawPoint = point as unknown as Record<string, unknown>;
+			return {
+				controlPointId: point.id,
+				cornerRole: rawPoint.cornerRole ?? null,
+				modelLocal: vector3ToRoundedObject( point.modelLocal ),
+				targetEnu: vector3ToRoundedObject( point.worldEnu ),
+				expectedAr: vector3ToRoundedObject( expectedAr ),
+				actualAr: vector3ToRoundedObject( actualAr ),
+				error: Number( error.toFixed( 6 ) )
+			};
+		} );
+		const maxError = Math.max( ...errors, 0 );
+		const rmsError = Math.sqrt(
+			errors.reduce( ( total, error ) => total + error * error, 0 )
+			/ Math.max( errors.length, 1 )
+		);
+		const warnings: string[] = [];
+		if ( maxError > 0.05 ) {
+			warnings.push( `model control point placement error ${maxError.toFixed( 3 )}m exceeds 0.05m` );
+		}
+
+		console.info( '[ModelControlPointPlacementCheck]', {
+			modelId: this.demoModelConfig?.modelId ?? null,
+			points,
+			maxError: Number( maxError.toFixed( 6 ) ),
+			rmsError: Number( rmsError.toFixed( 6 ) ),
+			warnings
+		} );
+
+	}
+
 	private applyCurrentSessionMarkerSolution(
 		solution: MarkerLocalizationSolution,
 		metadata: {
 			markerId: string;
 			markerConfigId: string;
 			source?: 'marker';
+			capturedCornersAr?: THREE.Vector3[];
 		}
 	): boolean {
 
@@ -2039,7 +2214,14 @@ export class ThreeEngine {
 		if ( appliedToPlacedModel ) {
 			this.applyModelLayerVisibility();
 			this.arSessionStateRuntime.markPlacementCommitted( true );
-			this.renderEngineeringCornerDebug( solution.arFromEnuSolution, currentTarget ?? null );
+			this.renderEngineeringCornerDebug(
+				solution.arFromEnuSolution,
+				currentTarget ?? null,
+				metadata.capturedCornersAr ?? []
+			);
+			this.logCoordinateAxisMappingCheck( solution.arFromEnuSolution );
+			this.logFootprintEnuToArCheck( solution.arFromEnuSolution, currentTarget ?? null );
+			this.logModelControlPointPlacementCheck( solution.arFromEnuSolution );
 		} else if ( this.workflowMode === 'ar-inspection' ) {
 			this.pointerSelection.suppressSelectionFor( 1200 );
 			console.info( '[MarkerPlacementRequested]', {
@@ -2054,7 +2236,14 @@ export class ThreeEngine {
 			this.placementWorkflow.requestAutoPlacement();
 			appliedToPlacedModel = this.placementSession.getPlacedModel() !== null;
 			if ( appliedToPlacedModel ) {
-				this.renderEngineeringCornerDebug( solution.arFromEnuSolution, currentTarget ?? null );
+				this.renderEngineeringCornerDebug(
+					solution.arFromEnuSolution,
+					currentTarget ?? null,
+					metadata.capturedCornersAr ?? []
+				);
+				this.logCoordinateAxisMappingCheck( solution.arFromEnuSolution );
+				this.logFootprintEnuToArCheck( solution.arFromEnuSolution, currentTarget ?? null );
+				this.logModelControlPointPlacementCheck( solution.arFromEnuSolution );
 			}
 		}
 
@@ -2661,6 +2850,31 @@ function enuTupleToArVector(
 ): THREE.Vector3 {
 
 	return new THREE.Vector3( tuple[ 0 ], tuple[ 1 ], tuple[ 2 ] ).applyMatrix4( arFromEnuSolution.matrix );
+
+}
+
+function tupleToVector3(tuple: [ number, number, number ]): THREE.Vector3 {
+
+	return new THREE.Vector3( tuple[ 0 ], tuple[ 1 ], tuple[ 2 ] );
+
+}
+
+function averageVectors(vectors: THREE.Vector3[]): THREE.Vector3 {
+
+	if ( vectors.length === 0 ) {
+		return new THREE.Vector3();
+	}
+	const total = vectors.reduce(
+		(sum, vector) => sum.add( vector ),
+		new THREE.Vector3()
+	);
+	return total.multiplyScalar( 1 / vectors.length );
+
+}
+
+function radToDeg(value: number): number {
+
+	return THREE.MathUtils.radToDeg( value );
 
 }
 

@@ -219,18 +219,18 @@ const markerCornerPrompt = computed( () => {
 
 	const label = engine.value.markerCalibration.nextCornerLabel;
 	if ( label.includes( '左上' ) || label.includes( 'leftTop' ) ) {
-		return '请将准星对准控制标志左上角 LT，并点击采集。';
+		return '请采集三角桶底座落地点左上角 LT，不要点桶身或视觉边缘。';
 	}
 	if ( label.includes( '右上' ) || label.includes( 'rightTop' ) ) {
-		return '请将准星对准控制标志右上角 RT，并点击采集。';
+		return '请采集三角桶底座落地点右上角 RT，不要点桶身或视觉边缘。';
 	}
 	if ( label.includes( '右下' ) || label.includes( 'rightBottom' ) ) {
-		return '请将准星对准控制标志右下角 RB，并点击采集。';
+		return '请采集三角桶底座落地点右下角 RB，不要点桶身或视觉边缘。';
 	}
 	if ( label.includes( '左下' ) || label.includes( 'leftBottom' ) ) {
-		return '请将准星对准控制标志左下角 LB，并点击采集。';
+		return '请采集三角桶底座落地点左下角 LB，不要点桶身或视觉边缘。';
 	}
-	return '请按左上角、右上角、右下角、左下角顺序采集控制标志四角。';
+	return '请按 LT、RT、RB、LB 顺序采集三角桶底座落地点四角。';
 } );
 
 watch( hasArSession, syncArOverlayClass, { immediate: true } );

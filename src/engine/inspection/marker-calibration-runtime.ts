@@ -12,7 +12,10 @@ import {
 	type MarkerLocalizationSolution,
 	type MarkerPoseInEnu
 } from '@/localization/marker/marker-localization.js';
-import { createMarkerCalibrationCorrespondencePayload } from '@/localization/core/corner-order-diagnostics.js';
+import {
+	computeQuadDiagnostics,
+	createMarkerCalibrationCorrespondencePayload
+} from '@/localization/core/corner-order-diagnostics.js';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
 import type {
 	ArWorkflowMode,
@@ -36,6 +39,7 @@ interface MarkerCalibrationRuntimeOptions {
 	store: RegistrationStore;
 	getWorkflowMode(): ArWorkflowMode;
 	getSiteId(): string | null;
+	getConfigUrl(): string | null;
 	getCurrentSessionId(): string | null;
 	isPresenting(): boolean;
 	hasGroundHit(): boolean;
@@ -51,12 +55,15 @@ interface MarkerCalibrationRuntimeOptions {
 			markerId: string;
 			markerConfigId: string;
 			source?: 'marker';
+			capturedCornersAr?: THREE.Vector3[];
 		}
 	): boolean;
 	setStatus(message: string): void;
 }
 
 const tempMarkerCapturePosition = new THREE.Vector3();
+const MARKER_CAPTURE_HEIGHT_WARNING_METERS = 0.08;
+const MARKER_SELF_CHECK_MAX_ERROR_METERS = 0.12;
 
 export class MarkerCalibrationRuntime {
 
@@ -286,6 +293,12 @@ export class MarkerCalibrationRuntime {
 			expectedCount: MARKER_CORNER_SEQUENCE.length,
 			cornerOrder: captureTarget?.cornerOrder ?? null
 		} );
+		console.info( '[MarkerCornerCaptureHitTestCheck]', createMarkerCornerCaptureHitTestPayload( {
+			capturedIndex,
+			expectedCornerName: cornerMeta.cornerOrderValue,
+			hitPosition: arPosition,
+			capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition )
+		} ) );
 		console.info( '[MarkerCornersArCaptured]', {
 			mode: MARKER_CALIBRATION_MODE,
 			workflowMode: this.options.getWorkflowMode(),
@@ -442,6 +455,27 @@ export class MarkerCalibrationRuntime {
 				timestamp: Date.now()
 			} );
 			this.currentSessionMarkerSolution = solution;
+			const selfCheck = createArFromEnuSelfCheckPayload( {
+				correspondences,
+				solution
+			} );
+			console.info( '[ArFromEnuSelfCheck]', selfCheck );
+			const calibrationPayload = createArFromEnuCalibrationSolvedPayload( {
+				modelId: demoModelConfig.modelId,
+				configUrl: this.options.getConfigUrl(),
+				siteOrigin: demoModelConfig.siteFrame.origin,
+				controlTarget: markerControlTarget,
+				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition ),
+				correspondences,
+				solution,
+				selfCheck
+			} );
+			console.info( '[ArFromEnuCalibrationSolved]', calibrationPayload );
+			if ( selfCheck.maxErrorMeters > MARKER_SELF_CHECK_MAX_ERROR_METERS ) {
+				throw new Error(
+					`Marker 自检误差 ${selfCheck.maxErrorMeters.toFixed( 3 )}m 超过 ${MARKER_SELF_CHECK_MAX_ERROR_METERS.toFixed( 2 )}m，请重新采集三角桶底座落地点四角。`
+				);
+			}
 
 			console.info( '[MarkerSessionCalibrationSolved]', {
 				mode: MARKER_CALIBRATION_MODE,
@@ -478,7 +512,8 @@ export class MarkerCalibrationRuntime {
 
 			const applied = this.options.applyCurrentSessionMarkerSolution( solution, {
 				markerId,
-				markerConfigId: markerId
+				markerConfigId: markerId,
+				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition.clone() )
 			} );
 			if ( applied ) {
 				console.info( '[MarkerLocalizationApplied]', {
@@ -640,6 +675,180 @@ function validateMarkerCornersTarget(target: VisualControlTarget | undefined): s
 	}
 
 	return null;
+
+}
+
+function createMarkerCornerCaptureHitTestPayload(args: {
+	capturedIndex: number;
+	expectedCornerName: string;
+	hitPosition: THREE.Vector3;
+	capturedCornersAr: THREE.Vector3[];
+}): Record<string, unknown> {
+
+	const firstY = args.capturedCornersAr[ 0 ]?.y ?? args.hitPosition.y;
+	const averageY = args.capturedCornersAr.reduce( ( total, point ) => total + point.y, 0 )
+		/ Math.max( args.capturedCornersAr.length, 1 );
+	const maxHeightDelta = args.capturedCornersAr.reduce(
+		(max, point) => Math.max( max, Math.abs( point.y - firstY ) ),
+		0
+	);
+	const warnings: string[] = [];
+	if ( maxHeightDelta > MARKER_CAPTURE_HEIGHT_WARNING_METERS ) {
+		warnings.push( `captured corner height delta ${maxHeightDelta.toFixed( 3 )}m exceeds ${MARKER_CAPTURE_HEIGHT_WARNING_METERS}m` );
+	}
+	if ( args.capturedCornersAr.length < MARKER_CORNER_SEQUENCE.length ) {
+		warnings.push( 'partial capture; height check is provisional' );
+	}
+
+	return {
+		capturedIndex: args.capturedIndex,
+		expectedCornerName: args.expectedCornerName,
+		hitPosition: vector3ToObject( args.hitPosition ),
+		hitNormal: null,
+		hitDistanceToCamera: null,
+		heightRelativeToFirstCorner: Number( ( args.hitPosition.y - firstY ).toFixed( 6 ) ),
+		heightRelativeToAverage: Number( ( args.hitPosition.y - averageY ).toFixed( 6 ) ),
+		maxHeightDeltaMeters: Number( maxHeightDelta.toFixed( 6 ) ),
+		isGroundLike: maxHeightDelta <= MARKER_CAPTURE_HEIGHT_WARNING_METERS,
+		captureHint: '请采集三角桶底座落地点四角，不要点桶身或视觉边缘。',
+		warnings
+	};
+
+}
+
+function createArFromEnuSelfCheckPayload(args: {
+	correspondences: Array<{
+		id: string;
+		siteEnu: THREE.Vector3;
+		arPosition: THREE.Vector3;
+	}>;
+	solution: MarkerLocalizationSolution;
+}): {
+	points: Array<Record<string, unknown>>;
+	maxErrorMeters: number;
+	rmsErrorMeters: number;
+	warnings: string[];
+} {
+
+	const errors: number[] = [];
+	const points = args.correspondences.map( ( correspondence, index ) => {
+		const predictedAr = correspondence.siteEnu.clone().applyMatrix4( args.solution.matrix );
+		const error = predictedAr.distanceTo( correspondence.arPosition );
+		errors.push( error );
+		return {
+			index,
+			id: correspondence.id,
+			enu: vector3ToObject( correspondence.siteEnu ),
+			predictedAr: vector3ToObject( predictedAr ),
+			actualAr: vector3ToObject( correspondence.arPosition ),
+			error: Number( error.toFixed( 6 ) )
+		};
+	} );
+	const maxErrorMeters = Math.max( ...errors, 0 );
+	const rmsErrorMeters = Math.sqrt(
+		errors.reduce( ( total, error ) => total + error * error, 0 )
+		/ Math.max( errors.length, 1 )
+	);
+	const warnings: string[] = [];
+	if ( maxErrorMeters > MARKER_SELF_CHECK_MAX_ERROR_METERS ) {
+		warnings.push( `max marker self-check error ${maxErrorMeters.toFixed( 3 )}m exceeds ${MARKER_SELF_CHECK_MAX_ERROR_METERS}m` );
+	}
+	return {
+		points,
+		maxErrorMeters: Number( maxErrorMeters.toFixed( 6 ) ),
+		rmsErrorMeters: Number( rmsErrorMeters.toFixed( 6 ) ),
+		warnings
+	};
+
+}
+
+function createArFromEnuCalibrationSolvedPayload(args: {
+	modelId: string;
+	configUrl: string | null;
+	siteOrigin: unknown;
+	controlTarget: VisualControlTarget;
+	capturedCornersAr: THREE.Vector3[];
+	correspondences: Array<{
+		id: string;
+		siteEnu: THREE.Vector3;
+		arPosition: THREE.Vector3;
+	}>;
+	solution: MarkerLocalizationSolution;
+	selfCheck: {
+		points: Array<Record<string, unknown>>;
+		maxErrorMeters: number;
+		rmsErrorMeters: number;
+		warnings: string[];
+	};
+}): Record<string, unknown> {
+
+	const cornersEnu = args.controlTarget.cornersEnu ?? [];
+	const enuQuad = computeQuadDiagnostics( cornersEnu );
+	const arQuad = computeQuadDiagnostics( args.capturedCornersAr );
+	const arHeightValues = args.capturedCornersAr.map( ( point ) => point.y );
+	const arHeightDelta = arHeightValues.length === 0
+		? 0
+		: Math.max( ...arHeightValues ) - Math.min( ...arHeightValues );
+	const scaleRatio = average( arQuad.sideLengths ) / Math.max( average( enuQuad.sideLengths ), 1e-9 );
+	const warnings = [
+		...enuQuad.warnings.map( ( warning ) => `enu: ${warning}` ),
+		...arQuad.warnings.map( ( warning ) => `ar: ${warning}` ),
+		...args.selfCheck.warnings
+	];
+	if ( arHeightDelta > MARKER_CAPTURE_HEIGHT_WARNING_METERS ) {
+		warnings.push( `captured AR corner height delta ${arHeightDelta.toFixed( 3 )}m exceeds ${MARKER_CAPTURE_HEIGHT_WARNING_METERS}m` );
+	}
+	if ( Math.abs( scaleRatio - 1 ) > 0.25 ) {
+		warnings.push( `marker ENU/AR side length scale ratio ${scaleRatio.toFixed( 3 )} differs from rigid expectation` );
+	}
+
+	return {
+		modelId: args.modelId,
+		configUrl: args.configUrl,
+		siteOrigin: args.siteOrigin,
+		controlTargetId: args.controlTarget.id,
+		controlTarget: {
+			id: args.controlTarget.id,
+			centerEnu: args.controlTarget.centerEnu ?? null,
+			cornersEnu: args.controlTarget.cornersEnu ?? null,
+			order: args.controlTarget.cornerOrder ?? null
+		},
+		cornerOrder: args.controlTarget.cornerOrder ?? null,
+		capturedCornersAr: args.capturedCornersAr.map( vector3ToObject ),
+		correspondences: args.correspondences.map( ( correspondence, index ) => ( {
+			index,
+			id: correspondence.id,
+			siteEnu: vector3ToObject( correspondence.siteEnu ),
+			arPosition: vector3ToObject( correspondence.arPosition )
+		} ) ),
+		solution: {
+			position: vector3ToObject( args.solution.siteOriginArPosition ),
+			siteOriginArPosition: vector3ToObject( args.solution.siteOriginArPosition ),
+			orientation: args.solution.orientation.toArray(),
+			matrix: args.solution.matrix.toArray()
+		},
+		residuals: args.selfCheck.points,
+		rmsError: args.selfCheck.rmsErrorMeters,
+		maxError: args.selfCheck.maxErrorMeters,
+		sideLengthsEnu: enuQuad.sideLengths,
+		sideLengthsAr: arQuad.sideLengths,
+		diagonalLengthsEnu: enuQuad.diagonalLengths,
+		diagonalLengthsAr: arQuad.diagonalLengths,
+		enuArea: enuQuad.area,
+		arArea: arQuad.area,
+		scaleRatio: Number( scaleRatio.toFixed( 6 ) ),
+		usedRigidOrSimilarity: 'rigid',
+		warnings
+	};
+
+}
+
+function average(values: number[]): number {
+
+	if ( values.length === 0 ) {
+		return 0;
+	}
+	return values.reduce( ( total, value ) => total + value, 0 ) / values.length;
 
 }
 

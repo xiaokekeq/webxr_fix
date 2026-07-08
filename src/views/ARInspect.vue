@@ -235,6 +235,18 @@ const markerCornerPrompt = computed( () => {
 	}
 
 	const label = engine.value.markerCalibration.nextCornerLabel;
+	if ( label.includes( 'leftTop' ) ) {
+		return '请采集三角桶底座落地点左上角 LT，不要点桶身或视觉边缘。';
+	}
+	if ( label.includes( 'rightTop' ) ) {
+		return '请采集三角桶底座落地点右上角 RT，不要点桶身或视觉边缘。';
+	}
+	if ( label.includes( 'rightBottom' ) ) {
+		return '请采集三角桶底座落地点右下角 RB，不要点桶身或视觉边缘。';
+	}
+	if ( label.includes( 'leftBottom' ) ) {
+		return '请采集三角桶底座落地点左下角 LB，不要点桶身或视觉边缘。';
+	}
 	if ( label.includes( '左上' ) || label.includes( 'leftTop' ) ) {
 		return '对准控制标志左上角 LT 后采集。';
 	}
