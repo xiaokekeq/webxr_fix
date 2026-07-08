@@ -296,13 +296,7 @@ const markerCornerSequenceText = computed( () => {
 		engine.value.markerCalibration.capturedCornerCount,
 		Math.max( engine.value.markerCalibration.expectedCornerCount - 1, 0 )
 	);
-	const labels = [
-		'1/4: leftTop 左上',
-		'2/4: rightTop 右上',
-		'3/4: rightBottom 右下',
-		'4/4: leftBottom 左下'
-	];
-	return labels[ index ] ?? '1/4: leftTop 左上';
+	return `${index + 1}/${engine.value.markerCalibration.expectedCornerCount}: ${engine.value.markerCalibration.nextCornerLabel || '-'}`;
 } );
 
 const markerCornerEnuText = computed( () => {

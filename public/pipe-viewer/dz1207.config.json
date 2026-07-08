@@ -149,17 +149,12 @@
       "sizeMeters": 0.297,
       "yawDeg": 0,
       "cornerOrder": [
-        "leftTop",
         "rightTop",
         "rightBottom",
-        "leftBottom"
+        "leftBottom",
+        "leftTop"
       ],
       "cornersEnu": [
-        [
-          -4.2881,
-          -3.8896,
-          -0.0093
-        ],
         [
           -4.0564,
           -3.6848,
@@ -174,6 +169,11 @@
           -4.0772,
           -4.1,
           -0.0024
+        ],
+        [
+          -4.2881,
+          -3.8896,
+          -0.0093
         ]
       ],
       "plane": "horizontal"
@@ -345,17 +345,12 @@
         -0.0058
       ],
       "cornerOrder": [
-        "leftTop",
         "rightTop",
         "rightBottom",
-        "leftBottom"
+        "leftBottom",
+        "leftTop"
       ],
       "cornersEnu": [
-        [
-          -4.2881,
-          -3.8896,
-          -0.0093
-        ],
         [
           -4.0564,
           -3.6848,
@@ -370,10 +365,15 @@
           -4.0772,
           -4.1,
           -0.0024
+        ],
+        [
+          -4.2881,
+          -3.8896,
+          -0.0093
         ]
       ],
       "plane": "horizontal",
-      "note": "cornersEnu order: 707-6 leftTop, 707-7 rightTop, 707-8 rightBottom, 707-9 leftBottom; warning sign marker, generated from WGS84 -> ECEF -> ENU relative to 707-10."
+      "note": "cornersEnu/cornerOrder follow现场红色采集顺序: 1=707-7 rightTop, 2=707-8 rightBottom, 3=707-9 leftBottom, 4=707-6 leftTop; generated from WGS84 -> ECEF -> ENU relative to 707-10."
     }
   ],
   "placementAnchorEnu": [
