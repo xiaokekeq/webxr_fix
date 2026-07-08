@@ -173,6 +173,7 @@ export interface MarkerCalibrationState {
 	applied: boolean;
 	rmsErrorMeters?: number;
 	headingDeg?: number;
+	looseThresholdAccepted?: boolean;
 	lastUpdatedAt?: number;
 }
 
@@ -450,7 +451,8 @@ export function createDefaultMarkerCalibrationState(): MarkerCalibrationState {
 		canCapture: false,
 		canSolve: false,
 		solved: false,
-		applied: false
+		applied: false,
+		looseThresholdAccepted: false
 	};
 
 }

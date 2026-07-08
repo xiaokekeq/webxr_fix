@@ -99,6 +99,10 @@ export interface DemoModelConfig {
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
+	markerCalibration?: {
+		maxSelfCheckErrorMeters?: number;
+		note?: string;
+	};
 	configCompleteness: {
 		hasExplicitSiteId: boolean;
 		hasSiteName: boolean;
@@ -158,6 +162,7 @@ interface LocalDebugModelConfig {
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
+	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
 interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters'> {
@@ -318,6 +323,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
+		markerCalibration: config.markerCalibration,
 		configCompleteness: {
 			hasExplicitSiteId: hasOwnObjectKey( config, 'siteId' ),
 			hasSiteName: hasOwnObjectKey( config, 'siteName' ),
@@ -363,6 +369,7 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
+		markerCalibration: config.markerCalibration,
 		configCompleteness: {
 			hasExplicitSiteId: true,
 			hasSiteName: hasOwnObjectKey( config, 'siteName' ),

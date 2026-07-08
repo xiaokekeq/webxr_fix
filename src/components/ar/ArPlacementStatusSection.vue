@@ -33,6 +33,7 @@ watch(
 		props.state.registrationChainDebug.arSessionLocalization.source,
 		props.state.markerCalibration.active,
 		props.state.markerCalibration.applied,
+		props.state.markerCalibration.looseThresholdAccepted,
 		props.state.placementSummary.positionText
 	].join( '|' ),
 	() => {
@@ -90,6 +91,10 @@ function formatModelPlacementStatus(state: RegistrationStoreState): string {
 }
 
 function resolvePlacementHint(state: RegistrationStoreState): string {
+
+	if ( state.markerCalibration.looseThresholdAccepted ) {
+		return '当前使用调试阈值完成校正，误差较大，仅用于测试。';
+	}
 
 	if ( state.engineeringConfigStatus.hasControlTargets === false ) {
 		return '当前模型没有控制标志。';
@@ -164,7 +169,7 @@ function createUiLogPayload(
 		<ArInfoGrid :items="placementCards" />
 		<div
 			class="runtime-banner"
-			:class="{ warning: state.registrationChainDebug.arSessionLocalization.available === false }"
+			:class="{ warning: state.registrationChainDebug.arSessionLocalization.available === false || state.markerCalibration.looseThresholdAccepted }"
 		>
 			{{ placementHint }}
 		</div>

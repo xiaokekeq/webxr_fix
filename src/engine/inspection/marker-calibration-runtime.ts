@@ -63,7 +63,24 @@ interface MarkerCalibrationRuntimeOptions {
 
 const tempMarkerCapturePosition = new THREE.Vector3();
 const MARKER_CAPTURE_HEIGHT_WARNING_METERS = 0.08;
-const MARKER_SELF_CHECK_MAX_ERROR_METERS = 0.12;
+const STRICT_MARKER_SELF_CHECK_MAX_ERROR_METERS = 0.12;
+const DEV_MARKER_SELF_CHECK_MAX_ERROR_METERS = 0.4;
+type MarkerCalibrationErrorLimitSource =
+	| 'config markerCalibration.maxSelfCheckErrorMeters'
+	| 'env VITE_MARKER_CALIBRATION_ERROR_LIMIT_M'
+	| 'dev default'
+	| 'production default';
+
+interface MarkerCalibrationErrorLimit {
+	meters: number;
+	source: MarkerCalibrationErrorLimitSource;
+}
+
+export function resolveMarkerCalibrationErrorLimitMeters(config?: DemoModelConfig): number {
+
+	return resolveMarkerCalibrationErrorLimit( config ).meters;
+
+}
 
 export class MarkerCalibrationRuntime {
 
@@ -123,6 +140,7 @@ export class MarkerCalibrationRuntime {
 				applied,
 				rmsErrorMeters: override?.rmsErrorMeters ?? this.currentSessionMarkerSolution?.rmsErrorMeters,
 				headingDeg: override?.headingDeg ?? this.currentSessionMarkerSolution?.headingDeg,
+				looseThresholdAccepted: override?.looseThresholdAccepted ?? currentState.looseThresholdAccepted ?? false,
 				lastUpdatedAt: override?.lastUpdatedAt ?? Date.now()
 			}
 		} );
@@ -173,6 +191,7 @@ export class MarkerCalibrationRuntime {
 			applied: this.options.hasAppliedMarkerSolutionForCurrentSession(),
 			rmsErrorMeters: undefined,
 			headingDeg: undefined,
+			looseThresholdAccepted: false,
 			lastUpdatedAt: Date.now()
 		} );
 
@@ -455,9 +474,11 @@ export class MarkerCalibrationRuntime {
 				timestamp: Date.now()
 			} );
 			this.currentSessionMarkerSolution = solution;
+			const errorLimit = resolveMarkerCalibrationErrorLimit( demoModelConfig );
 			const selfCheck = createArFromEnuSelfCheckPayload( {
 				correspondences,
-				solution
+				solution,
+				errorLimit
 			} );
 			console.info( '[ArFromEnuSelfCheck]', selfCheck );
 			const calibrationPayload = createArFromEnuCalibrationSolvedPayload( {
@@ -471,10 +492,24 @@ export class MarkerCalibrationRuntime {
 				selfCheck
 			} );
 			console.info( '[ArFromEnuCalibrationSolved]', calibrationPayload );
-			if ( selfCheck.maxErrorMeters > MARKER_SELF_CHECK_MAX_ERROR_METERS ) {
+			if ( selfCheck.acceptedByThreshold === false ) {
 				throw new Error(
-					`Marker 自检误差 ${selfCheck.maxErrorMeters.toFixed( 3 )}m 超过 ${MARKER_SELF_CHECK_MAX_ERROR_METERS.toFixed( 2 )}m，请重新采集三角桶底座落地点四角。`
+					`Marker 自检误差 ${selfCheck.maxErrorMeters.toFixed( 3 )}m 超过 ${errorLimit.meters}m，当前阈值来源：${errorLimit.source}。请重新采集三角桶底座落地点四角。`
 				);
+			}
+			const looseThresholdAccepted = selfCheck.maxErrorMeters > STRICT_MARKER_SELF_CHECK_MAX_ERROR_METERS
+				&& selfCheck.maxErrorMeters <= DEV_MARKER_SELF_CHECK_MAX_ERROR_METERS
+				&& errorLimit.meters > STRICT_MARKER_SELF_CHECK_MAX_ERROR_METERS
+				&& import.meta.env.DEV;
+			if ( looseThresholdAccepted ) {
+				console.warn( '[MarkerCalibrationLooseThresholdAccepted]', {
+					maxError: selfCheck.maxErrorMeters,
+					strictLimitMeters: STRICT_MARKER_SELF_CHECK_MAX_ERROR_METERS,
+					activeLimitMeters: errorLimit.meters,
+					reason: 'dev/manual outdoor testing threshold',
+					modelId: demoModelConfig.modelId,
+					controlTargetId: markerControlTarget.id
+				} );
 			}
 
 			console.info( '[MarkerSessionCalibrationSolved]', {
@@ -494,7 +529,7 @@ export class MarkerCalibrationRuntime {
 				correspondenceCount: solution.correspondenceCount,
 				rmsErrorMeters: solution.rmsErrorMeters,
 				residualMeters: solution.rmsErrorMeters,
-				maxErrorMeters: null,
+				maxErrorMeters: selfCheck.maxErrorMeters,
 				scale: 1,
 				headingDeg: solution.headingDeg,
 				rotation: solution.orientation.toArray(),
@@ -507,6 +542,7 @@ export class MarkerCalibrationRuntime {
 				applied: false,
 				rmsErrorMeters: solution.rmsErrorMeters,
 				headingDeg: solution.headingDeg,
+				looseThresholdAccepted,
 				lastUpdatedAt: Date.now()
 			} );
 
@@ -542,6 +578,7 @@ export class MarkerCalibrationRuntime {
 					canSolve: false,
 					rmsErrorMeters: solution.rmsErrorMeters,
 					headingDeg: solution.headingDeg,
+					looseThresholdAccepted,
 					lastUpdatedAt: Date.now()
 				} );
 			}
@@ -568,6 +605,7 @@ export class MarkerCalibrationRuntime {
 				canSolve: this.currentSessionMarkerCornerCaptures.length === MARKER_CORNER_SEQUENCE.length,
 				rmsErrorMeters: undefined,
 				headingDeg: undefined,
+				looseThresholdAccepted: false,
 				lastUpdatedAt: Date.now()
 			} );
 			console.error( '[MarkerSessionCalibrationSolveFailed]', {
@@ -672,6 +710,42 @@ export class MarkerCalibrationRuntime {
 
 }
 
+function resolveMarkerCalibrationErrorLimit(config?: DemoModelConfig): MarkerCalibrationErrorLimit {
+
+	const configuredLimit = config?.markerCalibration?.maxSelfCheckErrorMeters;
+	if ( isPositiveFiniteNumber( configuredLimit ) ) {
+		return {
+			meters: configuredLimit,
+			source: 'config markerCalibration.maxSelfCheckErrorMeters'
+		};
+	}
+
+	const envLimit = Number( import.meta.env.VITE_MARKER_CALIBRATION_ERROR_LIMIT_M );
+	if ( isPositiveFiniteNumber( envLimit ) ) {
+		return {
+			meters: envLimit,
+			source: 'env VITE_MARKER_CALIBRATION_ERROR_LIMIT_M'
+		};
+	}
+
+	return import.meta.env.DEV
+		? {
+			meters: DEV_MARKER_SELF_CHECK_MAX_ERROR_METERS,
+			source: 'dev default'
+		}
+		: {
+			meters: STRICT_MARKER_SELF_CHECK_MAX_ERROR_METERS,
+			source: 'production default'
+		};
+
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+
+	return typeof value === 'number' && Number.isFinite( value ) && value > 0;
+
+}
+
 function validateMarkerCornersTarget(target: VisualControlTarget | undefined): string | null {
 
 	if ( target === undefined ) {
@@ -745,10 +819,16 @@ function createArFromEnuSelfCheckPayload(args: {
 		arPosition: THREE.Vector3;
 	}>;
 	solution: MarkerLocalizationSolution;
+	errorLimit: MarkerCalibrationErrorLimit;
 }): {
 	points: Array<Record<string, unknown>>;
 	maxErrorMeters: number;
 	rmsErrorMeters: number;
+	maxSelfCheckErrorMeters: number;
+	errorLimitSource: MarkerCalibrationErrorLimitSource;
+	maxError: number;
+	rmsError: number;
+	acceptedByThreshold: boolean;
 	warnings: string[];
 } {
 
@@ -771,14 +851,22 @@ function createArFromEnuSelfCheckPayload(args: {
 		errors.reduce( ( total, error ) => total + error * error, 0 )
 		/ Math.max( errors.length, 1 )
 	);
+	const roundedMaxErrorMeters = Number( maxErrorMeters.toFixed( 6 ) );
+	const roundedRmsErrorMeters = Number( rmsErrorMeters.toFixed( 6 ) );
+	const acceptedByThreshold = maxErrorMeters <= args.errorLimit.meters;
 	const warnings: string[] = [];
-	if ( maxErrorMeters > MARKER_SELF_CHECK_MAX_ERROR_METERS ) {
-		warnings.push( `max marker self-check error ${maxErrorMeters.toFixed( 3 )}m exceeds ${MARKER_SELF_CHECK_MAX_ERROR_METERS}m` );
+	if ( acceptedByThreshold === false ) {
+		warnings.push( `max marker self-check error ${maxErrorMeters.toFixed( 3 )}m exceeds ${args.errorLimit.meters}m` );
 	}
 	return {
 		points,
-		maxErrorMeters: Number( maxErrorMeters.toFixed( 6 ) ),
-		rmsErrorMeters: Number( rmsErrorMeters.toFixed( 6 ) ),
+		maxErrorMeters: roundedMaxErrorMeters,
+		rmsErrorMeters: roundedRmsErrorMeters,
+		maxSelfCheckErrorMeters: args.errorLimit.meters,
+		errorLimitSource: args.errorLimit.source,
+		maxError: roundedMaxErrorMeters,
+		rmsError: roundedRmsErrorMeters,
+		acceptedByThreshold,
 		warnings
 	};
 
@@ -800,6 +888,11 @@ function createArFromEnuCalibrationSolvedPayload(args: {
 		points: Array<Record<string, unknown>>;
 		maxErrorMeters: number;
 		rmsErrorMeters: number;
+		maxSelfCheckErrorMeters: number;
+		errorLimitSource: MarkerCalibrationErrorLimitSource;
+		maxError: number;
+		rmsError: number;
+		acceptedByThreshold: boolean;
 		warnings: string[];
 	};
 }): Record<string, unknown> {
@@ -852,6 +945,9 @@ function createArFromEnuCalibrationSolvedPayload(args: {
 		residuals: args.selfCheck.points,
 		rmsError: args.selfCheck.rmsErrorMeters,
 		maxError: args.selfCheck.maxErrorMeters,
+		maxSelfCheckErrorMeters: args.selfCheck.maxSelfCheckErrorMeters,
+		errorLimitSource: args.selfCheck.errorLimitSource,
+		acceptedByThreshold: args.selfCheck.acceptedByThreshold,
 		sideLengthsEnu: enuQuad.sideLengths,
 		sideLengthsAr: arQuad.sideLengths,
 		diagonalLengthsEnu: enuQuad.diagonalLengths,

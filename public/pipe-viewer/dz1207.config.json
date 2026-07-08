@@ -35,6 +35,10 @@
     "mode": "rigid",
     "minControlPoints": 3
   },
+  "markerCalibration": {
+    "maxSelfCheckErrorMeters": 0.4,
+    "note": "Temporary loose threshold for outdoor manual cone-base corner capture; tighten for production."
+  },
   "modelControlPointOrder": [
     "707-1",
     "707-2",
