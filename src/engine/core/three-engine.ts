@@ -107,7 +107,8 @@ import { readPlaceableTemplateReport } from '@/engine/core/model.js';
 const MAX_LOG_ITEMS = 24;
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
 const AUTO_PLACE_AFTER_MARKER_CALIBRATION = import.meta.env.VITE_AUTO_PLACE_AFTER_MARKER_CALIBRATION === 'true';
-const DIRECT_CONTROL_POINT_PLACEMENT_ENABLED = import.meta.env.VITE_USE_DIRECT_CONTROL_POINT_PLACEMENT === 'true';
+const DIRECT_CONTROL_POINT_PLACEMENT_ENABLED = import.meta.env.VITE_USE_DIRECT_MODEL_CP_FIT === 'true'
+	|| import.meta.env.VITE_USE_DIRECT_CONTROL_POINT_PLACEMENT === 'true';
 
 interface EngineeringDebugLayerOptions {
 	showMarkerExpected: boolean;
@@ -2384,15 +2385,15 @@ export class ThreeEngine {
 		const contentErrors: number[] = [];
 		const points = this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
 			const expectedAr = point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
-			const actualArUsingPlacedRoot = placedModel.localToWorld( point.modelLocal.clone() );
-			const actualArUsingModelContent = modelContent === null
+			const actualArFromWrapper = placedModel.localToWorld( point.modelLocal.clone() );
+			const actualArFromContent = modelContent === null
 				? null
 				: modelContent.localToWorld( point.modelLocal.clone() );
-			const errorRoot = expectedAr.distanceTo( actualArUsingPlacedRoot );
-			const errorContent = actualArUsingModelContent === null
+			const errorWrapper = expectedAr.distanceTo( actualArFromWrapper );
+			const errorContent = actualArFromContent === null
 				? null
-				: expectedAr.distanceTo( actualArUsingModelContent );
-			rootErrors.push( errorRoot );
+				: expectedAr.distanceTo( actualArFromContent );
+			rootErrors.push( errorWrapper );
 			if ( errorContent !== null ) {
 				contentErrors.push( errorContent );
 			}
@@ -2400,11 +2401,11 @@ export class ThreeEngine {
 				controlPointId: point.id,
 				cornerRole: this.resolveControlPointCornerRole( point.id ),
 				modelLocal: vector3ToRoundedObject( point.modelLocal ),
-				targetEnu: vector3ToRoundedObject( point.worldEnu ),
+				worldEnu: vector3ToRoundedObject( point.worldEnu ),
 				expectedAr: vector3ToRoundedObject( expectedAr ),
-				actualArUsingPlacedRoot: vector3ToRoundedObject( actualArUsingPlacedRoot ),
-				actualArUsingModelContent: actualArUsingModelContent === null ? null : vector3ToRoundedObject( actualArUsingModelContent ),
-				errorRoot: Number( errorRoot.toFixed( 6 ) ),
+				actualArFromWrapper: vector3ToRoundedObject( actualArFromWrapper ),
+				actualArFromContent: actualArFromContent === null ? null : vector3ToRoundedObject( actualArFromContent ),
+				errorWrapper: Number( errorWrapper.toFixed( 6 ) ),
 				errorContent: errorContent === null ? null : Number( errorContent.toFixed( 6 ) )
 			};
 		} );
@@ -2423,24 +2424,34 @@ export class ThreeEngine {
 		const roundedRmsErrorRoot = Number( rmsErrorRoot.toFixed( 6 ) );
 		const roundedMaxErrorContent = contentErrors.length === 0 ? null : Number( maxErrorContent.toFixed( 6 ) );
 		const roundedRmsErrorContent = contentErrors.length === 0 ? null : Number( rmsErrorContent.toFixed( 6 ) );
+		const likelyModelLocalSpace = contentErrors.length > 0 && rmsErrorContent + 0.02 < rmsErrorRoot
+			? 'content'
+			: 'wrapper';
 		const payload = {
 			modelId: this.demoModelConfig?.modelId ?? null,
-			placedRootName: placedModel.name || placedModel.type,
+			modelLocalLikelySpace: likelyModelLocalSpace,
+			placedWrapperName: placedModel.name || placedModel.type,
 			contentObjectName: modelContent?.name || modelContent?.type || null,
-			placedRootMatrixWorld: matrixToRoundedArray( placedModel.matrixWorld ),
-			contentMatrixWorld: modelContent === null ? null : matrixToRoundedArray( modelContent.matrixWorld ),
+			placedWrapperMatrixWorld: matrixToRoundedArray( placedModel.matrixWorld ),
+			modelContentMatrixWorld: modelContent === null ? null : matrixToRoundedArray( modelContent.matrixWorld ),
 			points: points.map( ( point ) => ( {
 				...point,
-				maxErrorRoot: roundedMaxErrorRoot,
-				rmsErrorRoot: roundedRmsErrorRoot,
+				maxErrorWrapper: roundedMaxErrorRoot,
+				rmsErrorWrapper: roundedRmsErrorRoot,
 				maxErrorContent: roundedMaxErrorContent,
 				rmsErrorContent: roundedRmsErrorContent
 			} ) ),
-			maxErrorRoot: roundedMaxErrorRoot,
-			rmsErrorRoot: roundedRmsErrorRoot,
+			maxErrorWrapper: roundedMaxErrorRoot,
+			rmsErrorWrapper: roundedRmsErrorRoot,
 			maxErrorContent: roundedMaxErrorContent,
 			rmsErrorContent: roundedRmsErrorContent,
-			warning: warnings
+			warning: warnings,
+			placedWrapper: {
+				matrixWorld: matrixToRoundedArray( placedModel.matrixWorld )
+			},
+			modelContent: {
+				matrixWorld: modelContent === null ? null : matrixToRoundedArray( modelContent.matrixWorld )
+			}
 		};
 
 		console.info( '[ModelControlPointPlacementCheck]', payload );
@@ -2454,6 +2465,47 @@ export class ThreeEngine {
 		if ( rmsErrorRoot > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
 			console.error( '[ModelControlPointPlacementMismatch]', payload );
 			this.setStatus( message );
+		}
+
+	}
+
+	private logModelControlPointOrderCheck(): void {
+
+		if ( this.registrationSolution === null ) {
+			return;
+		}
+
+		const controlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
+		const modelLocalPoints = controlPoints.map( ( point ) => point.modelLocal.clone() );
+		const worldEnuPoints = controlPoints.map( ( point ) => point.worldEnu.clone() );
+		const modelLocalSignedArea = signedArea2D( modelLocalPoints, 'xz' );
+		const worldEnuSignedArea = signedArea2D( worldEnuPoints, 'xy' );
+		const warning: string[] = [];
+		if ( Math.sign( modelLocalSignedArea ) !== Math.sign( worldEnuSignedArea ) ) {
+			warning.push( 'modelLocal order direction differs from worldEnu order; possible mirrored control point order' );
+		}
+		if ( maxPairDelta( computeSideLengths( modelLocalPoints ), computeSideLengths( worldEnuPoints ) ) > 0.5 ) {
+			warning.push( 'modelLocal edge lengths differ from worldEnu footprint edge lengths; control point geometry may not match' );
+		}
+		const payload = {
+			controlPointIds: controlPoints.map( ( point ) => point.id ),
+			cornerRoles: controlPoints.map( ( point ) => this.resolveControlPointCornerRole( point.id ) ),
+			modelLocal: modelLocalPoints.map( vector3ToRoundedObject ),
+			worldEnu: worldEnuPoints.map( vector3ToRoundedObject ),
+			modelLocalEdgeLengths: computeSideLengths( modelLocalPoints ),
+			worldEnuFootprintEdgeLengths: computeSideLengths( worldEnuPoints ),
+			modelLocalDiagonals: computeDiagonalLengths( modelLocalPoints ),
+			worldEnuDiagonals: computeDiagonalLengths( worldEnuPoints ),
+			modelLocalYaw: Number( headingFromModelLocalPoints( modelLocalPoints ).toFixed( 3 ) ),
+			worldEnuYaw: Number( headingFromEnuPoints( worldEnuPoints ).toFixed( 3 ) ),
+			modelLocalOrderSign: Math.sign( modelLocalSignedArea ),
+			worldEnuOrderSign: Math.sign( worldEnuSignedArea ),
+			warning
+		};
+
+		console.info( '[ModelControlPointOrderCheck]', payload );
+		if ( warning.length > 0 ) {
+			console.error( '[ModelControlPointOrderMismatch]', payload );
 		}
 
 	}
@@ -2515,15 +2567,15 @@ export class ThreeEngine {
 		const bboxContent = modelContent === null ? null : computeBoundsInLocalSpace( modelContent, modelContent );
 		const toleranceRoot = Math.max( bboxRoot.getSize( new THREE.Vector3() ).y * 0.03, 0.05 );
 		const toleranceContent = bboxContent === null ? 0 : Math.max( bboxContent.getSize( new THREE.Vector3() ).y * 0.03, 0.05 );
-		let rootHits = 0;
+		let wrapperHits = 0;
 		let contentHits = 0;
 		const points = this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
-			const distanceToBottomPlaneRoot = Math.abs( point.modelLocal.y - bboxRoot.min.y );
+			const distanceToBottomPlaneWrapper = Math.abs( point.modelLocal.y - bboxRoot.min.y );
 			const distanceToBottomPlaneContent = bboxContent === null ? null : Math.abs( point.modelLocal.y - bboxContent.min.y );
-			const isInsideBBoxRoot = bboxRoot.containsPoint( point.modelLocal );
+			const isInsideWrapperBBox = bboxRoot.containsPoint( point.modelLocal );
 			const isInsideBBoxContent = bboxContent?.containsPoint( point.modelLocal ) ?? false;
-			if ( isInsideBBoxRoot && distanceToBottomPlaneRoot <= toleranceRoot ) {
-				rootHits += 1;
+			if ( isInsideWrapperBBox && distanceToBottomPlaneWrapper <= toleranceRoot ) {
+				wrapperHits += 1;
 			}
 			if ( isInsideBBoxContent && distanceToBottomPlaneContent !== null && distanceToBottomPlaneContent <= toleranceContent ) {
 				contentHits += 1;
@@ -2531,20 +2583,20 @@ export class ThreeEngine {
 			return {
 				controlPointId: point.id,
 				modelLocal: vector3ToRoundedObject( point.modelLocal ),
-				distanceToBottomPlaneRoot: Number( distanceToBottomPlaneRoot.toFixed( 6 ) ),
+				isInsideWrapperBBox,
+				isInsideContentBBox: isInsideBBoxContent,
+				distanceToBottomPlaneWrapper: Number( distanceToBottomPlaneWrapper.toFixed( 6 ) ),
 				distanceToBottomPlaneContent: distanceToBottomPlaneContent === null ? null : Number( distanceToBottomPlaneContent.toFixed( 6 ) ),
-				isInsideBBoxRoot,
-				isInsideBBoxContent
 			};
 		} );
-		const likelySpace = contentHits > rootHits ? 'content' : rootHits > 0 ? 'root' : 'unknown';
+		const likelySpace = contentHits > wrapperHits ? 'content' : wrapperHits > 0 ? 'wrapper' : 'unknown';
 		const warning = likelySpace === 'unknown'
 			? '707-1~707-4.modelLocal 不是模型底面 footprint 四角，模型无法落入黄色框。请重新量取模型底面四角或启用 bbox footprint 临时测试。'
 			: null;
 		const payload = {
-			bboxRoot: boxToRoundedObject( bboxRoot ),
-			bboxContent: bboxContent === null ? null : boxToRoundedObject( bboxContent ),
-			bottomYRoot: Number( bboxRoot.min.y.toFixed( 6 ) ),
+			modelBBoxInWrapperLocal: boxToRoundedObject( bboxRoot ),
+			modelBBoxInContentLocal: bboxContent === null ? null : boxToRoundedObject( bboxContent ),
+			bottomYWrapper: Number( bboxRoot.min.y.toFixed( 6 ) ),
 			bottomYContent: bboxContent === null ? null : Number( bboxContent.min.y.toFixed( 6 ) ),
 			points,
 			likelySpace,
@@ -2596,6 +2648,17 @@ export class ThreeEngine {
 			? contentCandidate
 			: rootCandidate;
 
+		console.info( '[DirectModelControlPointFitSolved]', {
+			fitMode: '3d-similarity',
+			sourceSpace: candidate.controlPointSpace === 'root' ? 'wrapper' : 'content',
+			yawDeg: null,
+			translation: vector3ToRoundedObject( new THREE.Vector3().setFromMatrixPosition( candidate.sourceLocalToArMatrix ) ),
+			rmsError: Number( candidate.rmsError.toFixed( 6 ) ),
+			maxError: Number( candidate.maxError.toFixed( 6 ) ),
+			sourcePoints: controlPoints.map( ( point ) => vector3ToRoundedObject( point.modelLocal ) ),
+			targetPoints: targetAr.map( vector3ToRoundedObject ),
+			matrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix )
+		} );
 		console.warn( '[DirectControlPointPlacementEnabled]', {
 			reason: 'dev verification only; fitting modelLocal control points to expected AR footprint',
 			modelId: this.demoModelConfig?.modelId ?? null,
@@ -2606,6 +2669,14 @@ export class ThreeEngine {
 
 		this.applyPlacedRootWorldMatrix( placedModel, candidate.placedRootMatrixWorld );
 		if ( candidate.controlPointSpace === 'content' && contentLocalToRootMatrix !== null ) {
+			console.info( '[PlacedWrapperMatrixComputed]', {
+				modelLocalSpace: 'content',
+				modelLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
+				contentLocalToWrapperMatrix: matrixToRoundedArray( contentLocalToRootMatrix ),
+				inverseContentLocalToWrapperMatrix: matrixToRoundedArray( contentLocalToRootMatrix.clone().invert() ),
+				finalWrapperMatrix: matrixToRoundedArray( candidate.placedRootMatrixWorld ),
+				verificationRmsError: Number( candidate.rmsError.toFixed( 6 ) )
+			} );
 			console.info( '[ContentSpacePlacementMatrixComputed]', {
 				controlPointSpace: 'content',
 				contentLocalToRootMatrix: matrixToRoundedArray( contentLocalToRootMatrix ),
@@ -2616,6 +2687,14 @@ export class ThreeEngine {
 			} );
 			return;
 		}
+		console.info( '[PlacedWrapperMatrixComputed]', {
+			modelLocalSpace: 'wrapper',
+			modelLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
+			contentLocalToWrapperMatrix: contentLocalToRootMatrix === null ? null : matrixToRoundedArray( contentLocalToRootMatrix ),
+			inverseContentLocalToWrapperMatrix: contentLocalToRootMatrix === null ? null : matrixToRoundedArray( contentLocalToRootMatrix.clone().invert() ),
+			finalWrapperMatrix: matrixToRoundedArray( candidate.placedRootMatrixWorld ),
+			verificationRmsError: Number( candidate.rmsError.toFixed( 6 ) )
+		} );
 		console.info( '[RootSpacePlacementMatrixComputed]', {
 			controlPointSpace: 'root',
 			rootLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
@@ -2636,6 +2715,7 @@ export class ThreeEngine {
 		sourceLocalToArMatrix: THREE.Matrix4;
 		placedRootMatrixWorld: THREE.Matrix4;
 		rmsError: number;
+		maxError: number;
 	} {
 
 		const fit = solveSimilarityTransform( sourceLocalPoints, targetArPoints, 'similarity' );
@@ -2655,7 +2735,8 @@ export class ThreeEngine {
 			controlPointSpace,
 			sourceLocalToArMatrix,
 			placedRootMatrixWorld,
-			rmsError: computeRms( verificationErrors )
+			rmsError: computeRms( verificationErrors ),
+			maxError: Math.max( ...verificationErrors, 0 )
 		};
 
 	}
@@ -2673,7 +2754,7 @@ export class ThreeEngine {
 
 	}
 
-	private logModelFinalAxisCheck(): void {
+	private logModelFinalAxisCheck(arFromEnuSolution: ArFromEnuSolution): void {
 
 		const placedModel = this.placementSession.getArPlacedModel();
 		if ( placedModel === null ) {
@@ -2682,16 +2763,26 @@ export class ThreeEngine {
 
 		placedModel.updateMatrixWorld( true );
 		const modelContent = this.getModelContentObject( placedModel );
+		modelContent?.updateMatrixWorld( true );
 		const origin = placedModel.localToWorld( new THREE.Vector3() );
 		const upPoint = placedModel.localToWorld( new THREE.Vector3( 0, 1, 0 ) );
-		const modelWorldUp = upPoint.sub( origin ).normalize();
-		const dotWithArUp = modelWorldUp.dot( new THREE.Vector3( 0, 1, 0 ) );
+		const wrapperWorldUp = upPoint.sub( origin ).normalize();
+		const contentWorldUp = modelContent === null
+			? null
+			: new THREE.Vector3( 0, 1, 0 ).transformDirection( modelContent.matrixWorld ).normalize();
+		const arWorldUp = new THREE.Vector3( 0, 1, 0 );
+		const dotWithArUp = wrapperWorldUp.dot( arWorldUp );
 		const determinant = placedModel.matrixWorld.determinant();
+		const determinantContent = modelContent === null ? null : modelContent.matrixWorld.determinant();
 		const payload = {
 			finalQuaternion: quaternionToRoundedObject( placedModel.getWorldQuaternion( new THREE.Quaternion() ) ),
-			modelWorldUp: vector3ToRoundedObject( modelWorldUp ),
-			dotWithArUp: Number( dotWithArUp.toFixed( 6 ) ),
-			determinant: Number( determinant.toFixed( 6 ) ),
+			wrapperWorldUp: vector3ToRoundedObject( wrapperWorldUp ),
+			contentWorldUp: contentWorldUp === null ? null : vector3ToRoundedObject( contentWorldUp ),
+			arWorldUp: vector3ToRoundedObject( arWorldUp ),
+			dotWrapperUp: Number( dotWithArUp.toFixed( 6 ) ),
+			dotContentUp: contentWorldUp === null ? null : Number( contentWorldUp.dot( arWorldUp ).toFixed( 6 ) ),
+			determinantWrapper: Number( determinant.toFixed( 6 ) ),
+			determinantContent: determinantContent === null ? null : Number( determinantContent.toFixed( 6 ) ),
 			modelUpAxis: this.modelTemplate?.userData.__modelUpAxis ?? 'asset-transform-normalized',
 			contentRotation: modelContent === null ? null : {
 				x: Number( modelContent.rotation.x.toFixed( 6 ) ),
@@ -2702,12 +2793,27 @@ export class ThreeEngine {
 				? '模型最终 up 轴朝下，检查 upAxis、content.rotation、modelLocal 坐标空间和矩阵乘法顺序。'
 				: null
 		};
+		if ( this.registrationSolution !== null ) {
+			const controlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
+			const expectedAr = controlPoints.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+			const actualWrapperAr = controlPoints.map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) );
+			const expectedFootprintYawDeg = headingFromArPoints( expectedAr );
+			const actualModelFootprintYawDeg = headingFromArPoints( actualWrapperAr );
+			const headingDeltaDeg = Math.abs( normalizeSignedDegrees( actualModelFootprintYawDeg - expectedFootprintYawDeg ) );
+			if ( headingDeltaDeg > 5 ) {
+				console.error( '[ModelHeadingMismatch]', {
+					expectedFootprintYawDeg: Number( expectedFootprintYawDeg.toFixed( 3 ) ),
+					actualModelFootprintYawDeg: Number( actualModelFootprintYawDeg.toFixed( 3 ) ),
+					headingDeltaDeg: Number( headingDeltaDeg.toFixed( 6 ) )
+				} );
+			}
+		}
 		if ( dotWithArUp < 0 ) {
 			console.error( '[ModelUpsideDownDetected]', payload );
 			const rootPosition = placedModel.getWorldPosition( new THREE.Vector3() );
 			const rootQuaternion = placedModel.getWorldQuaternion( new THREE.Quaternion() );
 			const rootScale = placedModel.getWorldScale( new THREE.Vector3() );
-			const correction = new THREE.Quaternion().setFromUnitVectors( modelWorldUp, new THREE.Vector3( 0, 1, 0 ) );
+			const correction = new THREE.Quaternion().setFromUnitVectors( wrapperWorldUp, new THREE.Vector3( 0, 1, 0 ) );
 			const correctedQuaternion = correction.multiply( rootQuaternion );
 			const correctedMatrix = new THREE.Matrix4().compose( rootPosition, correctedQuaternion, rootScale );
 			this.applyPlacedRootWorldMatrix( placedModel, correctedMatrix );
@@ -3012,9 +3118,10 @@ export class ThreeEngine {
 		}
 
 		this.logModelHierarchyCoordinateSpaceCheck();
+		this.logModelControlPointOrderCheck();
 		this.logModelLocalFootprintCheck();
 		this.applyDirectControlPointPlacementIfEnabled( arFromEnuSolution );
-		this.logModelFinalAxisCheck();
+		this.logModelFinalAxisCheck( arFromEnuSolution );
 		this.renderEngineeringCornerDebug(
 			arFromEnuSolution,
 			guard.controlTarget ?? this.getActiveEngineeringControlTarget(),
@@ -3680,6 +3787,35 @@ function headingFromArPoints(points: THREE.Vector3[]): number {
 	}
 	const edge = points[ 1 ].clone().sub( points[ 0 ] );
 	return normalizeSignedDegrees( radToDeg( Math.atan2( edge.x, - edge.z ) ) );
+
+}
+
+function headingFromModelLocalPoints(points: THREE.Vector3[]): number {
+
+	if ( points.length < 2 ) {
+		return 0;
+	}
+	const edge = points[ 1 ].clone().sub( points[ 0 ] );
+	return normalizeSignedDegrees( radToDeg( Math.atan2( edge.x, - edge.z ) ) );
+
+}
+
+function signedArea2D(points: THREE.Vector3[], plane: 'xy' | 'xz'): number {
+
+	if ( points.length < 3 ) {
+		return 0;
+	}
+	let area = 0;
+	for ( let index = 0; index < points.length; index += 1 ) {
+		const current = points[ index ];
+		const next = points[ ( index + 1 ) % points.length ];
+		const cx = current.x;
+		const cy = plane === 'xy' ? current.y : current.z;
+		const nx = next.x;
+		const ny = plane === 'xy' ? next.y : next.z;
+		area += cx * ny - nx * cy;
+	}
+	return area / 2;
 
 }
 
