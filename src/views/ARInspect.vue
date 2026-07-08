@@ -538,7 +538,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	const applied = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
 	console.info( '[MarkerCalibrationApplyResult]', {
 		applied,
-		message: applied ? 'Marker 校正已完成，请点击工程放置模型。' : 'Marker 校正未应用，面板保持打开。',
+		message: applied ? 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。' : 'Marker 校正未应用，面板保持打开。',
 		runtimeStatus: engine.value.runtimeStatus,
 		markerCalibration: engine.value.markerCalibration,
 		createdAt: Date.now()
@@ -560,7 +560,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	}
 	markerApplyFeedback.value = {
 		type: 'success',
-		message: 'Marker 校正已完成，请点击“工程放置模型”。',
+		message: 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。',
 		createdAt: Date.now()
 	};
 	markerCalibrationOverlayOpen.value = engine.value.markerCalibration.active;

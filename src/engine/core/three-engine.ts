@@ -2223,7 +2223,8 @@ export class ThreeEngine {
 		metadata: {
 			markerId: string;
 			markerConfigId: string;
-			source?: 'marker';
+			source?: 'marker-calibration';
+			placeModel?: boolean;
 			capturedCornersAr?: THREE.Vector3[];
 		}
 	): boolean {
@@ -2237,7 +2238,8 @@ export class ThreeEngine {
 		metadata: {
 			markerId: string;
 			markerConfigId: string;
-			source?: 'marker';
+			source?: 'marker-calibration';
+			placeModel?: boolean;
 			capturedCornersAr?: THREE.Vector3[];
 		}
 	): boolean {
@@ -2353,7 +2355,10 @@ export class ThreeEngine {
 		this.logCoordinateAxisMappingCheck( solution.arFromEnuSolution );
 		this.logFootprintEnuToArCheck( solution.arFromEnuSolution, currentTarget ?? null );
 		const autoPlacementPendingBefore = this.placementSession.getAutoPlacementPending();
-		const modelPlacedBefore = this.placementSession.getPlacedModel() !== null;
+		const placedModelBefore = this.placementSession.getPlacedModel();
+		const modelPlacedBefore = placedModelBefore !== null;
+		const modelVisibleBefore = placedModelBefore?.visible === true;
+		const placeModel = metadata.placeModel === true;
 		this.placementSession.cancelAutoPlacement();
 		this.renderEngineeringCornerDebug(
 			solution.arFromEnuSolution,
@@ -2362,8 +2367,11 @@ export class ThreeEngine {
 		);
 		const appliedToPlacedModel = false;
 		const autoPlacementPendingAfter = this.placementSession.getAutoPlacementPending();
+		const placedModelAfter = this.placementSession.getPlacedModel();
+		const modelPlacedAfter = placedModelAfter !== null;
+		const modelVisibleAfter = placedModelAfter?.visible === true;
 		const modelWasPlacedAutomatically = modelPlacedBefore === false
-			&& this.placementSession.getPlacedModel() !== null;
+			&& modelPlacedAfter;
 		console.info( '[MarkerCalibrationApplyFlow]', {
 			clickedApplyCalibration: true,
 			solveAndApplyCalled: true,
@@ -2374,8 +2382,35 @@ export class ThreeEngine {
 			autoPlacementPendingAfter,
 			placeFromPlacementBaseCalled: false,
 			modelWasPlacedAutomatically,
+			placeModelRequested: placeModel,
 			autoPlaceAfterMarkerCalibration: AUTO_PLACE_AFTER_MARKER_CALIBRATION
 		} );
+		console.info( '[MarkerCalibrationCompletedWithoutPlacement]', {
+			markerId: metadata.markerId,
+			sessionId: this.currentArSessionId,
+			hasArFromEnuSolution: this.activeMarkerArFromEnuSolution !== null,
+			autoPlacementPendingBefore,
+			autoPlacementPendingAfter,
+			modelVisibleBefore,
+			modelVisibleAfter,
+			modelPlacedBefore,
+			modelPlacedAfter
+		} );
+		if ( autoPlacementPendingAfter ) {
+			console.warn( '[MarkerCalibrationAutoPlacementPendingNotCleared]', {
+				markerId: metadata.markerId,
+				sessionId: this.currentArSessionId,
+				autoPlacementPendingBefore,
+				autoPlacementPendingAfter
+			} );
+		}
+		if ( placeModel ) {
+			console.warn( '[MarkerCalibrationPlaceModelIgnored]', {
+				markerId: metadata.markerId,
+				sessionId: this.currentArSessionId,
+				reason: 'marker calibration never places model; use engineering placement action'
+			} );
+		}
 		if ( modelWasPlacedAutomatically ) {
 			this.logUnexpectedAutoPlacementAfterCalibration( 'applyCurrentSessionMarkerSolutionOnly', metadata.markerId );
 		}
@@ -2418,7 +2453,7 @@ export class ThreeEngine {
 		} );
 		this.logRegistrationFinal();
 		this.setStatus(
-			'Marker 校正已完成，工程坐标已对齐，请点击“工程放置模型”。'
+			'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。'
 		);
 		this.emit();
 		return true;

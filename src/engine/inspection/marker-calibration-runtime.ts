@@ -54,7 +54,8 @@ interface MarkerCalibrationRuntimeOptions {
 		metadata: {
 			markerId: string;
 			markerConfigId: string;
-			source?: 'marker';
+			source?: 'marker-calibration';
+			placeModel?: boolean;
 			capturedCornersAr?: THREE.Vector3[];
 		}
 	): boolean;
@@ -549,6 +550,8 @@ export class MarkerCalibrationRuntime {
 			const applied = this.options.applyCurrentSessionMarkerSolution( solution, {
 				markerId,
 				markerConfigId: markerId,
+				source: 'marker-calibration',
+				placeModel: false,
 				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition.clone() )
 			} );
 			if ( applied ) {
