@@ -287,6 +287,7 @@ export class ThreeEngine {
 	private markerCorrectionFallbackArFromEnuSolution: ArFromEnuSolution | null = null;
 	private currentArSessionContext: ArSessionContext | null = null;
 	private currentArSessionId: string | null = null;
+	private siteOriginReferencePanelOpen = false;
 	private currentArSessionRequestMode: ArSessionRequestMode = 'normal';
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
 	private arSessionEndPending = false;
@@ -550,6 +551,10 @@ export class ThreeEngine {
 				this.clearAnnotationDetail();
 			},
 			handlePreSelectionRaycast: ( selection ) => {
+				if ( this.handleSiteOriginReferencePick( selection.raycaster ) ) {
+					return true;
+				}
+
 				const item = this.annotationLabelsController.pick( selection.raycaster );
 				if ( item === null ) {
 					return false;
@@ -1867,6 +1872,7 @@ export class ThreeEngine {
 	): void {
 
 		this.clearEngineeringCornerDebug();
+		this.addSiteOriginReferenceMarker( arFromEnuSolution );
 		if ( this.engineeringDebugLayers.showMarkerExpected && controlTarget?.cornersEnu !== undefined ) {
 			this.addDebugQuad( {
 				name: 'marker-expected',
@@ -2030,6 +2036,67 @@ export class ThreeEngine {
 		const line = new THREE.Line( geometry, material );
 		line.name = name;
 		this.engineeringCornerDebugGroup.add( line );
+
+	}
+
+	private addSiteOriginReferenceMarker(arFromEnuSolution: ArFromEnuSolution): void {
+
+		const originAr = new THREE.Vector3( 0, 0, 0 ).applyMatrix4( arFromEnuSolution.matrix );
+		const labelPosition = originAr.clone().add( new THREE.Vector3( 0.22, 0.42, 0 ) );
+		const point = new THREE.Mesh(
+			new THREE.SphereGeometry( 0.055, 16, 10 ),
+			new THREE.MeshBasicMaterial( { color: 0x38bdf8, depthTest: false } )
+		);
+		point.name = 'site-origin-reference-point';
+		point.position.copy( originAr );
+		markSiteOriginReferenceObject( point );
+		this.engineeringCornerDebugGroup.add( point );
+
+		this.addDebugLine( 'site-origin-reference-line', [ originAr, labelPosition ], 0x38bdf8 );
+		const label = createCanvasPanelSprite( {
+			title: '参考原点',
+			subtitle: 'siteOrigin / ENU (0,0,0)',
+			width: 0.72,
+			color: '#38bdf8'
+		} );
+		label.name = 'site-origin-reference-label';
+		label.position.copy( labelPosition );
+		markSiteOriginReferenceObject( label );
+		this.engineeringCornerDebugGroup.add( label );
+
+		if ( this.siteOriginReferencePanelOpen ) {
+			const detail = createCanvasPanelSprite( {
+				title: '工程参考原点',
+				subtitle: `AR ${originAr.x.toFixed( 2 )}, ${originAr.y.toFixed( 2 )}, ${originAr.z.toFixed( 2 )}`,
+				body: '这是 ENU 坐标系原点映射到当前 WebXR AR local 的参考点。再次点击关闭。',
+				width: 1.08,
+				color: '#facc15'
+			} );
+			detail.name = 'site-origin-reference-detail';
+			detail.position.copy( labelPosition ).add( new THREE.Vector3( 0, 0.34, 0 ) );
+			markSiteOriginReferenceObject( detail );
+			this.engineeringCornerDebugGroup.add( detail );
+		}
+
+	}
+
+	private handleSiteOriginReferencePick(raycaster: THREE.Raycaster): boolean {
+
+		const hit = raycaster.intersectObjects( this.engineeringCornerDebugGroup.children, true )
+			.find( ( intersection ) => hasSiteOriginReferenceObject( intersection.object ) );
+		if ( hit === undefined ) {
+			return false;
+		}
+
+		this.siteOriginReferencePanelOpen = ! this.siteOriginReferencePanelOpen;
+		if ( this.activeMarkerArFromEnuSolution !== null ) {
+			this.renderEngineeringCornerDebug(
+				this.activeMarkerArFromEnuSolution,
+				this.getActiveEngineeringControlTarget()
+			);
+		}
+		this.setStatus( this.siteOriginReferencePanelOpen ? '已显示参考原点说明。' : '已关闭参考原点说明。' );
+		return true;
 
 	}
 
@@ -4034,6 +4101,106 @@ function createDebugTextSprite(text: string, color: number): THREE.Sprite {
 	sprite.scale.set( 0.38, 0.14, 1 );
 	sprite.name = `corner-debug-label-${text}`;
 	return sprite;
+
+}
+
+function createCanvasPanelSprite(args: {
+	title: string;
+	subtitle: string;
+	body?: string;
+	width: number;
+	color: string;
+}): THREE.Sprite {
+
+	const canvas = document.createElement( 'canvas' );
+	canvas.width = 768;
+	canvas.height = args.body === undefined ? 256 : 448;
+	const context = canvas.getContext( '2d' );
+	if ( context !== null ) {
+		context.clearRect( 0, 0, canvas.width, canvas.height );
+		context.fillStyle = 'rgba(12, 18, 32, 0.88)';
+		context.fillRect( 0, 0, canvas.width, canvas.height );
+		context.strokeStyle = args.color;
+		context.lineWidth = 8;
+		context.strokeRect( 12, 12, canvas.width - 24, canvas.height - 24 );
+		context.fillStyle = '#ffffff';
+		context.font = 'bold 72px "Microsoft YaHei", sans-serif';
+		context.fillText( args.title, 44, 104 );
+		context.fillStyle = 'rgba(226, 232, 240, 0.96)';
+		context.font = '42px "Microsoft YaHei", sans-serif';
+		context.fillText( args.subtitle, 44, 170 );
+		if ( args.body !== undefined ) {
+			context.fillStyle = 'rgba(250, 204, 21, 0.96)';
+			context.font = '38px "Microsoft YaHei", sans-serif';
+			wrapCanvasText( context, args.body, 44, 250, canvas.width - 88, 52, 3 );
+		}
+	}
+	const texture = new THREE.CanvasTexture( canvas );
+	texture.colorSpace = THREE.SRGBColorSpace;
+	texture.minFilter = THREE.LinearFilter;
+	texture.magFilter = THREE.LinearFilter;
+	const sprite = new THREE.Sprite( new THREE.SpriteMaterial( {
+		map: texture,
+		depthTest: false,
+		transparent: true,
+		toneMapped: false
+	} ) );
+	sprite.renderOrder = 260;
+	sprite.raycast = THREE.Sprite.prototype.raycast;
+	sprite.scale.set( args.width, args.width / ( canvas.width / canvas.height ), 1 );
+	return sprite;
+
+}
+
+function wrapCanvasText(
+	context: CanvasRenderingContext2D,
+	text: string,
+	x: number,
+	y: number,
+	maxWidth: number,
+	lineHeight: number,
+	maxLines: number
+): void {
+
+	let line = '';
+	let lineCount = 0;
+	for ( const char of text ) {
+		const nextLine = line + char;
+		if ( context.measureText( nextLine ).width > maxWidth && line.length > 0 ) {
+			context.fillText( line, x, y + lineCount * lineHeight );
+			line = char;
+			lineCount += 1;
+			if ( lineCount >= maxLines ) {
+				return;
+			}
+			continue;
+		}
+		line = nextLine;
+	}
+	if ( line.length > 0 && lineCount < maxLines ) {
+		context.fillText( line, x, y + lineCount * lineHeight );
+	}
+
+}
+
+function markSiteOriginReferenceObject(object: THREE.Object3D): void {
+
+	object.userData.__siteOriginReference = true;
+	object.userData.__excludeFromLayerIndex = true;
+	object.userData.__displayModeHelper = true;
+
+}
+
+function hasSiteOriginReferenceObject(object: THREE.Object3D): boolean {
+
+	let current: THREE.Object3D | null = object;
+	while ( current !== null ) {
+		if ( current.userData.__siteOriginReference === true ) {
+			return true;
+		}
+		current = current.parent;
+	}
+	return false;
 
 }
 
