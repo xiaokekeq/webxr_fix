@@ -250,6 +250,29 @@ const markerCornerPrompt = computed( () => {
 	return '按 LT、RT、RB、LB 顺序采集。';
 } );
 
+const markerCornerSequenceText = computed( () => {
+	const index = Math.min(
+		engine.value.markerCalibration.capturedCornerCount,
+		Math.max( engine.value.markerCalibration.expectedCornerCount - 1, 0 )
+	);
+	const labels = [
+		'1/4: leftTop 左上',
+		'2/4: rightTop 右上',
+		'3/4: rightBottom 右下',
+		'4/4: leftBottom 左下'
+	];
+	return labels[ index ] ?? '1/4: leftTop 左上';
+} );
+
+const markerCornerEnuText = computed( () => {
+	const index = Math.min(
+		engine.value.markerCalibration.capturedCornerCount,
+		Math.max( engine.value.markerCalibration.expectedCornerCount - 1, 0 )
+	);
+	const corners = activeControlTargetSummary.value?.cornersEnuText.split( ' / ' ) ?? [];
+	return corners[ index ] ?? '-';
+} );
+
 const workflowHint = computed( () => {
 	if ( localizationReady.value && modelPlaced.value ) {
 		return '空间校正完成，模型已显示。';
@@ -689,6 +712,12 @@ function setArOverlayClass(active: boolean): void {
 						<ArInfoGrid :items="calibrationStatusCards" class="compact-info-grid" />
 						<div class="runtime-banner" :class="{ warning: canUseMarkerCorners === false }">
 							{{ markerCornerPrompt }}
+						</div>
+						<div class="runtime-banner">
+							当前采集：{{ markerCornerSequenceText }}<br>
+							控制标志：{{ configStatus.activeControlTargetId ?? '-' }}<br>
+							对应 ENU：{{ markerCornerEnuText }}<br>
+							当前采集顺序：左上 -> 右上 -> 右下 -> 左下
 						</div>
 						<div class="action-row">
 							<button

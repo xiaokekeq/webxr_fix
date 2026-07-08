@@ -35,9 +35,22 @@
     "mode": "rigid",
     "minControlPoints": 3
   },
+  "modelControlPointOrder": [
+    "707-1",
+    "707-2",
+    "707-3",
+    "707-4"
+  ],
+  "modelControlPointCornerOrder": [
+    "leftTop",
+    "rightTop",
+    "rightBottom",
+    "leftBottom"
+  ],
   "controlPoints": {
     "707-1": {
       "name": "模型控制点 707-1",
+      "cornerRole": "leftTop",
       "modelLocal": {
         "x": -2.182275,
         "y": 0.067804,
@@ -58,6 +71,7 @@
     },
     "707-2": {
       "name": "模型控制点 707-2",
+      "cornerRole": "rightTop",
       "modelLocal": {
         "x": 2.056397,
         "y": 0.067804,
@@ -78,6 +92,7 @@
     },
     "707-3": {
       "name": "模型控制点 707-3",
+      "cornerRole": "rightBottom",
       "modelLocal": {
         "x": 2.081138,
         "y": 0.031047,
@@ -98,6 +113,7 @@
     },
     "707-4": {
       "name": "模型控制点 707-4",
+      "cornerRole": "leftBottom",
       "modelLocal": {
         "x": -2.157534,
         "y": 0.031047,
@@ -128,6 +144,12 @@
       ],
       "sizeMeters": 0.297,
       "yawDeg": 0,
+      "cornerOrder": [
+        "leftTop",
+        "rightTop",
+        "rightBottom",
+        "leftBottom"
+      ],
       "cornersEnu": [
         [
           -4.2881,
@@ -165,6 +187,7 @@
         "id": "707-1",
         "name": "707-1",
         "type": "model-control-point",
+        "cornerRole": "leftTop",
         "geodetic": {
           "longitude": 118.7358803583,
           "latitude": 31.9400360222,
@@ -180,6 +203,7 @@
         "id": "707-2",
         "name": "707-2",
         "type": "model-control-point",
+        "cornerRole": "rightTop",
         "geodetic": {
           "longitude": 118.7359142694,
           "latitude": 31.9400648028,
@@ -195,6 +219,7 @@
         "id": "707-3",
         "name": "707-3",
         "type": "model-control-point",
+        "cornerRole": "rightBottom",
         "geodetic": {
           "longitude": 118.7359345528,
           "latitude": 31.9400473944,
@@ -210,6 +235,7 @@
         "id": "707-4",
         "name": "707-4",
         "type": "model-control-point",
+        "cornerRole": "leftBottom",
         "geodetic": {
           "longitude": 118.7359008583,
           "latitude": 31.9400187222,
@@ -225,6 +251,7 @@
         "id": "707-6",
         "name": "707-6",
         "type": "marker-corner",
+        "cornerRole": "leftTop",
         "geodetic": {
           "longitude": 118.7358990194,
           "latitude": 31.9400123,
@@ -240,6 +267,7 @@
         "id": "707-7",
         "name": "707-7",
         "type": "marker-corner",
+        "cornerRole": "rightTop",
         "geodetic": {
           "longitude": 118.7359014694,
           "latitude": 31.9400141472,
@@ -255,6 +283,7 @@
         "id": "707-8",
         "name": "707-8",
         "type": "marker-corner",
+        "cornerRole": "rightBottom",
         "geodetic": {
           "longitude": 118.7359035417,
           "latitude": 31.9400124361,
@@ -270,6 +299,7 @@
         "id": "707-9",
         "name": "707-9",
         "type": "marker-corner",
+        "cornerRole": "leftBottom",
         "geodetic": {
           "longitude": 118.73590125,
           "latitude": 31.9400104028,

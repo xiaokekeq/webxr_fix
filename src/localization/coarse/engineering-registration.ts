@@ -11,6 +11,7 @@ import {
 	type EnuFrame,
 	type GeodeticCoordinate
 } from '@/localization/core/geodesy.js';
+import { createModelToEnuCorrespondencePayload } from '@/localization/core/corner-order-diagnostics.js';
 
 export interface EngineeringControlPoint {
 	id: string;
@@ -89,6 +90,7 @@ export function solveEngineeringRegistration(
 			`Registration requires at least ${config.registration.minControlPoints} control points, but got ${controlPoints.length}.`
 		);
 	}
+	console.info( '[ModelToEnuCorrespondenceCheck]', createModelToEnuCorrespondencePayload( config, controlPoints ) );
 
 	// This is the offline/model-side registration: find the similarity transform
 	// that maps model-local control points into the engineering site ENU frame.

@@ -12,6 +12,7 @@ import {
 	type MarkerLocalizationSolution,
 	type MarkerPoseInEnu
 } from '@/localization/marker/marker-localization.js';
+import { createMarkerCalibrationCorrespondencePayload } from '@/localization/core/corner-order-diagnostics.js';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
 import type {
 	ArWorkflowMode,
@@ -272,6 +273,19 @@ export class MarkerCalibrationRuntime {
 			arPosition: vector3ToObject( arPosition ),
 			hitTestReady: this.options.hasGroundHit()
 		} );
+		const capturedIndex = this.currentSessionMarkerCornerCaptures.length - 1;
+		const captureTarget = this.options.getControlTargets()
+			.find( ( target ) => target.id === markerState.markerId || target.markerId === markerState.markerId );
+		console.info( '[MarkerCornerCaptured]', {
+			controlTargetId: captureTarget?.id ?? markerState.markerId,
+			capturedIndex,
+			expectedCornerName: cornerMeta.cornerOrderValue,
+			expectedCornerEnu: captureTarget?.cornersEnu?.[ capturedIndex ] ?? null,
+			capturedArPosition: vector3ToObject( arPosition ),
+			capturedCount: this.currentSessionMarkerCornerCaptures.length,
+			expectedCount: MARKER_CORNER_SEQUENCE.length,
+			cornerOrder: captureTarget?.cornerOrder ?? null
+		} );
 		console.info( '[MarkerCornersArCaptured]', {
 			mode: MARKER_CALIBRATION_MODE,
 			workflowMode: this.options.getWorkflowMode(),
@@ -416,6 +430,10 @@ export class MarkerCalibrationRuntime {
 				currentCorner: MARKER_CORNER_SEQUENCE[ MARKER_CORNER_SEQUENCE.length - 1 ].label,
 				capturedPointCount: correspondences.length,
 				cornersEnu: markerControlTarget.cornersEnu
+			} ) );
+			console.info( '[MarkerCalibrationCorrespondenceCheck]', createMarkerCalibrationCorrespondencePayload( {
+				controlTarget: markerControlTarget,
+				capturedArPoints: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition )
 			} ) );
 
 			const solution = solveMarkerLocalization( {

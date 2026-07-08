@@ -219,6 +219,7 @@ export class ThreeEngine {
 	private readonly sceneBundle;
 	private readonly xrButtonWrap: HTMLDivElement;
 	private readonly modelOrientation = new THREE.Quaternion();
+	private readonly engineeringCornerDebugGroup = new THREE.Group();
 	private readonly displayModeController;
 	private readonly structureRevealController = createArXrayVisualizationController();
 	private readonly layerPeelingController = createArLayerPeelingController();
@@ -270,6 +271,8 @@ export class ThreeEngine {
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
+		this.engineeringCornerDebugGroup.name = '__engineering-corner-debug';
+		this.sceneBundle.scene.add( this.engineeringCornerDebugGroup );
 
 		const statusRuntime = createStatusRuntime( {
 			store: this.store,
@@ -1828,6 +1831,87 @@ export class ThreeEngine {
 
 	}
 
+	private renderEngineeringCornerDebug(
+		arFromEnuSolution: ArFromEnuSolution,
+		controlTarget: VisualControlTarget | null
+	): void {
+
+		this.clearEngineeringCornerDebug();
+		if ( controlTarget?.cornersEnu !== undefined ) {
+			this.addDebugQuad( {
+				name: 'marker/controlTarget',
+				points: controlTarget.cornersEnu.map( ( point ) => enuTupleToArVector( point, arFromEnuSolution ) ),
+				labels: [ 'leftTop', 'rightTop', 'rightBottom', 'leftBottom' ],
+				color: 0x00d4ff
+			} );
+		}
+
+		if ( this.registrationSolution !== null ) {
+			this.addDebugQuad( {
+				name: 'model footprint',
+				points: this.registrationSolution.controlPoints
+					.slice( 0, 4 )
+					.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) ),
+				labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => point.id ),
+				color: 0xffd84d
+			} );
+		}
+
+		console.info( '[EngineeringCornerDebugDrawn]', {
+			controlTargetId: controlTarget?.id ?? null,
+			markerCornerCount: controlTarget?.cornersEnu?.length ?? 0,
+			modelControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
+			placementMode: 'diagnostic-only',
+			affectsPlacement: false,
+			createdAt: Date.now()
+		} );
+
+	}
+
+	private addDebugQuad(args: {
+		name: string;
+		points: THREE.Vector3[];
+		labels: string[];
+		color: number;
+	}): void {
+
+		if ( args.points.length !== 4 ) {
+			return;
+		}
+
+		const material = new THREE.LineBasicMaterial( { color: args.color, depthTest: false } );
+		const geometry = new THREE.BufferGeometry().setFromPoints( [ ...args.points, args.points[ 0 ] ] );
+		const line = new THREE.Line( geometry, material );
+		line.name = `${args.name}-quad`;
+		this.engineeringCornerDebugGroup.add( line );
+
+		for ( let index = 0; index < args.points.length; index += 1 ) {
+			const sphere = new THREE.Mesh(
+				new THREE.SphereGeometry( 0.035, 12, 8 ),
+				new THREE.MeshBasicMaterial( { color: args.color, depthTest: false } )
+			);
+			sphere.position.copy( args.points[ index ] );
+			sphere.name = `${args.name}-${args.labels[ index ]}`;
+			this.engineeringCornerDebugGroup.add( sphere );
+
+			const label = createDebugTextSprite( args.labels[ index ], args.color );
+			label.position.copy( args.points[ index ] ).add( new THREE.Vector3( 0, 0.08, 0 ) );
+			this.engineeringCornerDebugGroup.add( label );
+		}
+
+	}
+
+	private clearEngineeringCornerDebug(): void {
+
+		while ( this.engineeringCornerDebugGroup.children.length > 0 ) {
+			const child = this.engineeringCornerDebugGroup.children.pop();
+			if ( child !== undefined ) {
+				disposeDebugObject( child );
+			}
+		}
+
+	}
+
 	private applyCurrentSessionMarkerSolution(
 		solution: MarkerLocalizationSolution,
 		metadata: {
@@ -1955,6 +2039,7 @@ export class ThreeEngine {
 		if ( appliedToPlacedModel ) {
 			this.applyModelLayerVisibility();
 			this.arSessionStateRuntime.markPlacementCommitted( true );
+			this.renderEngineeringCornerDebug( solution.arFromEnuSolution, currentTarget ?? null );
 		} else if ( this.workflowMode === 'ar-inspection' ) {
 			this.pointerSelection.suppressSelectionFor( 1200 );
 			console.info( '[MarkerPlacementRequested]', {
@@ -1968,6 +2053,9 @@ export class ThreeEngine {
 			} );
 			this.placementWorkflow.requestAutoPlacement();
 			appliedToPlacedModel = this.placementSession.getPlacedModel() !== null;
+			if ( appliedToPlacedModel ) {
+				this.renderEngineeringCornerDebug( solution.arFromEnuSolution, currentTarget ?? null );
+			}
 		}
 
 		if ( appliedToPlacedModel && this.workflowMode === 'ar-inspection' ) {
@@ -2092,6 +2180,7 @@ export class ThreeEngine {
 		this.activeMarkerArFromEnuSolution = null;
 		this.activeMarkerLocalizationResult = null;
 		this.markerCorrectionFallbackArFromEnuSolution = null;
+		this.clearEngineeringCornerDebug();
 
 	}
 
@@ -2563,6 +2652,68 @@ function quaternionToRoundedObject(quaternion: THREE.Quaternion): { x: number; y
 		z: Number( quaternion.z.toFixed( 6 ) ),
 		w: Number( quaternion.w.toFixed( 6 ) )
 	};
+
+}
+
+function enuTupleToArVector(
+	tuple: [ number, number, number ],
+	arFromEnuSolution: ArFromEnuSolution
+): THREE.Vector3 {
+
+	return new THREE.Vector3( tuple[ 0 ], tuple[ 1 ], tuple[ 2 ] ).applyMatrix4( arFromEnuSolution.matrix );
+
+}
+
+function createDebugTextSprite(text: string, color: number): THREE.Sprite {
+
+	const canvas = document.createElement( 'canvas' );
+	canvas.width = 256;
+	canvas.height = 96;
+	const context = canvas.getContext( '2d' );
+	if ( context !== null ) {
+		context.font = 'bold 28px sans-serif';
+		context.fillStyle = 'rgba(0,0,0,0.72)';
+		context.fillRect( 0, 0, canvas.width, canvas.height );
+		context.fillStyle = `#${color.toString( 16 ).padStart( 6, '0' )}`;
+		context.fillText( text, 16, 58 );
+	}
+	const texture = new THREE.CanvasTexture( canvas );
+	texture.minFilter = THREE.LinearFilter;
+	texture.magFilter = THREE.LinearFilter;
+	const sprite = new THREE.Sprite( new THREE.SpriteMaterial( {
+		map: texture,
+		depthTest: false,
+		transparent: true
+	} ) );
+	sprite.scale.set( 0.38, 0.14, 1 );
+	sprite.name = `corner-debug-label-${text}`;
+	return sprite;
+
+}
+
+function disposeDebugObject(object: THREE.Object3D): void {
+
+	object.traverse( ( child ) => {
+		if ( child instanceof THREE.Mesh || child instanceof THREE.Line ) {
+			child.geometry.dispose();
+			disposeMaterial( child.material );
+		}
+		if ( child instanceof THREE.Sprite ) {
+			disposeMaterial( child.material );
+		}
+	} );
+
+}
+
+function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
+
+	if ( Array.isArray( material ) ) {
+		material.forEach( disposeMaterial );
+		return;
+	}
+	const maybeTextured = material as THREE.Material & { map?: THREE.Texture };
+	maybeTextured.map?.dispose();
+	material.dispose();
 
 }
 

@@ -7,6 +7,7 @@ import {
 import { convertGeodeticToWgs84 } from '@/localization/core/coordinate-systems.js';
 import type { RtkSurveyDataset } from '@/localization/rtk/rtk-survey-dataset.js';
 import type { VisualControlTarget } from '@/localization/baseline/site-calibration-baseline.js';
+import { createCornerOrderConfigLoadedPayload } from '@/localization/core/corner-order-diagnostics.js';
 
 export interface DemoModelLocalPoint {
 	x: number;
@@ -203,6 +204,7 @@ export async function loadDemoModelConfig(
 		const normalized = normalizeDemoModelConfig( enrichedRaw );
 		validateDemoModelConfig( normalized );
 		console.info( '[DemoModelConfigLoaded]', createConfigDebugPayload( url, normalized ) );
+		console.info( '[CornerOrderConfigLoaded]', createCornerOrderConfigLoadedPayload( url, normalized ) );
 		console.info( '[Demo Model Config]', normalized );
 
 		return normalized;
@@ -261,6 +263,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 	for ( const [ id, point ] of Object.entries( config.controlPoints ) ) {
 		if ( isControlPointCorrespondence( point ) ) {
 			normalizedControlPoints[ id ] = {
+				...( point as unknown as Record<string, unknown> ),
 				modelLocal: point.modelLocal,
 				world: normalizeGeodeticShape( point.world, `${id}.world` )
 			};
