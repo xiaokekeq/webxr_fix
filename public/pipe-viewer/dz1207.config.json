@@ -26,9 +26,9 @@
       "title": "疑似渗漏点",
       "description": "演示 annotation，不是模型控制点。",
       "anchorEnu": {
-        "east": -5.7526,
-        "north": -1.0592,
-        "up": 0.063
+        "east": -7.024,
+        "north": -1.499,
+        "up": 0.18
       },
       "label": {
         "mode": "offset",
@@ -52,8 +52,8 @@
       "title": "巡检说明点",
       "description": "用于验证显式配置的业务标识。",
       "anchorEnu": {
-        "east": -3.2,
-        "north": -0.6,
+        "east": -2.604,
+        "north": 2.902,
         "up": 0.18
       },
       "label": {
@@ -77,9 +77,9 @@
       "title": "堤防观察点",
       "description": "普通业务标签演示。",
       "anchorEnu": {
-        "east": -4.6,
-        "north": -2.2,
-        "up": 0.12
+        "east": 0.043,
+        "north": 0.24,
+        "up": 0.18
       },
       "severity": "normal",
       "source": "demo",
