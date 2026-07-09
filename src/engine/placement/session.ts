@@ -42,7 +42,6 @@ export interface PlacementSession {
 	getAutoPlacementPending(): boolean;
 	markAutoPlacementPending(): void;
 	cancelAutoPlacement(): void;
-	setUndergroundPreview(enabled: boolean, depthMeters: number): void;
 	resetPlacement(): void;
 	requestAutoPlacement(modelTemplate: THREE.Group | null): void;
 	attemptLocalizedPlacement(args: {
@@ -82,37 +81,11 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	let arPlacementBase: ManualPlacementBase | null = null;
 	let autoPlacementPending = false;
 	let trackedArPlacementTransform: TrackedArPlacementTransform | null = null;
-	let undergroundPreviewOffsetMeters = 0;
+	const visualOffsetMatrix = new THREE.Matrix4();
 
 	function updatePlacementSummary(): void {
 
 		store.patch( { placementSummary: createPlacementSummaryState( arPlacedModel ) } );
-
-	}
-
-	function applyCurrentUndergroundPreviewOffset(): void {
-
-		if ( arPlacedModel === null || undergroundPreviewOffsetMeters === 0 ) {
-			return;
-		}
-
-		translatePlacedModelY( undergroundPreviewOffsetMeters );
-		arPlacedModel.updateMatrixWorld( true );
-
-	}
-
-	function setUndergroundPreview(enabled: boolean, depthMeters: number): void {
-
-		const nextOffset = enabled ? - Math.max( 0, depthMeters ) : 0;
-		const delta = nextOffset - undergroundPreviewOffsetMeters;
-		undergroundPreviewOffsetMeters = nextOffset;
-
-		if ( arPlacedModel !== null && delta !== 0 ) {
-			translatePlacedModelY( delta );
-			arPlacedModel.updateMatrixWorld( true );
-			updatePlacementSummary();
-			trackArPlacement( 'marker' );
-		}
 
 	}
 
@@ -172,22 +145,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 	}
 
-	function translatePlacedModelY(delta: number): void {
-
-		if ( arPlacedModel === null ) {
-			return;
-		}
-
-		if ( arPlacedModel.matrixAutoUpdate === false ) {
-			arPlacedModel.matrix.premultiply( new THREE.Matrix4().makeTranslation( 0, delta, 0 ) );
-			arPlacedModel.matrix.decompose( arPlacedModel.position, arPlacedModel.quaternion, arPlacedModel.scale );
-			return;
-		}
-
-		arPlacedModel.position.y += delta;
-
-	}
-
 	function placeFromPlacementBase(
 		modelTemplate: THREE.Group,
 		source: ArPlacementSource
@@ -205,7 +162,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			modelAnchor: sceneBundle.arModelAnchor,
 			adjustedPlacement
 		} );
-		applyCurrentUndergroundPreviewOffset();
 		trackArPlacement( source );
 		updateRegistrationStatusDetail( '状态：模型已按工程坐标显示' );
 		updatePlacementSummary();
@@ -256,8 +212,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			autoPlacementPending = false;
 
 		},
-
-		setUndergroundPreview,
 
 		resetPlacement() {
 
@@ -396,6 +350,10 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				arFromEnuSolution,
 				registrationSolution
 			} );
+			const visualOffsetMeters = resolveConfiguredVisualYOffsetMeters( modelTemplate, registrationSolution, modelRawLocalToArMatrix );
+			if ( visualOffsetMeters !== 0 ) {
+				modelRawLocalToArMatrix.premultiply( visualOffsetMatrix.makeTranslation( 0, visualOffsetMeters, 0 ) );
+			}
 			resetArPlacementAnchorTransform();
 			arPlacementBase = null;
 			arPlacedModel = placeModelWithMatrix(
@@ -404,7 +362,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				sceneBundle.arModelAnchor,
 				modelRawLocalToArMatrix
 			);
-			applyCurrentUndergroundPreviewOffset();
 			trackArPlacement( resolvePlacementSourceFromArLocalization( arFromEnuSolution.source ) );
 			updateRegistrationStatusDetail( '状态：模型已按工程矩阵显示' );
 			updatePlacementSummary();
@@ -417,6 +374,8 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelToSiteMatrix: registrationSolution.modelToSite.matrix.toArray(),
 				arFromEnuMatrix: arFromEnuSolution.matrix.toArray(),
 				modelRawLocalToArMatrix: modelRawLocalToArMatrix.toArray(),
+				visualPlacementMode: registrationSolution.visualPlacementMode,
+				visualYOffsetMeters: visualOffsetMeters,
 				createdAt: Date.now()
 			} );
 			setStatus( '模型已按工程矩阵显示，未使用 hit-test 决定最终位置。' );
@@ -457,6 +416,30 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 function requiresCurrentSession(source: ArFromEnuSolution['source'] | undefined): boolean {
 
 	return source === 'marker';
+
+}
+
+function resolveConfiguredVisualYOffsetMeters(
+	modelTemplate: THREE.Group,
+	registrationSolution: EngineeringRegistrationSolution,
+	modelRawLocalToArMatrix: THREE.Matrix4
+): number {
+
+	const explicitOffset = registrationSolution.visualGroundOffsetMeters;
+	if ( registrationSolution.visualPlacementMode !== 'underground' ) {
+		return explicitOffset;
+	}
+
+	const bounds = new THREE.Box3().setFromObject( modelTemplate );
+	if ( bounds.isEmpty() ) {
+		return explicitOffset;
+	}
+
+	const localHeight = bounds.max.y - bounds.min.y;
+	const arHeight = new THREE.Vector3( 0, localHeight, 0 )
+		.applyMatrix3( new THREE.Matrix3().setFromMatrix4( modelRawLocalToArMatrix ) )
+		.length();
+	return explicitOffset - arHeight;
 
 }
 

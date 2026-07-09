@@ -6,6 +6,7 @@ import type {
 	ArSessionPhase,
 	RegistrationStoreState
 } from '@/localization/core/registration-store.js';
+import { arInfo } from '@/engine/debug/ar-logger.js';
 
 const props = withDefaults( defineProps<{
 	state: RegistrationStoreState;
@@ -37,7 +38,7 @@ watch(
 		props.state.placementSummary.positionText
 	].join( '|' ),
 	() => {
-		console.info( '[ArUiLocalizationStepChanged]', createUiLogPayload( props.state, resolveCurrentStep( props.state ), placementHint.value ) );
+		arInfo( 'ArUiLocalizationStepChanged', createUiLogPayload( props.state, resolveCurrentStep( props.state ), placementHint.value ) );
 	},
 	{ immediate: true }
 );

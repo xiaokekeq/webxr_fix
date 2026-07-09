@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted } from 'vue'
+import { arInfo } from '@/engine/debug/ar-logger.js'
 
 export function useWebSocket() {
   let ws: WebSocket | null = null
@@ -6,7 +7,7 @@ export function useWebSocket() {
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     ws = new WebSocket(`${proto}://${location.host}/ws`)
-    ws.onopen = () => console.log('WS connected')
+    ws.onopen = () => arInfo('WebSocketConnected')
     ws.onmessage = (e) => {
       try { JSON.parse(e.data) } catch { /* ignore */ }
     }

@@ -2,27 +2,6 @@
   "modelId": "dz1207",
   "siteId": "dz1207",
   "siteName": "707 堤坝警示牌控制点",
-  "siteFrame": {
-    "origin": {
-      "lng": 118.7359443694,
-      "lat": 31.9400473778,
-      "height": 24.33046,
-      "coordType": "WGS84",
-      "longitude": 118.7359443694,
-      "latitude": 31.9400473778,
-      "coordinateSystem": "WGS84"
-    },
-    "axes": "enu"
-  },
-  "siteOrigin": {
-    "longitude": 118.7359443694,
-    "latitude": 31.9400473778,
-    "height": 24.33046,
-    "coordinateSystem": "WGS84",
-    "lng": 118.7359443694,
-    "lat": 31.9400473778,
-    "coordType": "WGS84"
-  },
   "anchor": {
     "lng": 118.7359443694,
     "lat": 31.9400473778,
@@ -40,6 +19,76 @@
     "solveMode": "ground-plane-2d",
     "note": "Temporary loose threshold for outdoor manual cone-base corner capture; tighten for production."
   },
+  "annotations": [
+    {
+      "id": "risk-near-707-1",
+      "type": "risk",
+      "title": "疑似渗漏点",
+      "description": "演示 annotation，不是模型控制点。",
+      "anchorEnu": {
+        "east": -5.7526,
+        "north": -1.0592,
+        "up": 0.063
+      },
+      "label": {
+        "mode": "offset",
+        "offsetMeters": {
+          "east": 0.4,
+          "north": 0.2,
+          "up": 0.6
+        }
+      },
+      "severity": "danger",
+      "source": "demo",
+      "properties": {
+        "风险等级": "高",
+        "巡检状态": "待处理",
+        "说明": "演示 annotation，不是模型控制点"
+      }
+    },
+    {
+      "id": "inspection-note-707",
+      "type": "inspection",
+      "title": "巡检说明点",
+      "description": "用于验证显式配置的业务标识。",
+      "anchorEnu": {
+        "east": -3.2,
+        "north": -0.6,
+        "up": 0.18
+      },
+      "label": {
+        "mode": "offset",
+        "offsetMeters": {
+          "east": 0.2,
+          "north": 0.4,
+          "up": 0.55
+        }
+      },
+      "severity": "warning",
+      "source": "demo",
+      "properties": {
+        "类型": "巡检提示",
+        "说明": "显式 annotations[] 配置生成"
+      }
+    },
+    {
+      "id": "normal-label-707",
+      "type": "label",
+      "title": "堤防观察点",
+      "description": "普通业务标签演示。",
+      "anchorEnu": {
+        "east": -4.6,
+        "north": -2.2,
+        "up": 0.12
+      },
+      "severity": "normal",
+      "source": "demo",
+      "properties": {
+        "状态": "正常",
+        "说明": "蓝色 normal annotation"
+      }
+    }
+  ],
   "modelControlPointOrder": [
     "707-1",
     "707-2",
@@ -180,203 +229,6 @@
       "plane": "horizontal"
     }
   ],
-  "rtkSurveyDataset": {
-    "siteId": "dz1207",
-    "coordinateSystem": "WGS84",
-    "source": "manual-import",
-    "sourceFile": "nj0706_2026-07-07-10-49-53.xlsx",
-    "originPointId": "707-10",
-    "enuOrder": "east,north,up",
-    "points": [
-      {
-        "id": "707-1",
-        "name": "707-1",
-        "type": "model-control-point",
-        "cornerRole": "leftTop",
-        "geodetic": {
-          "longitude": 118.7358803583,
-          "latitude": 31.9400360222,
-          "height": 24.29345
-        },
-        "enu": [
-          -6.0526,
-          -1.2592,
-          -0.037
-        ]
-      },
-      {
-        "id": "707-2",
-        "name": "707-2",
-        "type": "model-control-point",
-        "cornerRole": "rightTop",
-        "geodetic": {
-          "longitude": 118.7359142694,
-          "latitude": 31.9400648028,
-          "height": 24.24052
-        },
-        "enu": [
-          -2.8461,
-          1.9322,
-          -0.0899
-        ]
-      },
-      {
-        "id": "707-3",
-        "name": "707-3",
-        "type": "model-control-point",
-        "cornerRole": "rightBottom",
-        "geodetic": {
-          "longitude": 118.7359345528,
-          "latitude": 31.9400473944,
-          "height": 24.29282
-        },
-        "enu": [
-          -0.9282,
-          0.0018,
-          -0.0376
-        ]
-      },
-      {
-        "id": "707-4",
-        "name": "707-4",
-        "type": "model-control-point",
-        "cornerRole": "leftBottom",
-        "geodetic": {
-          "longitude": 118.7359008583,
-          "latitude": 31.9400187222,
-          "height": 24.31788
-        },
-        "enu": [
-          -4.1142,
-          -3.1775,
-          -0.0126
-        ]
-      },
-      {
-        "id": "707-6",
-        "name": "707-6",
-        "type": "marker-corner",
-        "cornerRole": "leftTop",
-        "geodetic": {
-          "longitude": 118.7358990194,
-          "latitude": 31.9400123,
-          "height": 24.32113
-        },
-        "enu": [
-          -4.2881,
-          -3.8896,
-          -0.0093
-        ]
-      },
-      {
-        "id": "707-7",
-        "name": "707-7",
-        "type": "marker-corner",
-        "cornerRole": "rightTop",
-        "geodetic": {
-          "longitude": 118.7359014694,
-          "latitude": 31.9400141472,
-          "height": 24.31619
-        },
-        "enu": [
-          -4.0564,
-          -3.6848,
-          -0.0143
-        ]
-      },
-      {
-        "id": "707-8",
-        "name": "707-8",
-        "type": "marker-corner",
-        "cornerRole": "rightBottom",
-        "geodetic": {
-          "longitude": 118.7359035417,
-          "latitude": 31.9400124361,
-          "height": 24.33315
-        },
-        "enu": [
-          -3.8605,
-          -3.8745,
-          0.0027
-        ]
-      },
-      {
-        "id": "707-9",
-        "name": "707-9",
-        "type": "marker-corner",
-        "cornerRole": "leftBottom",
-        "geodetic": {
-          "longitude": 118.73590125,
-          "latitude": 31.9400104028,
-          "height": 24.3281
-        },
-        "enu": [
-          -4.0772,
-          -4.1,
-          -0.0024
-        ]
-      },
-      {
-        "id": "707-10",
-        "name": "707-10",
-        "type": "site-origin",
-        "geodetic": {
-          "longitude": 118.7359443694,
-          "latitude": 31.9400473778,
-          "height": 24.33046
-        },
-        "enu": [
-          0,
-          0,
-          0
-        ]
-      }
-    ],
-    "note": "WGS fields used; projected northing/easting fields intentionally ignored."
-  },
-  "controlTargets": [
-    {
-      "id": "marker-warning-707",
-      "name": "707 警示牌控制标志",
-      "type": "marker-corners-4",
-      "markerId": "marker-warning-707",
-      "centerEnu": [
-        -4.0705,
-        -3.8872,
-        -0.0058
-      ],
-      "cornerOrder": [
-        "leftTop",
-        "rightTop",
-        "rightBottom",
-        "leftBottom"
-      ],
-      "cornersEnu": [
-        [
-          -4.2881,
-          -3.8896,
-          -0.0093
-        ],
-        [
-          -4.0564,
-          -3.6848,
-          -0.0143
-        ],
-        [
-          -3.8605,
-          -3.8745,
-          0.0027
-        ],
-        [
-          -4.0772,
-          -4.1,
-          -0.0024
-        ]
-      ],
-      "plane": "horizontal",
-      "note": "cornersEnu/cornerOrder follow RTK physical marker order: 1=707-6 leftTop, 2=707-7 rightTop, 3=707-8 rightBottom, 4=707-9 leftBottom; generated from WGS84 -> ECEF -> ENU relative to 707-10."
-    }
-  ],
   "placementAnchorEnu": [
     0,
     0,
@@ -384,51 +236,6 @@
   ],
   "placementAnchorMeaning": "site-origin-ground-reference",
   "visualGroundOffsetMeters": 0,
-  "undergroundObjects": [],
-  "sensors": [],
-  "riskPoints": [],
-  "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json",
-  "rtkValidation": {
-    "siteOriginWgs": {
-      "longitude": 118.7359443694,
-      "latitude": 31.9400473778,
-      "height": 24.33046,
-      "coordinateSystem": "WGS84",
-      "lng": 118.7359443694,
-      "lat": 31.9400473778,
-      "coordType": "WGS84"
-    },
-    "markerEdgesMeters": {
-      "707-6->707-7": 0.3093,
-      "707-7->707-8": 0.2732,
-      "707-8->707-9": 0.3128,
-      "707-9->707-6": 0.298
-    },
-    "markerDiagonalsMeters": {
-      "707-6->707-8": 0.428,
-      "707-7->707-9": 0.4159
-    },
-    "markerOrderCrossingCheck": {
-      "crossSigns": [
-        -0.0841,
-        -0.0853,
-        -0.0932,
-        -0.0919
-      ],
-      "appearsCrossed": false
-    },
-    "unitChecks": [
-      "WGS longitude/latitude parsed from DMS and inside China range.",
-      "Projected north/east columns look like planar coordinates and were not used.",
-      "Marker edges are decimeter-scale, not tens/hundreds of meters.",
-      "Marker is a surveyed warning sign marker, not an A4 sheet; A4 size check is intentionally not applied."
-    ],
-    "modelControlPointRegionMeters": {
-      "707-1->707-2": 4.5243,
-      "707-2->707-3": 2.7217,
-      "707-3->707-4": 4.501,
-      "707-4->707-1": 2.7272
-    },
-    "modelLocalStatus": "modelLocal values use dizhi1207.obj bottom bounding-box footprint corners mapped to the physical 707-1~707-4 footprint order; replace with surveyed model corners if available."
-  }
+  "visualPlacementMode": "underground",
+  "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json"
 }

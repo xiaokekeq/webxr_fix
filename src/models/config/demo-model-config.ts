@@ -8,6 +8,14 @@ import { convertGeodeticToWgs84 } from '@/localization/core/coordinate-systems.j
 import type { RtkSurveyDataset } from '@/localization/rtk/rtk-survey-dataset.js';
 import type { VisualControlTarget } from '@/localization/baseline/site-calibration-baseline.js';
 import { createCornerOrderConfigLoadedPayload } from '@/localization/core/corner-order-diagnostics.js';
+import type {
+	AnnotationSeverity,
+	AnnotationStyleRule,
+	AnnotationType,
+	EngineeringAnnotation,
+	EnuPoint
+} from '@/engine/annotation/annotation-types.js';
+import { arDebug, arError, arInfo, arWarn } from '@/engine/debug/ar-logger.js';
 
 export interface DemoModelLocalPoint {
 	x: number;
@@ -73,6 +81,7 @@ interface RawMarkerEngineeringConfig extends Omit<MarkerEngineeringConfig, 'enu'
 }
 
 export type DemoModelRegistrationMode = 'rigid-ground-plane';
+export type DemoModelVisualPlacementMode = 'surface' | 'underground';
 
 export interface DemoModelConfig {
 	modelId: string;
@@ -96,9 +105,12 @@ export interface DemoModelConfig {
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters: number;
+	visualPlacementMode: DemoModelVisualPlacementMode;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
+	annotations: EngineeringAnnotation[];
+	annotationStyleRules: AnnotationStyleRule[];
 	markerCalibration?: {
 		solveMode?: 'ground-plane-2d' | 'rigid-3d-debug';
 		maxSelfCheckErrorMeters?: number;
@@ -160,13 +172,16 @@ interface LocalDebugModelConfig {
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters?: number;
+	visualPlacementMode?: DemoModelVisualPlacementMode;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
+	annotations?: unknown[];
+	annotationStyleRules?: unknown[];
 	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters' | 'visualPlacementMode' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	controlPoints: Record<string, {
@@ -182,9 +197,12 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters?: number;
+	visualPlacementMode?: DemoModelVisualPlacementMode;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
+	annotations?: unknown[];
+	annotationStyleRules?: unknown[];
 }
 
 type RawDemoModelConfig = LegacyDemoModelConfig | LocalDebugModelConfig;
@@ -209,13 +227,13 @@ export async function loadDemoModelConfig(
 		const enrichedRaw = await enrichDemoModelConfigAttachments( raw );
 		const normalized = normalizeDemoModelConfig( enrichedRaw );
 		validateDemoModelConfig( normalized );
-		console.info( '[DemoModelConfigLoaded]', createConfigDebugPayload( url, normalized ) );
-		console.info( '[CornerOrderConfigLoaded]', createCornerOrderConfigLoadedPayload( url, normalized ) );
-		console.info( '[Demo Model Config]', normalized );
+		arInfo( 'DemoModelConfigLoaded', createConfigDebugPayload( url, normalized ) );
+		arInfo( 'CornerOrderConfigLoaded', createCornerOrderConfigLoadedPayload( url, normalized ) );
+		arDebug( 'DemoModelConfigNormalized', normalized );
 
 		return normalized;
 	} catch ( error ) {
-		console.error( '[DemoModelConfigParseFailed]', {
+		arError( 'DemoModelConfigParseFailed', {
 			configUrl: url,
 			modelId: 'modelId' in raw ? raw.modelId : 'siteId' in raw ? raw.siteId : null,
 			hasSiteFrameOrigin: 'siteFrame' in raw && raw.siteFrame?.origin !== undefined,
@@ -304,6 +322,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.modelId );
+	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints );
 
 	return {
 		modelId: config.modelId,
@@ -321,9 +340,12 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
+		visualPlacementMode: normalizeVisualPlacementMode( config.visualPlacementMode ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
+		annotations,
+		annotationStyleRules: normalizeAnnotationStyleRules( config.annotationStyleRules ),
 		markerCalibration: config.markerCalibration,
 		configCompleteness: {
 			hasExplicitSiteId: hasOwnObjectKey( config, 'siteId' ),
@@ -342,6 +364,7 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.siteId );
+	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints );
 
 	return {
 		modelId: config.siteId,
@@ -365,9 +388,12 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
+		visualPlacementMode: normalizeVisualPlacementMode( config.visualPlacementMode ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
+		annotations,
+		annotationStyleRules: normalizeAnnotationStyleRules( config.annotationStyleRules ),
 		markerCalibration: config.markerCalibration,
 		configCompleteness: {
 			hasExplicitSiteId: true,
@@ -467,6 +493,301 @@ function normalizeLocalDebugControlPoints(
 
 }
 
+function normalizeEngineeringAnnotations(
+	rawAnnotations: unknown[] | undefined,
+	controlPoints: Record<string, DemoModelControlPointCorrespondence>
+): EngineeringAnnotation[] {
+
+	if ( Array.isArray( rawAnnotations ) === false ) {
+		arInfo( 'AnnotationConfigLoaded', {
+			totalRaw: 0,
+			totalValid: 0,
+			skippedIds: [],
+			annotationIds: [],
+			severityCounts: {},
+			layerIds: [],
+			generatedFromControlPoints: false,
+			generatedFromControlTargets: false
+		} );
+		return [];
+	}
+
+	const annotations: EngineeringAnnotation[] = [];
+	const skippedIds: string[] = [];
+	const seenIds = new Set<string>();
+	const controlPointIds = new Set( Object.keys( controlPoints ) );
+
+	for ( const [ index, raw ] of rawAnnotations.entries() ) {
+		const rawRecord = isRecord( raw ) ? raw : null;
+		const id = typeof rawRecord?.id === 'string' ? rawRecord.id.trim() : '';
+		const fallbackSkippedId = id || `annotations[${index}]`;
+
+		const normalized = normalizeEngineeringAnnotation( rawRecord, index );
+		if ( normalized === null ) {
+			skippedIds.push( fallbackSkippedId );
+			continue;
+		}
+
+		if ( seenIds.has( normalized.id ) ) {
+			arWarn( 'AnnotationConfigValidationWarning', {
+				id: normalized.id,
+				index,
+				reason: 'duplicate annotation id'
+			} );
+			skippedIds.push( normalized.id );
+			continue;
+		}
+
+		if ( controlPointIds.has( normalized.id ) ) {
+			arWarn( 'AnnotationControlPointIdCollisionWarning', {
+				id: normalized.id,
+				index,
+				reason: 'annotation id matches controlPoint id; annotation remains explicit and is not auto-generated'
+			} );
+		}
+
+		seenIds.add( normalized.id );
+		annotations.push( normalized );
+	}
+
+	arInfo( 'AnnotationConfigLoaded', {
+		totalRaw: rawAnnotations.length,
+		totalValid: annotations.length,
+		skippedIds,
+		annotationIds: annotations.map( ( annotation ) => annotation.id ),
+		severityCounts: countAnnotationSeverities( annotations ),
+		layerIds: Array.from( new Set( annotations.map( ( annotation ) => annotation.layerId ) ) ),
+		generatedFromControlPoints: false,
+		generatedFromControlTargets: false
+	} );
+
+	return annotations;
+
+}
+
+function normalizeEngineeringAnnotation(
+	raw: Record<string, unknown> | null,
+	index: number
+): EngineeringAnnotation | null {
+
+	if ( raw === null ) {
+		arWarn( 'AnnotationConfigValidationWarning', {
+			index,
+			reason: 'annotation must be an object'
+		} );
+		return null;
+	}
+
+	const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+	const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+	const anchorEnu = normalizeAnnotationEnuPoint( raw.anchorEnu );
+	const severity = normalizeAnnotationSeverity( raw.severity );
+	const type = normalizeAnnotationType( raw.type );
+	const label = normalizeAnnotationLabel( raw.label );
+
+	const reason = id.length === 0
+		? 'missing id'
+		: title.length === 0
+			? 'missing title'
+			: anchorEnu === null
+				? 'anchorEnu east/north/up must be numbers'
+				: severity === null
+					? 'severity must be normal/warning/danger'
+					: type === null
+						? 'type is invalid'
+						: label === null && raw.label !== undefined
+							? 'label config is invalid'
+							: '';
+	if ( reason.length > 0 || anchorEnu === null || severity === null || type === null || ( label === null && raw.label !== undefined ) ) {
+		arWarn( 'AnnotationConfigValidationWarning', {
+			id: id || null,
+			index,
+			reason
+		} );
+		return null;
+	}
+
+	return {
+		id,
+		type,
+		title,
+		description: typeof raw.description === 'string' ? raw.description : undefined,
+		anchorEnu,
+		label: label ?? undefined,
+		severity,
+		status: typeof raw.status === 'string' ? raw.status : undefined,
+		color: typeof raw.color === 'string' ? raw.color : undefined,
+		icon: typeof raw.icon === 'string' ? raw.icon : undefined,
+		source: normalizeAnnotationSource( raw.source ),
+		properties: normalizeAnnotationProperties( raw.properties ),
+		visible: typeof raw.visible === 'boolean' ? raw.visible : true,
+		layerId: typeof raw.layerId === 'string' && raw.layerId.trim().length > 0
+			? raw.layerId.trim()
+			: 'annotations'
+	};
+
+}
+
+function normalizeAnnotationStyleRules(rawRules: unknown[] | undefined): AnnotationStyleRule[] {
+
+	if ( Array.isArray( rawRules ) === false ) {
+		return [];
+	}
+
+	return rawRules.flatMap( ( raw, index ) => {
+		if ( isRecord( raw ) === false ) {
+			arWarn( 'AnnotationConfigValidationWarning', {
+				index,
+				reason: 'annotationStyleRules item must be an object'
+			} );
+			return [];
+		}
+
+		const severity = normalizeAnnotationSeverity( raw.severity );
+		if (
+			severity === null
+			|| typeof raw.pointColor !== 'string'
+			|| typeof raw.lineColor !== 'string'
+			|| typeof raw.labelColor !== 'string'
+		) {
+			arWarn( 'AnnotationConfigValidationWarning', {
+				index,
+				reason: 'annotationStyleRules item is invalid'
+			} );
+			return [];
+		}
+
+		return [ {
+			severity,
+			pointColor: raw.pointColor,
+			lineColor: raw.lineColor,
+			labelColor: raw.labelColor
+		} ];
+	} );
+
+}
+
+function normalizeAnnotationLabel(raw: unknown): EngineeringAnnotation['label'] | null {
+
+	if ( raw === undefined ) {
+		return undefined;
+	}
+	if ( isRecord( raw ) === false ) {
+		return null;
+	}
+
+	if ( raw.mode === 'offset' ) {
+		const offsetMeters = normalizeAnnotationEnuPoint( raw.offsetMeters );
+		return offsetMeters === null ? null : {
+			mode: 'offset',
+			offsetMeters
+		};
+	}
+
+	if ( raw.mode === 'absolute' ) {
+		const labelEnu = normalizeAnnotationEnuPoint( raw.labelEnu );
+		return labelEnu === null ? null : {
+			mode: 'absolute',
+			labelEnu
+		};
+	}
+
+	return null;
+
+}
+
+function normalizeAnnotationEnuPoint(raw: unknown): EnuPoint | null {
+
+	if ( isRecord( raw ) === false ) {
+		return null;
+	}
+
+	const east = raw.east;
+	const north = raw.north;
+	const up = raw.up;
+	if (
+		typeof east !== 'number'
+		|| Number.isFinite( east ) === false
+		|| typeof north !== 'number'
+		|| Number.isFinite( north ) === false
+		|| typeof up !== 'number'
+		|| Number.isFinite( up ) === false
+	) {
+		return null;
+	}
+
+	return { east, north, up };
+
+}
+
+function normalizeAnnotationSeverity(raw: unknown): AnnotationSeverity | null {
+
+	return raw === 'normal' || raw === 'warning' || raw === 'danger' ? raw : null;
+
+}
+
+function normalizeAnnotationType(raw: unknown): AnnotationType | null {
+
+	return raw === 'risk'
+		|| raw === 'monitor'
+		|| raw === 'inspection'
+		|| raw === 'label'
+		|| raw === 'warning'
+		|| raw === 'custom'
+		? raw
+		: null;
+
+}
+
+function normalizeAnnotationSource(raw: unknown): EngineeringAnnotation['source'] {
+
+	return raw === 'demo'
+		|| raw === 'sensor'
+		|| raw === 'inspection'
+		|| raw === 'risk'
+		|| raw === 'business'
+		? raw
+		: 'business';
+
+}
+
+function normalizeAnnotationProperties(raw: unknown): Record<string, string | number | boolean | null> {
+
+	if ( isRecord( raw ) === false ) {
+		return {};
+	}
+
+	const properties: Record<string, string | number | boolean | null> = {};
+	for ( const [ key, value ] of Object.entries( raw ) ) {
+		if (
+			typeof value === 'string'
+			|| typeof value === 'number'
+			|| typeof value === 'boolean'
+			|| value === null
+		) {
+			properties[ key ] = value;
+		}
+	}
+	return properties;
+
+}
+
+function countAnnotationSeverities(annotations: EngineeringAnnotation[]): Record<AnnotationSeverity, number> {
+
+	return {
+		normal: annotations.filter( ( annotation ) => annotation.severity === 'normal' ).length,
+		warning: annotations.filter( ( annotation ) => annotation.severity === 'warning' ).length,
+		danger: annotations.filter( ( annotation ) => annotation.severity === 'danger' ).length
+	};
+
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+
+	return typeof value === 'object' && value !== null && Array.isArray( value ) === false;
+
+}
+
 function validateDemoModelConfig(config: DemoModelConfig): void {
 
 	if ( typeof config.modelId !== 'string' || config.modelId.length === 0 ) {
@@ -511,6 +832,14 @@ function validateDemoModelConfig(config: DemoModelConfig): void {
 
 	if ( Array.isArray( config.attachments ) === false ) {
 		throw new Error( 'Model config attachments must be an array.' );
+	}
+
+	if ( Array.isArray( config.annotations ) === false ) {
+		throw new Error( 'Model config annotations must be an array.' );
+	}
+
+	if ( Array.isArray( config.annotationStyleRules ) === false ) {
+		throw new Error( 'Model config annotationStyleRules must be an array.' );
 	}
 
 }
@@ -567,7 +896,7 @@ function normalizeRtkSurveyDataset(
 ): RtkSurveyDataset | undefined {
 
 	if ( dataset === undefined ) {
-		console.info( '[RtkSurveyDatasetLoaded]', {
+		arInfo( 'RtkSurveyDatasetLoaded', {
 			siteId,
 			pointCount: 0,
 			source: null,
@@ -589,7 +918,7 @@ function normalizeRtkSurveyDataset(
 		points: Array.isArray( dataset.points ) ? dataset.points : []
 	};
 
-	console.info( '[RtkSurveyDatasetLoaded]', {
+	arInfo( 'RtkSurveyDatasetLoaded', {
 		siteId: normalized.siteId,
 		pointCount: normalized.points.length,
 		source: normalized.source ?? null,
@@ -637,7 +966,7 @@ function normalizeSiteConfigControlTargets(
 	} );
 	const resolvedTargets = [ ...normalizedTargets, ...markerFallbackTargets ];
 
-	console.info( '[SiteConfigControlTargetsResolved]', {
+	arInfo( 'SiteConfigControlTargetsResolved', {
 		siteId,
 		sourceControlTargetsCount: Array.isArray( targets ) ? targets.length : 0,
 		sourceMarkersCount: markers.length,
@@ -666,7 +995,7 @@ function normalizeVisualControlTargets(
 		const cornersEnu = normalizeCornersEnu( target.cornersEnu );
 		const centerEnu = normalizeEnuTuple( target.centerEnu ) ?? deriveCenterEnuFromCorners( cornersEnu );
 		if ( centerEnu === undefined ) {
-			console.warn( '[RtkSurveyControlTargetResolved]', {
+			arWarn( 'RtkSurveyControlTargetResolved', {
 				targetId: target.id,
 				resolved: false,
 				reason: `controlTargets[${index}].centerEnu missing and cornersEnu invalid`,
@@ -675,7 +1004,7 @@ function normalizeVisualControlTargets(
 			return [];
 		}
 
-		console.info( '[RtkSurveyControlTargetResolved]', {
+		arInfo( 'RtkSurveyControlTargetResolved', {
 			targetId: target.id,
 			resolved: true,
 			hasCornersEnu: cornersEnu !== undefined,
@@ -744,6 +1073,12 @@ function hasControlPointEnu(value: unknown): boolean {
 function normalizeVisualGroundOffsetMeters(value: number | undefined): number {
 
 	return typeof value === 'number' && Number.isFinite( value ) ? value : 0;
+
+}
+
+function normalizeVisualPlacementMode(value: DemoModelVisualPlacementMode | undefined): DemoModelVisualPlacementMode {
+
+	return value === 'underground' ? 'underground' : 'surface';
 
 }
 

@@ -23,7 +23,7 @@ interface CreatePointerSelectionSessionOptions {
 			clientX: number;
 			clientY: number;
 			source: 'screen' | 'xr-select';
-			placedModel: THREE.Group;
+			placedModel: THREE.Group | null;
 		}
 	): boolean;
 	getPlacedModel(): THREE.Group | null;
@@ -110,11 +110,6 @@ export function createPointerSelectionSession(
 		}
 		hasPendingPointerSelection = false;
 
-		const placedModel = getPlacedModel();
-		if ( placedModel === null ) {
-			return;
-		}
-
 		const dragDistance = pointerDownPosition.distanceTo(
 			new THREE.Vector2( clientX, clientY )
 		);
@@ -131,6 +126,7 @@ export function createPointerSelectionSession(
 			: sceneBundle.camera;
 		raycaster.setFromCamera( pointer, activeCamera );
 		lastScreenSelectionTime = performance.now();
+		const placedModel = getPlacedModel();
 		if ( handlePreSelectionRaycast?.( {
 			raycaster,
 			clientX,
@@ -138,6 +134,9 @@ export function createPointerSelectionSession(
 			source: 'screen',
 			placedModel
 		} ) === true ) {
+			return;
+		}
+		if ( placedModel === null ) {
 			return;
 		}
 		selectScreenPoint( clientX, clientY, placedModel );
@@ -170,16 +169,12 @@ export function createPointerSelectionSession(
 				return;
 			}
 
-			const placedModel = getPlacedModel();
-			if ( placedModel === null ) {
-				return;
-			}
-
 			const xrCamera = sceneBundle.renderer.xr.getCamera();
 			xrRayOrigin.setFromMatrixPosition( xrCamera.matrixWorld );
 			xrRayDirection.set( 0, 0, -1 ).transformDirection( xrCamera.matrixWorld );
 			raycaster.set( xrRayOrigin, xrRayDirection );
 			const canvasRect = sceneBundle.renderer.domElement.getBoundingClientRect();
+			const placedModel = getPlacedModel();
 			if ( handlePreSelectionRaycast?.( {
 				raycaster,
 				clientX: canvasRect.left + canvasRect.width / 2,
@@ -187,6 +182,9 @@ export function createPointerSelectionSession(
 				source: 'xr-select',
 				placedModel
 			} ) === true ) {
+				return;
+			}
+			if ( placedModel === null ) {
 				return;
 			}
 

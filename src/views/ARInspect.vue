@@ -10,6 +10,7 @@ import {
 	SECTION_CUT_PLANE_MODE_OPTIONS
 } from '@/features/ar/types/display-modes.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
+import { arInfo, arWarn, isArDebugEnabled } from '@/engine/debug/ar-logger.js';
 
 type InspectPanelView = 'display' | 'localization' | 'record';
 
@@ -32,6 +33,7 @@ const markerApplyFeedback = ref<{
 	message: string;
 	createdAt: number;
 } | null>( null );
+const arDebugMode = isArDebugEnabled();
 const debugInfoOpen = ref( false );
 const registrationDiagnosticOpen = ref( false );
 
@@ -44,6 +46,7 @@ const currentModel = computed(
 const currentModelName = computed( () => currentModel.value?.name ?? '未选择站点' );
 const currentConfigUrl = computed( () => currentModel.value?.configUrl ?? '-' );
 const configStatus = computed( () => engine.value.engineeringConfigStatus );
+const annotationDetail = computed( () => engine.value.annotationDetail );
 const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
 const modelPlaced = computed( () => engine.value.placementSummary.positionText !== '-' );
 const hitTestReady = computed(
@@ -102,6 +105,7 @@ const configCards = computed( () => [
 	{ label: '当前模型', value: `${engine.value.selectedModelId || '-'} / ${currentModelName.value}`, wide: true },
 	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
 	{ label: '模型控制点', value: `${engine.value.registrationChainDebug.engineeringControlRegistration.controlPointCount} 个` },
+	{ label: '业务标识', value: `${configStatus.value.annotationCount} 个` },
 	{ label: '控制标志', value: formatActiveMarkerText(), wide: true },
 	{ label: '四角 ENU', value: canUseMarkerCorners.value ? '已配置' : '缺失' }
 ] );
@@ -338,7 +342,7 @@ const workflowHint = computed( () => {
 watch(
 	workflowHint,
 	(message) => {
-		console.info( '[ArUiLocalizationStepChanged]', {
+		arInfo( 'ArUiLocalizationStepChanged', {
 			mode: engine.value.workflowMode,
 			siteId: engine.value.selectedModelId || null,
 			modelId: engine.value.selectedModelId || null,
@@ -515,7 +519,7 @@ async function handleResetMarkerCalibration(): Promise<void> {
 async function handleApplyMarkerCalibration(): Promise<void> {
 	markerApplyFeedback.value = null;
 	const blockedReason = markerApplyBlockedReason.value;
-	console.info( '[MarkerCalibrationApplyClicked]', {
+	arInfo( 'MarkerCalibrationApplyClicked', {
 		modelId: engine.value.selectedModelId || null,
 		currentSessionId: engine.value.markerCalibration.currentSessionId,
 		markerCalibrationActive: engine.value.markerCalibration.active,
@@ -536,7 +540,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 			message: blockedReason || '当前条件不足，无法完成 Marker 校正。',
 			createdAt: Date.now()
 		};
-		console.warn( '[MarkerCalibrationApplyBlockedInUi]', {
+		arWarn( 'MarkerCalibrationApplyBlockedInUi', {
 			reason: blockedReason,
 			createdAt: Date.now()
 		} );
@@ -544,7 +548,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	}
 
 	const applied = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
-	console.info( '[MarkerCalibrationApplyResult]', {
+	arInfo( 'MarkerCalibrationApplyResult', {
 		applied,
 		message: applied ? 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。' : 'Marker 校正未应用，面板保持打开。',
 		runtimeStatus: engine.value.runtimeStatus,
@@ -559,7 +563,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 			createdAt: Date.now()
 		};
 		markerCalibrationOverlayOpen.value = true;
-		console.warn( '[MarkerCalibrationApplyFailedInUi]', {
+		arWarn( 'MarkerCalibrationApplyFailedInUi', {
 			runtimeStatus: engine.value.runtimeStatus,
 			markerCalibration: engine.value.markerCalibration,
 			createdAt: Date.now()
@@ -577,7 +581,7 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 
 async function handlePlaceEngineeringModel(): Promise<void> {
 	if ( canPlaceEngineeringModel.value === false ) {
-		console.warn( '[EngineeringPlacementBlockedInUi]', {
+		arWarn( 'EngineeringPlacementBlockedInUi', {
 			modelId: engine.value.selectedModelId || null,
 			sessionId: engine.value.markerCalibration.currentSessionId,
 			hasSiteOrigin: configStatus.value.hasSiteOrigin,
@@ -713,6 +717,35 @@ function setArOverlayClass(active: boolean): void {
 			</button>
 		</nav>
 
+		<section
+			v-if="hasArSession && annotationDetail.visible"
+			class="annotation-detail-panel"
+			data-ar-ui="true"
+			@pointerdown.stop="store.actions.handleArUiInteraction()"
+			@click.stop
+		>
+			<div class="annotation-detail-header">
+				<div>
+					<div class="annotation-detail-kicker">业务标识</div>
+					<div class="annotation-detail-title">{{ annotationDetail.title }}</div>
+					<div class="annotation-detail-subtitle">{{ annotationDetail.subtitle }}</div>
+				</div>
+				<button type="button" class="annotation-detail-close" @click="store.actions.closePropertyPanel()">
+					关闭
+				</button>
+			</div>
+			<div class="annotation-detail-fields">
+				<div
+					v-for="field in annotationDetail.fields"
+					:key="field.label"
+					class="annotation-detail-field"
+				>
+					<span>{{ field.label }}</span>
+					<strong>{{ field.value }}</strong>
+				</div>
+			</div>
+		</section>
+
 		<transition name="sheet-fade">
 			<section
 				v-if="ui.drawerOpen && showMarkerCalibrationOverlay === false"
@@ -771,19 +804,6 @@ function setArOverlayClass(active: boolean): void {
 						</div>
 					</div>
 
-					<div class="sheet-section">
-						<div class="section-label">地底预览</div>
-						<div class="chip-grid">
-							<button
-								type="button"
-								class="chip-button"
-								:class="{ active: engine.undergroundPreviewEnabled }"
-								@click="store.actions.toggleUndergroundPreview()"
-							>
-								{{ engine.undergroundPreviewEnabled ? '关闭下沉' : '下沉 1m' }}
-							</button>
-						</div>
-					</div>
 				</template>
 
 				<template v-else-if="activePanelView === 'localization'">
@@ -792,14 +812,14 @@ function setArOverlayClass(active: boolean): void {
 						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
 							{{ warning }}
 						</div>
-						<button type="button" class="debug-toggle" @click="debugInfoOpen = !debugInfoOpen">
+						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="debugInfoOpen = !debugInfoOpen">
 							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
 						</button>
-						<ArInfoGrid v-if="debugInfoOpen" :items="debugCards" />
-						<button type="button" class="debug-toggle" @click="registrationDiagnosticOpen = !registrationDiagnosticOpen">
+						<ArInfoGrid v-if="arDebugMode && debugInfoOpen" :items="debugCards" />
+						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="registrationDiagnosticOpen = !registrationDiagnosticOpen">
 							{{ registrationDiagnosticOpen ? '收起配准诊断' : '配准诊断' }}
 						</button>
-						<ArInfoGrid v-if="registrationDiagnosticOpen" :items="registrationDiagnosticCards" />
+						<ArInfoGrid v-if="arDebugMode && registrationDiagnosticOpen" :items="registrationDiagnosticCards" />
 					</ArPanelSection>
 
 					<ArPlacementStatusSection :state="engine" title="AR 定位" />
@@ -1162,6 +1182,76 @@ function setArOverlayClass(active: boolean): void {
 .dock-label {
 	font-size: 11px;
 	margin-top: 2px;
+}
+
+.annotation-detail-panel {
+	position: fixed;
+	z-index: 8;
+	left: 16px;
+	right: 16px;
+	bottom: calc(82px + env(safe-area-inset-bottom));
+	max-height: 44vh;
+	overflow: auto;
+	padding: 14px;
+	border-radius: 22px;
+	background: rgba(8, 15, 27, 0.88);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	box-shadow: 0 24px 72px rgba(0, 0, 0, 0.42);
+	backdrop-filter: blur(24px);
+}
+
+.annotation-detail-header {
+	display: flex;
+	gap: 12px;
+	align-items: flex-start;
+	justify-content: space-between;
+}
+
+.annotation-detail-kicker,
+.annotation-detail-subtitle,
+.annotation-detail-field span {
+	color: rgba(191, 219, 254, 0.72);
+	font-size: 12px;
+}
+
+.annotation-detail-title {
+	margin-top: 4px;
+	color: #eff6ff;
+	font-size: 18px;
+	font-weight: 900;
+}
+
+.annotation-detail-close {
+	flex: 0 0 auto;
+	border: 1px solid rgba(148, 163, 184, 0.22);
+	border-radius: 12px;
+	background: rgba(15, 23, 42, 0.82);
+	color: #eff6ff;
+	padding: 8px 10px;
+	font-size: 12px;
+	font-weight: 800;
+}
+
+.annotation-detail-fields {
+	display: grid;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.annotation-detail-field {
+	display: grid;
+	gap: 4px;
+	padding: 10px;
+	border-radius: 12px;
+	background: rgba(15, 23, 42, 0.66);
+	border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.annotation-detail-field strong {
+	color: #eff6ff;
+	font-size: 13px;
+	line-height: 1.45;
+	word-break: break-word;
 }
 
 .bottom-sheet {

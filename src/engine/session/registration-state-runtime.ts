@@ -21,6 +21,7 @@ import type {
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
 import { formatGeodetic } from '@/features/ar/utils/formatters.js';
+import { arInfo, arWarn } from '@/engine/debug/ar-logger.js';
 
 interface RegistrationStateRuntimeOptions {
 	store: RegistrationStore;
@@ -244,6 +245,7 @@ export class RegistrationStateRuntime {
 				undergroundObjectCount: demoModelConfig.undergroundObjects?.length ?? 0,
 				sensorCount: demoModelConfig.sensors?.length ?? 0,
 				riskPointCount: demoModelConfig.riskPoints?.length ?? 0,
+				annotationCount: demoModelConfig.annotations.length,
 				siteOriginText: formatGeodetic(
 					demoModelConfig.siteFrame.origin.lat,
 					demoModelConfig.siteFrame.origin.lon,
@@ -274,7 +276,7 @@ export class RegistrationStateRuntime {
 			: controlTargetSource === 'site-config'
 				? 'SiteConfigControlTargetsUsed'
 				: 'ArUiConfigStatusResolved';
-		console.info( `[${eventName}]`, this.createUiLogPayload( {
+		arInfo( eventName, this.createUiLogPayload( {
 			currentStep: 'load-config',
 			localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
 			targetId: firstTarget?.id ?? null,
@@ -282,7 +284,7 @@ export class RegistrationStateRuntime {
 		} ) );
 
 		if ( baselineMismatch ) {
-			console.warn( '[SiteBaselineControlTargetsMismatchWarning]', this.createUiLogPayload( {
+			arWarn( 'SiteBaselineControlTargetsMismatchWarning', this.createUiLogPayload( {
 				currentStep: 'load-config',
 				localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
 				targetId: firstTarget?.id ?? null,
@@ -290,7 +292,7 @@ export class RegistrationStateRuntime {
 			} ) );
 		}
 
-		console.info( '[ArUiConfigStatusResolved]', this.createUiLogPayload( {
+		arInfo( 'ArUiConfigStatusResolved', this.createUiLogPayload( {
 			currentStep: 'load-config',
 			localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
 			targetId: firstTarget?.id ?? null,
@@ -358,13 +360,13 @@ export class RegistrationStateRuntime {
 			createdAt: Date.now()
 		};
 
-		console.info( '[EngineeringCalibrationLoaded]', payload );
+		arInfo( 'EngineeringCalibrationLoaded', payload );
 		if ( args.missingRequiredFields.length === 0 && args.hasMockEngineeringData === false ) {
-			console.info( '[EngineeringCalibrationConfigValidated]', payload );
+			arInfo( 'EngineeringCalibrationConfigValidated', payload );
 			return;
 		}
 
-		console.warn( '[EngineeringCalibrationConfigInvalid]', payload );
+		arWarn( 'EngineeringCalibrationConfigInvalid', payload );
 
 	}
 
@@ -410,7 +412,7 @@ export class RegistrationStateRuntime {
 
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
 			for ( const target of baseline.controlTargets ) {
-				console.info( '[ArSessionUsingBaselineControlTargets]', {
+				arInfo( 'ArSessionUsingBaselineControlTargets', {
 					mode: this.options.getWorkflowMode(),
 					siteId: baseline.siteId,
 					sessionId: this.options.getCurrentSessionId(),
@@ -590,7 +592,7 @@ export function hasMockEngineeringDataInConfig(
 
 	const reasons = resolveMockEngineeringDataReasons( config, controlTargets );
 	const hasMock = reasons.length > 0;
-	console.info( '[MockEngineeringDataResolved]', {
+	arInfo( 'MockEngineeringDataResolved', {
 		modelId: config.modelId,
 		hasMockEngineeringData: hasMock,
 		reasons,

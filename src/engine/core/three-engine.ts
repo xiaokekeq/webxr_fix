@@ -78,6 +78,9 @@ import {
 	type ArAnnotationDetailOverlay,
 	type ArAnnotationItem
 } from '@/engine/annotation/ar-annotation-labels.js';
+import { AnnotationLayer } from '@/engine/annotation/annotation-layer.js';
+import type { EngineeringAnnotation } from '@/engine/annotation/annotation-types.js';
+import { ArCoordinateService } from '@/engine/coordinates/ar-coordinate-service.js';
 import {
 	setAttachmentInfoBoardVisibility
 } from './attachment-info-board.js';
@@ -103,6 +106,7 @@ import type { CreateInspectionRecordInput } from '@/services/repositories/inspec
 import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
 import { updateCpuDepthFromFrame, setCpuDepthEnabled, cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
 import { readPlaceableTemplateReport } from '@/engine/core/model.js';
+import { arInfo } from '@/engine/debug/ar-logger.js';
 
 const MAX_LOG_ITEMS = 24;
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
@@ -166,13 +170,12 @@ function createInitialState(): RegistrationStoreState {
 		layerPeelingValue: 0,
 		sectionCutValue: 50,
 		sectionCutPlaneMode: 'horizontal-section',
-		undergroundPreviewEnabled: false,
-		undergroundPreviewDepthMeters: 1,
 		timelineStages: TIMELINE_STAGES,
 		currentTimelineStageIndex: 2,
 		layerNames: STATIC_LAYER_NAMES,
 		modelLayers: [],
 		pipeList: [],
+		selectedAnnotationId: null,
 		propertyPanel: {
 			name: '未选择构件',
 			statusBadge: '未选中',
@@ -252,6 +255,8 @@ export class ThreeEngine {
 	private readonly layerPeelingController = createArLayerPeelingController();
 	private readonly sectionCutController;
 	private readonly annotationLabelsController;
+	private readonly annotationLayer = new AnnotationLayer();
+	private readonly arCoordinateService = new ArCoordinateService();
 	private readonly layerVisibility = createLayerVisibilityController();
 	private readonly propertySelection;
 	private readonly placementSession;
@@ -301,6 +306,7 @@ export class ThreeEngine {
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
 		this.engineeringCornerDebugGroup.name = '__engineering-corner-debug';
 		this.sceneBundle.scene.add( this.engineeringCornerDebugGroup );
+		this.sceneBundle.scene.add( this.annotationLayer.group );
 
 		const statusRuntime = createStatusRuntime( {
 			store: this.store,
@@ -547,6 +553,10 @@ export class ThreeEngine {
 				this.clearAnnotationDetail();
 			},
 			handlePreSelectionRaycast: ( selection ) => {
+				if ( this.handleBusinessAnnotationPick( selection.raycaster ) ) {
+					return true;
+				}
+
 				if ( this.handleSiteOriginReferencePick( selection.raycaster ) ) {
 					return true;
 				}
@@ -594,9 +604,12 @@ export class ThreeEngine {
 				this.visualizationStateRuntime.reset();
 				this.lastAnnotationLabelsSignature = '';
 				this.annotationLabelsController.clear();
+				this.annotationLayer.setAnnotations( [] );
+				this.arCoordinateService.clear( 'runtime-reset' );
 				this.store.patch( {
 					layerNames: STATIC_LAYER_NAMES,
 					modelLayers: [],
+					selectedAnnotationId: null,
 					annotationDetail: createDefaultAnnotationDetailState(),
 					siteCalibrationBaseline: createDefaultSiteCalibrationBaselineState(),
 					engineeringConfigStatus: createDefaultEngineeringConfigStatusState()
@@ -610,6 +623,17 @@ export class ThreeEngine {
 				this.demoModelConfig = bundle.demoModelConfig;
 				this.modelTemplate = bundle.modelTemplate;
 				this.registrationSolution = bundle.registrationSolution;
+				this.annotationLayer.setAnnotations(
+					bundle.demoModelConfig.annotations,
+					bundle.demoModelConfig.annotationStyleRules
+				);
+				if ( bundle.demoModelConfig.visualPlacementMode === 'underground' ) {
+					this.store.patch( {
+						displayMode: 'transparent-xray',
+						structureRevealValue: 50,
+						transparentXrayValue: 50
+					} );
+				}
 				this.resolvedMarkerPosesInEnu = this.resolveConfiguredMarkerPoses( bundle.demoModelConfig );
 				this.rebuildModelLayers();
 				this.syncArSessionContext();
@@ -765,6 +789,7 @@ export class ThreeEngine {
 		this.layerPeelingController.dispose();
 		this.sectionCutController.dispose();
 		this.annotationLabelsController.dispose();
+		this.annotationLayer.dispose();
 		this.sceneBundle.renderer.dispose();
 
 	}
@@ -780,6 +805,7 @@ export class ThreeEngine {
 		this.pointerSelection.suppressSelectionFor( 1000 );
 		this.propertySelection.clearSelection();
 		this.clearAnnotationDetail();
+		this.annotationLayer.setSelected( null );
 		this.setStatus( '已关闭构件信息面板。' );
 
 	}
@@ -884,21 +910,6 @@ export class ThreeEngine {
 
 	}
 
-	toggleUndergroundPreview(): void {
-
-		const state = this.store.getState();
-		const enabled = ! state.undergroundPreviewEnabled;
-		this.placementSession.setUndergroundPreview( enabled, state.undergroundPreviewDepthMeters );
-		this.store.patch( { undergroundPreviewEnabled: enabled } );
-		this.setStatus(
-			enabled
-				? `地底预览已开启：模型下沉 ${state.undergroundPreviewDepthMeters.toFixed( 1 )}m。`
-				: '地底预览已关闭：模型恢复正常高度。'
-		);
-		this.emit();
-
-	}
-
 	setWorkspaceMode(mode: WorkspaceMode): void {
 
 		if ( this.store.getState().workspaceMode === mode ) {
@@ -954,7 +965,7 @@ export class ThreeEngine {
 
 	async refreshGeoLocation(): Promise<void> {
 
-		console.info( '[RealtimeDeviceLocalizationDisabled]', {
+		arInfo( 'RealtimeDeviceLocalizationDisabled', {
 			mode: this.workflowMode,
 			siteId: this.demoModelConfig?.modelId ?? null,
 			sessionId: this.currentArSessionId,
@@ -979,7 +990,7 @@ export class ThreeEngine {
 
 		const baseline = this.buildSiteCalibrationBaseline( this.activeSiteCalibrationBaseline?.createdAt );
 		for ( const target of baseline.controlTargets ) {
-			console.info( '[SiteBaselineConfigControlTargetLoaded]', {
+			arInfo( 'SiteBaselineConfigControlTargetLoaded', {
 				mode: this.workflowMode,
 				siteId: baseline.siteId,
 				dataSource: repositories.dataSource,
@@ -992,7 +1003,7 @@ export class ThreeEngine {
 			} );
 		}
 
-		console.info( '[SiteBaselineSaveStarted]', {
+		arInfo( 'SiteBaselineSaveStarted', {
 			mode: this.workflowMode,
 			siteId: baseline.siteId,
 			dataSource: repositories.dataSource,
@@ -1047,7 +1058,7 @@ export class ThreeEngine {
 		}
 
 		void repositories.siteBaseline.save( baseline ).then( () => {
-			console.info( '[SiteBaselineSaveSucceeded]', {
+			arInfo( 'SiteBaselineSaveSucceeded', {
 				mode: this.workflowMode,
 				siteId: baseline.siteId,
 				dataSource: repositories.dataSource,
@@ -1061,7 +1072,7 @@ export class ThreeEngine {
 			this.activeSiteCalibrationBaseline = baseline;
 			this.syncArSessionContext();
 			this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
-			console.info( '[SiteBaselineSaved]', {
+			arInfo( 'SiteBaselineSaved', {
 				mode: this.workflowMode,
 				siteId: baseline.siteId,
 				sessionId: this.currentArSessionId,
@@ -1179,7 +1190,7 @@ export class ThreeEngine {
 		}
 
 		this.syncRegistrationChainDebug();
-		console.info( '[MarkerCorrectionCleared]', {
+		arInfo( 'MarkerCorrectionCleared', {
 			previousMarkerId,
 			fallbackSource
 		} );
@@ -1320,7 +1331,7 @@ export class ThreeEngine {
 			createdAt: Date.now(),
 			...input
 		};
-		console.info( '[InspectionRecordSaveStarted]', {
+		arInfo( 'InspectionRecordSaveStarted', {
 			mode: this.workflowMode,
 			siteId,
 			dataSource: repositories.dataSource,
@@ -1330,7 +1341,7 @@ export class ThreeEngine {
 			createdAt: nextRecord.createdAt
 		} );
 		void repositories.inspection.create( nextRecord ).then( ( record ) => {
-			console.info( '[InspectionRecordSaveSucceeded]', {
+			arInfo( 'InspectionRecordSaveSucceeded', {
 				mode: this.workflowMode,
 				siteId,
 				dataSource: repositories.dataSource,
@@ -1478,7 +1489,7 @@ export class ThreeEngine {
 		}
 
 		const requestId = ++this.siteBaselineLoadRequestId;
-		console.info( '[SiteBaselineLoadStarted]', {
+		arInfo( 'SiteBaselineLoadStarted', {
 			mode: this.workflowMode,
 			siteId,
 			dataSource: repositories.dataSource,
@@ -1496,7 +1507,7 @@ export class ThreeEngine {
 			}
 
 			if ( baseline === null ) {
-				console.info( '[SiteBaselineLoadMissing]', {
+				arInfo( 'SiteBaselineLoadMissing', {
 					mode: this.workflowMode,
 					siteId,
 					dataSource: repositories.dataSource,
@@ -1507,7 +1518,7 @@ export class ThreeEngine {
 					createdAt: Date.now()
 				} );
 			} else {
-				console.info( '[SiteBaselineLoadSucceeded]', {
+				arInfo( 'SiteBaselineLoadSucceeded', {
 					mode: this.workflowMode,
 					siteId: baseline.siteId,
 					dataSource: repositories.dataSource,
@@ -1586,7 +1597,7 @@ export class ThreeEngine {
 		}
 
 		this.lastArSessionContextLogSignature = signature;
-		console.info( '[ArSessionContextCreated]', {
+		arInfo( 'ArSessionContextCreated', {
 			mode: nextContext.mode,
 			siteId: nextContext.siteId,
 			dataSource: repositories.dataSource,
@@ -1596,10 +1607,10 @@ export class ThreeEngine {
 			controlTargetCount: resolved.controlTargets.length,
 			baselineAvailable: nextContext.baseline !== null
 		} );
-		console.info(
+		arInfo(
 			resolved.source === 'baseline'
-				? '[ArSessionUsingBaselineControlTargets]'
-				: '[ArSessionUsingSiteConfigControlTargets]',
+				? 'ArSessionUsingBaselineControlTargets'
+				: 'ArSessionUsingSiteConfigControlTargets',
 			{
 				mode: nextContext.mode,
 				siteId: nextContext.siteId,
@@ -1805,7 +1816,7 @@ export class ThreeEngine {
 		const controlTargets = this.getCurrentControlTargets();
 		const hasMockEngineeringData = this.demoModelConfig !== null
 			&& hasMockEngineeringDataInConfig( this.demoModelConfig, controlTargets );
-		console.info( '[EngineeringPlacementApplied]', {
+		arInfo( 'EngineeringPlacementApplied', {
 			modelId: this.demoModelConfig?.modelId ?? this.store.getState().selectedModelId ?? null,
 			configUrl: this.modelSession.getCurrentModelDefinition()?.configUrl ?? null,
 			siteOrigin: this.demoModelConfig?.siteFrame.origin ?? null,
@@ -1891,7 +1902,7 @@ export class ThreeEngine {
 			const markerPhysicalText = capturedCornersAr.length === 4
 				? `RTK marker 边长 ${computeSideLengths( markerCornersEnu ).map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m；采集边长 ${computeSideLengths( capturedCornersAr ).map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m。请确认 RTK marker 四角和当前采集的三角桶底座四角是同一组物理点。`
 				: '请确认 RTK 测量的 marker 四角和当前采集的三角桶底座四角是同一组物理点。三角桶如果被移动或旋转，校正会稳定但整体偏移。';
-			console.info( '[MarkerCornerPhysicalDefinitionCheck]', {
+			arInfo( 'MarkerCornerPhysicalDefinitionCheck', {
 				markerCornerIds: controlTarget.cornerOrder ?? [],
 				cornerRoles: controlTarget.cornerOrder ?? [],
 				cornersEnu: markerCornersEnu.map( vector3ToRoundedObject ),
@@ -1914,7 +1925,7 @@ export class ThreeEngine {
 			const footprintControlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
 			const footprintCornersAr = footprintControlPoints
 				.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
-			console.info( '[FootprintRenderDependencyCheck]', {
+			arInfo( 'FootprintRenderDependencyCheck', {
 				source: arFromEnuSolution.source,
 				sessionId: arFromEnuSolution.sessionId ?? null,
 				matrixChain: 'controlPoint.worldEnu -> arFromEnu',
@@ -1963,7 +1974,7 @@ export class ThreeEngine {
 			}
 		}
 
-		console.info( '[EngineeringCornerDebugDrawn]', {
+		arInfo( 'EngineeringCornerDebugDrawn', {
 			controlTargetId: controlTarget?.id ?? null,
 			markerCornerCount: controlTarget?.cornersEnu?.length ?? 0,
 			capturedCornerCount: capturedCornersAr.length,
@@ -2110,7 +2121,7 @@ export class ThreeEngine {
 	private logCoordinateAxisMappingCheck(arFromEnuSolution: ArFromEnuSolution): void {
 
 		const sampleEnuPoint = new THREE.Vector3( 1, 1, 1 );
-		console.info( '[CoordinateAxisMappingCheck]', {
+		arInfo( 'CoordinateAxisMappingCheck', {
 			enuToThreeMapping: {
 				beforeArFromEnu: '[east,north,up] stored as Vector3(x=east,y=north,z=up)',
 				afterArFromEnu: 'solution.matrix maps ENU meters into WebXR AR local coordinates'
@@ -2198,7 +2209,7 @@ export class ThreeEngine {
 			?? Object.keys( this.demoModelConfig?.controlPoints ?? {} ).slice( 0, 4 );
 		const wrongFootprintControlPointsUsed = footprintControlPointIds.join( '|' ) !== expectedFootprintControlPointIds.join( '|' );
 
-		console.info( '[FootprintEnuToArCheck]', {
+		arInfo( 'FootprintEnuToArCheck', {
 			modelId: this.demoModelConfig?.modelId ?? null,
 			footprintControlPointIds,
 			footprintCornerOrder: [ 'leftTop', 'rightTop', 'rightBottom', 'leftBottom' ],
@@ -2220,7 +2231,7 @@ export class ThreeEngine {
 			headingMarkerToFootprintCenterAr: Number( headingMarkerToFootprintArDeg.toFixed( 3 ) ),
 			warnings
 		} );
-		console.info( '[MarkerToFootprintVectorDirectionCheck]', {
+		arInfo( 'MarkerToFootprintVectorDirectionCheck', {
 			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
 			footprintCenterEnu: vector3ToRoundedObject( footprintCenterEnu ),
 			vectorMarkerToFootprintEnu: vector3ToRoundedObject( vectorMarkerToFootprintCenterEnu ),
@@ -2230,7 +2241,7 @@ export class ThreeEngine {
 			reversedVectorWouldHeadingDeg: Number( reversedVectorWouldHeadingDeg.toFixed( 3 ) ),
 			warning: null
 		} );
-		console.info( '[HeadingConventionCheck]', {
+		arInfo( 'HeadingConventionCheck', {
 			convention: 'ar-x-minus-z',
 			enuHeadingFormula: 'atan2(deltaEast, deltaNorth)',
 			arHeadingFormula: 'atan2(deltaX, -deltaZ)',
@@ -2244,7 +2255,7 @@ export class ThreeEngine {
 			actualHeadingInArDeg: Number( actualHeadingInArDeg.toFixed( 3 ) ),
 			correctedHeadingDeltaDeg: Number( headingDeltaDeg.toFixed( 6 ) )
 		} );
-		console.info( '[GroundPlaneYawConventionCheck]', createGroundPlaneYawConventionPayload( arFromEnuSolution ) );
+		arInfo( 'GroundPlaneYawConventionCheck', createGroundPlaneYawConventionPayload( arFromEnuSolution ) );
 		const relationPayload = {
 			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
 			footprintCenterEnu: vector3ToRoundedObject( footprintCenterEnu ),
@@ -2264,7 +2275,7 @@ export class ThreeEngine {
 			headingDeltaDeg: Number( headingDeltaDeg.toFixed( 6 ) ),
 			distanceDeltaMeters: Number( distanceDeltaMeters.toFixed( 6 ) )
 		};
-		console.info( '[MarkerToFootprintRelationCheck]', relationPayload );
+		arInfo( 'MarkerToFootprintRelationCheck', relationPayload );
 		const headingPayload = {
 			headingMarkerToFootprintEnuDeg: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
 			yawDegFromGroundPlane2D: Number( yawDegFromGroundPlane2D.toFixed( 3 ) ),
@@ -2274,14 +2285,14 @@ export class ThreeEngine {
 			previousRawHeadingDeltaDeg: Number( previousRawHeadingDeltaDeg.toFixed( 6 ) ),
 			diagnosticWasRawHeadingComparison: previousRawHeadingDeltaDeg !== headingDeltaDeg
 		};
-		console.info( '[MarkerToFootprintHeadingCheck]', headingPayload );
+		arInfo( 'MarkerToFootprintHeadingCheck', headingPayload );
 		if ( distanceDeltaMeters > 0.2 ) {
 			console.error( '[MarkerToFootprintDistanceMismatch]', relationPayload );
 		}
 		if ( headingDeltaDeg > 5 ) {
 			console.error( '[MarkerToFootprintHeadingMismatch]', relationPayload );
 		}
-		console.info( '[FootprintShapeCheck]', {
+		arInfo( 'FootprintShapeCheck', {
 			footprintControlPointIds,
 			footprintCornersEnu: footprintCornersEnu.map( vector3ToRoundedObject ),
 			footprintCornersAr: footprintCornersAr.map( vector3ToRoundedObject ),
@@ -2299,7 +2310,7 @@ export class ThreeEngine {
 				? 'footprint shape changed after ENU->AR; check scale/unit/matrix application'
 				: null
 		} );
-		console.info( '[FootprintControlPointConfigCheck]', footprintPoints.map( ( point, index ) => {
+		arInfo( 'FootprintControlPointConfigCheck', footprintPoints.map( ( point, index ) => {
 			const rawPoint = this.demoModelConfig?.controlPoints[ point.id ];
 			const rawPointRecord = rawPoint as unknown as Record<string, unknown> | undefined;
 			return {
@@ -2319,7 +2330,7 @@ export class ThreeEngine {
 				expectedControlPointIds: expectedFootprintControlPointIds
 			} );
 		}
-		console.info( '[PhysicalMarkerFootprintRelationReminder]', {
+		arInfo( 'PhysicalMarkerFootprintRelationReminder', {
 			markerId: controlTarget?.id ?? controlTarget?.markerId ?? null,
 			markerControlPointIds: controlTarget?.cornerOrder ?? [],
 			markerCenterEnu: vector3ToRoundedObject( markerCenterEnu ),
@@ -2329,7 +2340,7 @@ export class ThreeEngine {
 			headingMarkerToFootprintEnuDeg: Number( headingMarkerToFootprintEnuDeg.toFixed( 3 ) ),
 			note: `当前数据认为：marker 中心到 footprint 中心距离为 ${distanceMarkerToFootprintCenterEnu.toFixed( 3 )}m，方向为 ENU ${headingMarkerToFootprintEnuDeg.toFixed( 1 )}°。请现场确认三角桶中心到真实黄框中心是否确实约 ${distanceMarkerToFootprintCenterEnu.toFixed( 2 )}m，且方向一致。`
 		} );
-		console.info( '[EnuFieldUsageCheck]', footprintPoints.map( ( point ) => {
+		arInfo( 'EnuFieldUsageCheck', footprintPoints.map( ( point ) => {
 			const rawPoint = this.demoModelConfig?.controlPoints[ point.id ] as unknown as { enu?: [ number, number, number ] } | undefined;
 			const configuredEnu = Array.isArray( rawPoint?.enu ) ? tupleToVector3( rawPoint.enu ) : null;
 			const configuredDelta = configuredEnu === null ? 0 : configuredEnu.distanceTo( point.worldEnu );
@@ -2419,7 +2430,7 @@ export class ThreeEngine {
 			console.warn( '[ModelLocalControlPointBoundsCheck]', payload );
 			return;
 		}
-		console.info( '[ModelLocalControlPointBoundsCheck]', payload );
+		arInfo( 'ModelLocalControlPointBoundsCheck', payload );
 
 	}
 
@@ -2463,7 +2474,7 @@ export class ThreeEngine {
 			} );
 			return;
 		}
-		console.info( '[ModelAxisMappingCheck]', payload );
+		arInfo( 'ModelAxisMappingCheck', payload );
 
 	}
 
@@ -2554,7 +2565,7 @@ export class ThreeEngine {
 			}
 		};
 
-		console.info( '[ModelControlPointPlacementCheck]', payload );
+		arInfo( 'ModelControlPointPlacementCheck', payload );
 		const severity = maxErrorRoot > 0.5
 			? '模型控制点严重不对齐，请检查 modelLocal 坐标空间 / upAxis / 放置矩阵。'
 			: rmsErrorRoot > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS
@@ -2624,7 +2635,7 @@ export class ThreeEngine {
 				? '不是换序问题，modelLocal 几何尺寸不匹配'
 				: '点对应关系不确定，需复核';
 
-		console.info( '[ModelControlPointOrderCheck]', payload );
+		arInfo( 'ModelControlPointOrderCheck', payload );
 		this.store.patch( {
 			footprintDiagnostics: {
 				...this.store.getState().footprintDiagnostics,
@@ -2657,7 +2668,7 @@ export class ThreeEngine {
 		const rootBounds = computeBoundsInLocalSpace( placedModel, placedModel );
 		const contentBounds = modelContent === null ? null : computeBoundsInLocalSpace( modelContent, modelContent );
 		const report = readPlaceableTemplateReport( this.modelTemplate ?? placedModel );
-		console.info( '[ModelHierarchyCoordinateSpaceCheck]', {
+		arInfo( 'ModelHierarchyCoordinateSpaceCheck', {
 			loadedModelRootName: placedModel.name || placedModel.type,
 			contentObjectName: modelContent?.name || modelContent?.type || null,
 			rootChildren: placedModel.children.map( ( child ) => child.name || child.type ),
@@ -2753,7 +2764,7 @@ export class ThreeEngine {
 				modelLocalFootprintText: `likely ${likelySpace}；wrapperHits ${wrapperHits}/4；contentHits ${contentHits}/4`
 			}
 		} );
-		console.info( '[ModelLocalFootprintCheck]', payload );
+		arInfo( 'ModelLocalFootprintCheck', payload );
 
 	}
 
@@ -2856,7 +2867,7 @@ export class ThreeEngine {
 			console.warn( '[ModelFinalAxisCheck]', payload );
 			return;
 		}
-		console.info( '[ModelFinalAxisCheck]', payload );
+		arInfo( 'ModelFinalAxisCheck', payload );
 
 	}
 
@@ -2969,6 +2980,8 @@ export class ThreeEngine {
 			? null
 			: cloneArFromEnuSolution( fallbackSolution );
 		this.activeMarkerArFromEnuSolution = cloneArFromEnuSolution( solution.arFromEnuSolution );
+		this.arCoordinateService.setArFromEnuSolution( this.activeMarkerArFromEnuSolution, this.currentArSessionId );
+		this.annotationLayer.updateFromCalibration( this.arCoordinateService );
 		this.activeMarkerLocalizationResult = {
 			markerId: metadata.markerId,
 			markerConfigId: metadata.markerConfigId,
@@ -2982,7 +2995,7 @@ export class ThreeEngine {
 		};
 		const currentTarget = currentControlTargets
 			.find( ( target ) => target.id === metadata.markerId || target.markerId === metadata.markerId );
-		console.info( '[CurrentSessionLocalizationCached]', {
+		arInfo( 'CurrentSessionLocalizationCached', {
 			mode: 'marker-corners-4',
 			workflowMode: this.workflowMode,
 			siteId: this.demoModelConfig?.modelId ?? null,
@@ -3027,7 +3040,7 @@ export class ThreeEngine {
 		const modelVisibleAfter = placedModelAfter?.visible === true;
 		const modelWasPlacedAutomatically = modelPlacedBefore === false
 			&& modelPlacedAfter;
-		console.info( '[MarkerCalibrationApplyFlow]', {
+		arInfo( 'MarkerCalibrationApplyFlow', {
 			clickedApplyCalibration: true,
 			solveAndApplyCalled: true,
 			applyCurrentSessionMarkerSolutionCalled: true,
@@ -3040,7 +3053,7 @@ export class ThreeEngine {
 			placeModelRequested: placeModel,
 			autoPlaceAfterMarkerCalibration: AUTO_PLACE_AFTER_MARKER_CALIBRATION
 		} );
-		console.info( '[MarkerCalibrationCompletedWithoutPlacement]', {
+		arInfo( 'MarkerCalibrationCompletedWithoutPlacement', {
 			markerId: metadata.markerId,
 			sessionId: this.currentArSessionId,
 			hasArFromEnuSolution: this.activeMarkerArFromEnuSolution !== null,
@@ -3072,7 +3085,7 @@ export class ThreeEngine {
 
 		this.syncRegistrationChainDebug();
 		if ( this.workflowMode === 'site-baseline-config' ) {
-			console.info( '[SiteBaselineConfigTemporarySolutionCreated]', {
+			arInfo( 'SiteBaselineConfigTemporarySolutionCreated', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
 				sessionId: this.currentArSessionId,
@@ -3083,7 +3096,7 @@ export class ThreeEngine {
 				stableFrameCount: solution.correspondenceCount
 			} );
 		} else {
-			console.info( '[ArInspectionLocalizationApplied]', {
+			arInfo( 'ArInspectionLocalizationApplied', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
 				sessionId: this.currentArSessionId,
@@ -3094,7 +3107,7 @@ export class ThreeEngine {
 				stableFrameCount: solution.correspondenceCount
 			} );
 		}
-		console.info( '[MarkerCorrectionApplied]', {
+		arInfo( 'MarkerCorrectionApplied', {
 			sessionId: this.currentArSessionId,
 			markerId: metadata.markerId,
 			markerConfigId: metadata.markerConfigId,
@@ -3172,7 +3185,7 @@ export class ThreeEngine {
 
 		const markerSolution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
 		if ( markerSolution !== null ) {
-			console.info( '[LocalizationPriorityResolved]', {
+			arInfo( 'LocalizationPriorityResolved', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
 				sessionId: this.currentArSessionId,
@@ -3184,7 +3197,7 @@ export class ThreeEngine {
 
 		const nonMarkerSolution = this.getCurrentNonMarkerArFromEnuSolution();
 		if ( nonMarkerSolution !== null && nonMarkerSolution.source === 'rtk' ) {
-			console.info( '[LocalizationPriorityResolved]', {
+			arInfo( 'LocalizationPriorityResolved', {
 				mode: this.workflowMode,
 				siteId: this.demoModelConfig?.modelId ?? null,
 				sessionId: this.currentArSessionId,
@@ -3215,6 +3228,10 @@ export class ThreeEngine {
 		this.activeMarkerArFromEnuSolution = null;
 		this.activeMarkerLocalizationResult = null;
 		this.markerCorrectionFallbackArFromEnuSolution = null;
+		this.arCoordinateService.clear( 'marker-localization-reset' );
+		this.annotationLayer.clear();
+		this.annotationLayer.setSelected( null );
+		this.clearAnnotationDetail();
 		this.clearEngineeringCornerDebug();
 
 	}
@@ -3224,7 +3241,7 @@ export class ThreeEngine {
 		const arFromEnuSolution = this.getActiveArFromEnuSolution();
 		const placedModel = this.placementSession.getArPlacedModel();
 		placedModel?.updateMatrixWorld( true );
-		console.info( '[RegistrationFinal]', {
+		arInfo( 'RegistrationFinal', {
 			currentArLocalizationSource: this.store.getState().registrationChainDebug.arSessionLocalization.source,
 			arFromEnuSource: arFromEnuSolution?.source ?? 'unknown',
 			modelRootMatrix: placedModel === null ? null : placedModel.matrixWorld.toArray()
@@ -3288,6 +3305,10 @@ export class ThreeEngine {
 
 		this.arSessionEndPending = false;
 		this.currentArSessionRequestMode = 'normal';
+		this.arCoordinateService.clear( 'xr-session-end' );
+		this.annotationLayer.clear();
+		this.annotationLayer.setSelected( null );
+		this.clearAnnotationDetail();
 		this.sessionLifecycleRuntime.handleXRSessionEnd();
 
 	}
@@ -3340,7 +3361,7 @@ export class ThreeEngine {
 		if ( placedModel === null ) {
 			this.annotationLabelsController.clear();
 			this.clearAnnotationDetail();
-			console.info( '[ArAnnotationLabels]', {
+			arInfo( 'ArAnnotationLabels', {
 				labelCount: 0,
 				source: 'terrain-layer',
 				modelPlaced: false,
@@ -3351,7 +3372,7 @@ export class ThreeEngine {
 
 		const items = this.buildAnnotationItemsForPlacedModel( placedModel );
 		this.annotationLabelsController.setItems( items );
-		console.info( '[ArAnnotationLabels]', {
+		arInfo( 'ArAnnotationLabels', {
 			labelCount: items.length,
 			source: 'terrain-layer',
 			modelPlaced: true,
@@ -3397,7 +3418,7 @@ export class ThreeEngine {
 			: null;
 		this.propertySelection.selectBusinessObject( item.targetObject, properties );
 		this.updateAnnotationDetailFromSelection( item.targetObject, properties, item.layerName );
-		console.info( '[ArAnnotationSelected]', {
+		arInfo( 'ArAnnotationSelected', {
 			id: item.id,
 			title: item.title,
 			objectName: item.objectName ?? item.targetObject.name,
@@ -3435,8 +3456,12 @@ export class ThreeEngine {
 			return;
 		}
 
-		this.store.patch( { annotationDetail: createDefaultAnnotationDetailState() } );
+		this.store.patch( {
+			selectedAnnotationId: null,
+			annotationDetail: createDefaultAnnotationDetailState()
+		} );
 		this.annotationLabelsController.setDetail( null );
+		this.annotationLayer.setSelected( null );
 
 	}
 
@@ -3624,6 +3649,75 @@ export class ThreeEngine {
 			this.placementSession.getArPlacedModel(),
 			this.sceneBundle.renderer.xr.isPresenting
 		);
+
+	}
+
+	private handleBusinessAnnotationPick(raycaster: THREE.Raycaster): boolean {
+
+		const hit = raycaster.intersectObjects( this.annotationLayer.getPickableObjects(), true )[ 0 ];
+		if ( hit === undefined ) {
+			return false;
+		}
+
+		if (
+			hit.object.userData.entityType !== 'annotation'
+			|| hit.object.userData.clickable !== true
+			|| typeof hit.object.userData.annotationId !== 'string'
+		) {
+			return false;
+		}
+
+		const annotation = this.annotationLayer.getAnnotationByObject( hit.object );
+		if ( annotation === null ) {
+			return false;
+		}
+
+		this.handleEngineeringAnnotationSelection( annotation, hit.object );
+		return true;
+
+	}
+
+	private handleEngineeringAnnotationSelection(
+		annotation: EngineeringAnnotation,
+		object: THREE.Object3D
+	): void {
+
+		this.propertySelection.clearSelection();
+		this.annotationLayer.setSelected( annotation.id );
+		this.store.patch( {
+			selectedAnnotationId: annotation.id,
+			annotationDetail: this.createEngineeringAnnotationDetailState( annotation )
+		} );
+		this.annotationLabelsController.setDetail( null );
+		arInfo( 'AnnotationPicked', {
+			annotationId: annotation.id,
+			title: annotation.title,
+			severity: annotation.severity,
+			objectKind: object.userData.kind ?? object.type
+		} );
+		this.setStatus( `已选择业务标识：${annotation.title}` );
+		this.emit();
+
+	}
+
+	private createEngineeringAnnotationDetailState(annotation: EngineeringAnnotation): AnnotationDetailState {
+
+		return {
+			visible: true,
+			title: annotation.title,
+			subtitle: `${annotation.type} / ${annotation.severity}`,
+			fields: [
+				{ label: '类型', value: annotation.type },
+				{ label: '等级', value: annotation.severity },
+				{ label: '状态', value: annotation.status ?? '-' },
+				{ label: '来源', value: annotation.source },
+				{ label: '说明', value: annotation.description ?? '-' },
+				...Object.entries( annotation.properties ).map( ( [ label, value ] ) => ( {
+					label,
+					value: value === null ? '-' : String( value )
+				} ) )
+			]
+		};
 
 	}
 

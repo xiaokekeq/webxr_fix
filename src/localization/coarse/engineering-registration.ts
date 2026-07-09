@@ -2,7 +2,8 @@
 import type {
 	DemoModelConfig,
 	DemoModelControlPointCorrespondence,
-	DemoModelRegistrationMode
+	DemoModelRegistrationMode,
+	DemoModelVisualPlacementMode
 } from '@/models/config/demo-model-config.js';
 import {
 	createEnuFrame,
@@ -44,6 +45,7 @@ export interface EngineeringRegistrationSolution {
 	placementAnchorModelLocal?: THREE.Vector3;
 	placementAnchorMeaning?: string;
 	visualGroundOffsetMeters: number;
+	visualPlacementMode: DemoModelVisualPlacementMode;
 }
 
 export type SimilarityTransformMode = 'rigid' | 'similarity';
@@ -119,7 +121,8 @@ export function solveEngineeringRegistration(
 		modelUnitScale,
 		placementAnchorModelLocal: tupleToVector3( config.placementAnchorModelLocal ),
 		placementAnchorMeaning: config.placementAnchorMeaning,
-		visualGroundOffsetMeters: config.visualGroundOffsetMeters
+		visualGroundOffsetMeters: config.visualGroundOffsetMeters,
+		visualPlacementMode: config.visualPlacementMode
 	};
 
 }

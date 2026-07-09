@@ -142,6 +142,7 @@ export interface EngineeringConfigStatusState {
 	undergroundObjectCount: number;
 	sensorCount: number;
 	riskPointCount: number;
+	annotationCount: number;
 	siteOriginText: string;
 	placementAnchorText: string;
 	controlTargetSummaries: Array<{
@@ -246,14 +247,13 @@ export interface RegistrationStoreState {
 	layerPeelingValue: number;
 	sectionCutValue: number;
 	sectionCutPlaneMode: SectionCutPlaneMode;
-	undergroundPreviewEnabled: boolean;
-	undergroundPreviewDepthMeters: number;
 	timelineStages: readonly string[];
 	currentTimelineStageIndex: number;
 	layerNames: readonly string[];
 	modelLayers: ModelLayerState[];
 	pipeList: PipeRecord[];
 	propertyPanel: PropertyPanelState;
+	selectedAnnotationId: string | null;
 	inspectionPlacementSource: InspectionPlacementSource;
 	registrationMetrics: RegistrationMetricsState;
 	modelScaleSummary: ModelScaleSummaryState;
@@ -452,6 +452,7 @@ export function createDefaultEngineeringConfigStatusState(): EngineeringConfigSt
 		undergroundObjectCount: 0,
 		sensorCount: 0,
 		riskPointCount: 0,
+		annotationCount: 0,
 		siteOriginText: '-',
 		placementAnchorText: '-',
 		controlTargetSummaries: []

@@ -266,12 +266,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		toggleUndergroundPreview(): void {
-
-			ensureController().actions.toggleUndergroundPreview();
-
-		},
-
 		activatePanel(mode: WorkspaceMode): void {
 
 			handleActivatePanel( mode );
