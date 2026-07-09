@@ -93,13 +93,18 @@ export function solveEngineeringRegistration(
 	}
 	console.info( '[ModelToEnuCorrespondenceCheck]', createModelToEnuCorrespondencePayload( config, controlPoints ) );
 
-	// This is the offline/model-side registration: find the similarity transform
-	// that maps model-local control points into the engineering site ENU frame.
-	const modelToSite = solveSimilarityTransform(
-		controlPoints.map( ( point ) => point.modelLocal ),
-		controlPoints.map( ( point ) => point.worldEnu ),
-		config.registration.mode
-	);
+	// This is the offline/model-side registration: find the transform that maps
+	// model-local control points into the engineering site ENU frame.
+	const modelToSite = config.registration.mode === 'rigid'
+		? solveGroundPlaneRigidTransform(
+			controlPoints.map( ( point ) => point.modelLocal ),
+			controlPoints.map( ( point ) => point.worldEnu )
+		)
+		: solveSimilarityTransform(
+			controlPoints.map( ( point ) => point.modelLocal ),
+			controlPoints.map( ( point ) => point.worldEnu ),
+			config.registration.mode
+		);
 
 	const rootSiteEnu = modelToSite.translation.clone();
 	const rootWorldGeodetic = enuToGeodetic( rootSiteEnu, siteEnuFrame );
@@ -212,6 +217,78 @@ export function solveSimilarityTransform(
 		matrix,
 		rmsErrorMeters
 	};
+
+}
+
+function solveGroundPlaneRigidTransform(
+	sourcePoints: THREE.Vector3[],
+	targetPoints: THREE.Vector3[]
+): SimilarityTransformSolution {
+
+	const sourceCentroid = computeCentroid( sourcePoints );
+	const targetCentroid = computeCentroid( targetPoints );
+	let dot = 0;
+	let cross = 0;
+	for ( let index = 0; index < sourcePoints.length; index += 1 ) {
+		const sourceEast = sourcePoints[ index ].x - sourceCentroid.x;
+		const sourceNorth = - ( sourcePoints[ index ].z - sourceCentroid.z );
+		const targetEast = targetPoints[ index ].x - targetCentroid.x;
+		const targetNorth = targetPoints[ index ].y - targetCentroid.y;
+		dot += sourceEast * targetEast + sourceNorth * targetNorth;
+		cross += sourceEast * targetNorth - sourceNorth * targetEast;
+	}
+
+	const yawRad = Math.atan2( cross, dot );
+	const c = Math.cos( yawRad );
+	const s = Math.sin( yawRad );
+	const rotatedSourceCentroid = new THREE.Vector3(
+		c * sourceCentroid.x + s * sourceCentroid.z,
+		s * sourceCentroid.x - c * sourceCentroid.z,
+		sourceCentroid.y
+	);
+	const translation = targetCentroid.clone().sub( rotatedSourceCentroid );
+	const matrix = new THREE.Matrix4().set(
+		c, 0, s, translation.x,
+		s, 0, - c, translation.y,
+		0, 1, 0, translation.z,
+		0, 0, 0, 1
+	);
+	const rotation = new THREE.Quaternion().setFromRotationMatrix( matrix );
+	const rmsErrorMeters = computeMatrixRmsError( sourcePoints, targetPoints, matrix );
+	console.info( '[GroundPlaneModelToEnuSolved]', {
+		yawDeg: Number( THREE.MathUtils.radToDeg( yawRad ).toFixed( 6 ) ),
+		translation: {
+			x: Number( translation.x.toFixed( 6 ) ),
+			y: Number( translation.y.toFixed( 6 ) ),
+			z: Number( translation.z.toFixed( 6 ) )
+		},
+		rmsErrorMeters: Number( rmsErrorMeters.toFixed( 6 ) ),
+		matrix: matrix.toArray()
+	} );
+
+	return {
+		rotation,
+		translation,
+		scale: 1,
+		matrix,
+		rmsErrorMeters
+	};
+
+}
+
+function computeMatrixRmsError(
+	sourcePoints: THREE.Vector3[],
+	targetPoints: THREE.Vector3[],
+	matrix: THREE.Matrix4
+): number {
+
+	let sumSquaredError = 0;
+	const transformed = new THREE.Vector3();
+	for ( let index = 0; index < sourcePoints.length; index += 1 ) {
+		transformed.copy( sourcePoints[ index ] ).applyMatrix4( matrix );
+		sumSquaredError += transformed.distanceToSquared( targetPoints[ index ] );
+	}
+	return Math.sqrt( sumSquaredError / sourcePoints.length );
 
 }
 
