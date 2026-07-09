@@ -125,16 +125,37 @@ export interface ModelPlacementDebugState {
 	currentModelWorldPosition?: { x: number; y: number; z: number };
 	modelWorldDeltaXZ?: number;
 	modelWorldDeltaY?: number;
+	arModelAnchorWorldDeltaXZ?: number;
+	arModelAnchorWorldDeltaY?: number;
+	arPlacementAnchorWorldDeltaXZ?: number;
+	arPlacementAnchorWorldDeltaY?: number;
 	initialCameraWorldPosition?: { x: number; y: number; z: number };
 	currentCameraWorldPosition?: { x: number; y: number; z: number };
 	cameraMovedDistance?: number;
+	cameraToModelDistance?: number;
+	cameraToModelDistanceDelta?: number;
 	isWorldLocked?: boolean | null;
 	worldLockStatus?: 'unknown' | 'normal' | 'warning' | 'error';
 	modelParentName?: string;
 	arModelAnchorParentName?: string;
+	arPlacementAnchorParentName?: string;
+	placedModelParentChain?: string;
+	arModelAnchorParentChain?: string;
+	arPlacementAnchorParentChain?: string;
+	isArModelAnchorChildOfPlacementAnchor?: boolean;
+	isPlacedModelChildOfPlacementAnchor?: boolean;
 	isArModelAnchorChildOfCamera?: boolean;
 	isArModelAnchorChildOfReticle?: boolean;
 	isArModelAnchorChildOfScene?: boolean;
+	placementAnchorUpdateCount?: number;
+	lastPlacementAnchorUpdateReason?: string;
+	updatedPlacementAnchorFromFrameLoop?: boolean;
+	engineeringMatrixChanged?: boolean;
+	visualMatrixChanged?: boolean;
+	placedModelMatrixWorldChanged?: boolean;
+	arModelAnchorMatrixWorldChanged?: boolean;
+	arPlacementAnchorMatrixWorldChanged?: boolean;
+	arFromEnuMatrixChanged?: boolean;
 	engineeringPlacementCallCount?: number;
 	lastPlacementReason?: string;
 	lastPlacementTimestamp?: number;
@@ -466,6 +487,9 @@ export function createDefaultModelPlacementDebugState(): ModelPlacementDebugStat
 		worldLockStatus: 'unknown',
 		engineeringPlacementCallCount: 0,
 		replacedModelCount: 0,
+		placementAnchorUpdateCount: 0,
+		lastPlacementAnchorUpdateReason: 'none',
+		updatedPlacementAnchorFromFrameLoop: false,
 		hasExistingPlacedModel: false,
 		conclusion: '等待工程放置模型'
 	};

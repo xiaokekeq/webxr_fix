@@ -211,6 +211,36 @@ const modelPlacementDebugCards = computed( () => {
 			label: '结论',
 			value: debug.conclusion ?? '-',
 			wide: true
+		},
+		{
+			label: '对象漂移',
+			value: `model ${formatMeters( debug.modelWorldDeltaXZ )}/${formatMeters( debug.modelWorldDeltaY )}；modelAnchor ${formatMeters( debug.arModelAnchorWorldDeltaXZ )}/${formatMeters( debug.arModelAnchorWorldDeltaY )}；placementAnchor ${formatMeters( debug.arPlacementAnchorWorldDeltaXZ )}/${formatMeters( debug.arPlacementAnchorWorldDeltaY )}`,
+			wide: true
+		},
+		{
+			label: '相机距离',
+			value: `cameraToModel ${formatMeters( debug.cameraToModelDistance )}；变化 ${formatMeters( debug.cameraToModelDistanceDelta )}`,
+			wide: true
+		},
+		{
+			label: '模型链路',
+			value: debug.placedModelParentChain ?? '-',
+			wide: true
+		},
+		{
+			label: 'Anchor 链路',
+			value: `modelAnchor: ${debug.arModelAnchorParentChain ?? '-'}；placementAnchor: ${debug.arPlacementAnchorParentChain ?? '-'}`,
+			wide: true
+		},
+		{
+			label: 'placementAnchor 更新',
+			value: `次数 ${debug.placementAnchorUpdateCount ?? 0}；来源 ${debug.lastPlacementAnchorUpdateReason ?? 'none'}；frameLoop ${formatBoolean( debug.updatedPlacementAnchorFromFrameLoop )}；模型挂其下 ${formatBoolean( debug.isPlacedModelChildOfPlacementAnchor )}`,
+			wide: true
+		},
+		{
+			label: '矩阵变化',
+			value: `engineering ${formatChanged( debug.engineeringMatrixChanged )}；visual ${formatChanged( debug.visualMatrixChanged )}；modelWorld ${formatChanged( debug.placedModelMatrixWorldChanged )}；modelAnchor ${formatChanged( debug.arModelAnchorMatrixWorldChanged )}；placementAnchor ${formatChanged( debug.arPlacementAnchorMatrixWorldChanged )}；arFromEnu ${formatChanged( debug.arFromEnuMatrixChanged )}`,
+			wide: true
 		}
 	];
 } );
@@ -486,6 +516,10 @@ function formatBoolean(value: boolean | undefined): string {
 		return '否';
 	}
 	return '-';
+}
+
+function formatChanged(value: boolean | undefined): string {
+	return value === true ? '是' : '否';
 }
 
 function formatBuriedDepthSource(source: string | undefined): string {

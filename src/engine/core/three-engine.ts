@@ -302,7 +302,16 @@ export class ThreeEngine {
 	private siteBaselineLoadRequestId = 0;
 	private pipesByName = new Map<string, PipeRecord>();
 	private placementDebugInitialModelWorldPosition: THREE.Vector3 | null = null;
+	private placementDebugInitialArModelAnchorWorldPosition: THREE.Vector3 | null = null;
+	private placementDebugInitialArPlacementAnchorWorldPosition: THREE.Vector3 | null = null;
 	private placementDebugInitialCameraWorldPosition: THREE.Vector3 | null = null;
+	private placementDebugInitialCameraToModelDistance: number | null = null;
+	private placementDebugInitialEngineeringMatrix: THREE.Matrix4 | null = null;
+	private placementDebugInitialVisualMatrix: THREE.Matrix4 | null = null;
+	private placementDebugInitialPlacedModelMatrixWorld: THREE.Matrix4 | null = null;
+	private placementDebugInitialArModelAnchorMatrixWorld: THREE.Matrix4 | null = null;
+	private placementDebugInitialArPlacementAnchorMatrixWorld: THREE.Matrix4 | null = null;
+	private placementDebugInitialArFromEnuMatrix: THREE.Matrix4 | null = null;
 	private placementDebugLastWorldLockUpdateAt = 0;
 	private engineeringPlacementCallCount = 0;
 	private replacedModelCount = 0;
@@ -3252,13 +3261,32 @@ export class ThreeEngine {
 		const placedModel = this.placementSession.getArPlacedModel();
 		if ( placedModel === null ) {
 			this.placementDebugInitialModelWorldPosition = null;
+			this.placementDebugInitialArModelAnchorWorldPosition = null;
+			this.placementDebugInitialArPlacementAnchorWorldPosition = null;
 			this.placementDebugInitialCameraWorldPosition = null;
+			this.placementDebugInitialCameraToModelDistance = null;
+			this.placementDebugInitialEngineeringMatrix = null;
+			this.placementDebugInitialVisualMatrix = null;
+			this.placementDebugInitialPlacedModelMatrixWorld = null;
+			this.placementDebugInitialArModelAnchorMatrixWorld = null;
+			this.placementDebugInitialArPlacementAnchorMatrixWorld = null;
+			this.placementDebugInitialArFromEnuMatrix = null;
 			return;
 		}
 
+		this.sceneBundle.scene.updateMatrixWorld( true );
+		this.sceneBundle.camera.updateMatrixWorld( true );
+		this.sceneBundle.arModelAnchor.updateMatrixWorld( true );
+		this.sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
 		placedModel.updateMatrixWorld( true );
 		this.placementDebugInitialModelWorldPosition = placedModel.getWorldPosition( new THREE.Vector3() );
+		this.placementDebugInitialArModelAnchorWorldPosition = this.sceneBundle.arModelAnchor.getWorldPosition( new THREE.Vector3() );
+		this.placementDebugInitialArPlacementAnchorWorldPosition = this.sceneBundle.arPlacementAnchor.getWorldPosition( new THREE.Vector3() );
 		this.placementDebugInitialCameraWorldPosition = this.getCurrentCameraWorldPosition();
+		this.placementDebugInitialCameraToModelDistance = this.placementDebugInitialCameraWorldPosition.distanceTo( this.placementDebugInitialModelWorldPosition );
+		this.placementDebugInitialPlacedModelMatrixWorld = placedModel.matrixWorld.clone();
+		this.placementDebugInitialArModelAnchorMatrixWorld = this.sceneBundle.arModelAnchor.matrixWorld.clone();
+		this.placementDebugInitialArPlacementAnchorMatrixWorld = this.sceneBundle.arPlacementAnchor.matrixWorld.clone();
 		this.placementDebugLastWorldLockUpdateAt = 0;
 
 	}
@@ -3284,6 +3312,11 @@ export class ThreeEngine {
 		const placedModel = this.placementSession.getArPlacedModel();
 		const registrationSolution = this.registrationSolution;
 		const modelTemplate = this.modelTemplate;
+		this.sceneBundle.scene.updateMatrixWorld( true );
+		this.sceneBundle.camera.updateMatrixWorld( true );
+		this.sceneBundle.arModelAnchor.updateMatrixWorld( true );
+		this.sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
+		placedModel?.updateMatrixWorld( true );
 		const partial: ModelPlacementDebugState = {
 			engineeringPlacementCallCount: this.engineeringPlacementCallCount,
 			lastPlacementReason: this.lastPlacementReason,
@@ -3292,17 +3325,33 @@ export class ThreeEngine {
 			hasExistingPlacedModel: placedModel !== null,
 			modelParentName: placedModel?.parent?.name || placedModel?.parent?.type || '-',
 			arModelAnchorParentName: this.sceneBundle.arModelAnchor.parent?.name || this.sceneBundle.arModelAnchor.parent?.type || '-',
+			arPlacementAnchorParentName: this.sceneBundle.arPlacementAnchor.parent?.name || this.sceneBundle.arPlacementAnchor.parent?.type || '-',
+			placedModelParentChain: placedModel === null ? '-' : formatParentChain( placedModel ),
+			arModelAnchorParentChain: formatParentChain( this.sceneBundle.arModelAnchor ),
+			arPlacementAnchorParentChain: formatParentChain( this.sceneBundle.arPlacementAnchor ),
+			isPlacedModelChildOfPlacementAnchor: placedModel === null ? false : isDescendantOf( placedModel, this.sceneBundle.arPlacementAnchor ),
+			isArModelAnchorChildOfPlacementAnchor: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.arPlacementAnchor ),
 			isArModelAnchorChildOfCamera: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.camera ),
 			isArModelAnchorChildOfReticle: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.reticle ),
-			isArModelAnchorChildOfScene: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.scene )
+			isArModelAnchorChildOfScene: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.scene ),
+			placementAnchorUpdateCount: 0,
+			lastPlacementAnchorUpdateReason: 'none',
+			updatedPlacementAnchorFromFrameLoop: false
 		};
 
 		if ( placedModel !== null ) {
-			placedModel.updateMatrixWorld( true );
 			const currentModelWorldPosition = placedModel.getWorldPosition( new THREE.Vector3() );
+			const currentArModelAnchorWorldPosition = this.sceneBundle.arModelAnchor.getWorldPosition( new THREE.Vector3() );
+			const currentArPlacementAnchorWorldPosition = this.sceneBundle.arPlacementAnchor.getWorldPosition( new THREE.Vector3() );
 			const currentCameraWorldPosition = this.getCurrentCameraWorldPosition();
 			if ( this.placementDebugInitialModelWorldPosition === null ) {
 				this.placementDebugInitialModelWorldPosition = currentModelWorldPosition.clone();
+			}
+			if ( this.placementDebugInitialArModelAnchorWorldPosition === null ) {
+				this.placementDebugInitialArModelAnchorWorldPosition = currentArModelAnchorWorldPosition.clone();
+			}
+			if ( this.placementDebugInitialArPlacementAnchorWorldPosition === null ) {
+				this.placementDebugInitialArPlacementAnchorWorldPosition = currentArPlacementAnchorWorldPosition.clone();
 			}
 			if ( this.placementDebugInitialCameraWorldPosition === null ) {
 				this.placementDebugInitialCameraWorldPosition = currentCameraWorldPosition.clone();
@@ -3311,19 +3360,42 @@ export class ThreeEngine {
 				this.placementDebugInitialModelWorldPosition,
 				currentModelWorldPosition
 			);
+			const arModelAnchorWorldDeltaXZ = horizontalDistanceXZ(
+				this.placementDebugInitialArModelAnchorWorldPosition,
+				currentArModelAnchorWorldPosition
+			);
+			const arPlacementAnchorWorldDeltaXZ = horizontalDistanceXZ(
+				this.placementDebugInitialArPlacementAnchorWorldPosition,
+				currentArPlacementAnchorWorldPosition
+			);
 			const modelWorldDeltaY = Math.abs( currentModelWorldPosition.y - this.placementDebugInitialModelWorldPosition.y );
+			const arModelAnchorWorldDeltaY = Math.abs( currentArModelAnchorWorldPosition.y - this.placementDebugInitialArModelAnchorWorldPosition.y );
+			const arPlacementAnchorWorldDeltaY = Math.abs( currentArPlacementAnchorWorldPosition.y - this.placementDebugInitialArPlacementAnchorWorldPosition.y );
 			const cameraMovedDistance = this.placementDebugInitialCameraWorldPosition.distanceTo( currentCameraWorldPosition );
+			const cameraToModelDistance = currentCameraWorldPosition.distanceTo( currentModelWorldPosition );
+			if ( this.placementDebugInitialCameraToModelDistance === null ) {
+				this.placementDebugInitialCameraToModelDistance = cameraToModelDistance;
+			}
 			const worldLock = resolveWorldLockStatus( cameraMovedDistance, modelWorldDeltaXZ );
 			Object.assign( partial, {
 				initialModelWorldPosition: vector3ToRoundedObject( this.placementDebugInitialModelWorldPosition ),
 				currentModelWorldPosition: vector3ToRoundedObject( currentModelWorldPosition ),
 				modelWorldDeltaXZ: roundMeters( modelWorldDeltaXZ ),
 				modelWorldDeltaY: roundMeters( modelWorldDeltaY ),
+				arModelAnchorWorldDeltaXZ: roundMeters( arModelAnchorWorldDeltaXZ ),
+				arModelAnchorWorldDeltaY: roundMeters( arModelAnchorWorldDeltaY ),
+				arPlacementAnchorWorldDeltaXZ: roundMeters( arPlacementAnchorWorldDeltaXZ ),
+				arPlacementAnchorWorldDeltaY: roundMeters( arPlacementAnchorWorldDeltaY ),
 				initialCameraWorldPosition: vector3ToRoundedObject( this.placementDebugInitialCameraWorldPosition ),
 				currentCameraWorldPosition: vector3ToRoundedObject( currentCameraWorldPosition ),
 				cameraMovedDistance: roundMeters( cameraMovedDistance ),
+				cameraToModelDistance: roundMeters( cameraToModelDistance ),
+				cameraToModelDistanceDelta: roundMeters( Math.abs( cameraToModelDistance - this.placementDebugInitialCameraToModelDistance ) ),
 				isWorldLocked: worldLock.isWorldLocked,
-				worldLockStatus: worldLock.status
+				worldLockStatus: worldLock.status,
+				placedModelMatrixWorldChanged: matrixChanged( this.placementDebugInitialPlacedModelMatrixWorld, placedModel.matrixWorld ),
+				arModelAnchorMatrixWorldChanged: matrixChanged( this.placementDebugInitialArModelAnchorMatrixWorld, this.sceneBundle.arModelAnchor.matrixWorld ),
+				arPlacementAnchorMatrixWorldChanged: matrixChanged( this.placementDebugInitialArPlacementAnchorMatrixWorld, this.sceneBundle.arPlacementAnchor.matrixWorld )
 			} );
 		}
 
@@ -3354,12 +3426,25 @@ export class ThreeEngine {
 				registrationSolution
 			} );
 			const visualMatrix = placedModel?.matrixWorld.clone() ?? engineeringMatrix.clone();
+			if ( this.placementDebugInitialEngineeringMatrix === null ) {
+				this.placementDebugInitialEngineeringMatrix = engineeringMatrix.clone();
+			}
+			if ( this.placementDebugInitialVisualMatrix === null ) {
+				this.placementDebugInitialVisualMatrix = visualMatrix.clone();
+			}
+			if ( this.placementDebugInitialArFromEnuMatrix === null ) {
+				this.placementDebugInitialArFromEnuMatrix = arFromEnuSolution.matrix.clone();
+			}
 			Object.assign( partial, computePlacementErrorDebug( {
 				registrationSolution,
 				arFromEnuSolution,
 				engineeringMatrix,
 				visualMatrix
-			} ) );
+			} ), {
+				engineeringMatrixChanged: matrixChanged( this.placementDebugInitialEngineeringMatrix, engineeringMatrix ),
+				visualMatrixChanged: matrixChanged( this.placementDebugInitialVisualMatrix, visualMatrix ),
+				arFromEnuMatrixChanged: matrixChanged( this.placementDebugInitialArFromEnuMatrix, arFromEnuSolution.matrix )
+			} );
 		}
 
 		partial.conclusion = createModelPlacementDebugConclusion( partial );
@@ -3999,6 +4084,34 @@ function isDescendantOf(object: THREE.Object3D, ancestor: THREE.Object3D): boole
 
 }
 
+function formatParentChain(object: THREE.Object3D): string {
+
+	const names: string[] = [];
+	let current: THREE.Object3D | null = object;
+	while ( current !== null ) {
+		names.push( current.name || current.type );
+		current = current.parent;
+	}
+	return names.join( ' -> ' );
+
+}
+
+function matrixChanged(initial: THREE.Matrix4 | null, current: THREE.Matrix4): boolean {
+
+	if ( initial === null ) {
+		return false;
+	}
+	const a = initial.elements;
+	const b = current.elements;
+	for ( let index = 0; index < 16; index += 1 ) {
+		if ( Math.abs( a[ index ] - b[ index ] ) > 0.0001 ) {
+			return true;
+		}
+	}
+	return false;
+
+}
+
 function resolveWorldLockStatus(
 	cameraMovedDistance: number,
 	modelWorldDeltaXZ: number
@@ -4060,6 +4173,18 @@ function createModelPlacementDebugConclusion(state: ModelPlacementDebugState): s
 	if ( state.isArModelAnchorChildOfCamera === true || state.isArModelAnchorChildOfReticle === true ) {
 		return '模型锚点挂载错误，疑似跟随相机或 reticle。';
 	}
+	if ( state.arFromEnuMatrixChanged === true ) {
+		return 'arFromEnu 在放置后发生变化，可能导致模型重定位。';
+	}
+	if (
+		state.isPlacedModelChildOfPlacementAnchor === true
+		&& ( state.arPlacementAnchorWorldDeltaXZ ?? 0 ) > 0.05
+	) {
+		return '模型疑似跟随 moving placementAnchor，请改挂 fixed model root。';
+	}
+	if ( ( state.engineeringPlacementCallCount ?? 0 ) > 1 || ( state.replacedModelCount ?? 0 ) > 0 ) {
+		return '模型被重复放置，请检查工程放置入口。';
+	}
 	if ( state.worldLockStatus === 'error' ) {
 		return '模型疑似跟随相机移动，请检查 anchor parent。';
 	}
@@ -4068,6 +4193,13 @@ function createModelPlacementDebugConclusion(state: ModelPlacementDebugState): s
 	}
 	if ( state.worldLockStatus === 'unknown' ) {
 		return '请移动手机超过 0.3m 后再判断 world-lock。';
+	}
+	if (
+		( state.modelWorldDeltaXZ ?? 0 ) < 0.05
+		&& ( state.arModelAnchorWorldDeltaXZ ?? 0 ) < 0.05
+		&& state.isPlacedModelChildOfPlacementAnchor !== true
+	) {
+		return '模型没有跟随手机；当前更像地下模型下沉后的视觉投影效果。';
 	}
 	if ( state.buriedDepthSource === 'model-height' ) {
 		return '模型已固定，当前使用模型高度作为下沉深度。';
