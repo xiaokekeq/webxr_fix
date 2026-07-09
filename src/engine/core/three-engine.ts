@@ -94,6 +94,7 @@ import {
 import { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-workflow.js';
 import { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
 import { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
+import { composeModelRawLocalToArMatrix } from '@/engine/placement/runtime.js';
 import type {
 	ArWorkflowMode,
 	SiteCalibrationBaseline,
@@ -628,10 +629,11 @@ export class ThreeEngine {
 					bundle.demoModelConfig.annotationStyleRules
 				);
 				if ( bundle.demoModelConfig.visualPlacementMode === 'underground' ) {
+					const opacity = resolveXrayOpacityPercent( bundle.demoModelConfig.undergroundDisplay?.xrayOpacity );
 					this.store.patch( {
 						displayMode: 'transparent-xray',
-						structureRevealValue: 50,
-						transparentXrayValue: 50
+						structureRevealValue: opacity,
+						transparentXrayValue: opacity
 					} );
 				}
 				this.resolvedMarkerPosesInEnu = this.resolveConfiguredMarkerPoses( bundle.demoModelConfig );
@@ -1957,14 +1959,28 @@ export class ThreeEngine {
 		if ( placedModel !== null && this.registrationSolution !== null ) {
 			placedModel.updateMatrixWorld( true );
 			if ( this.engineeringDebugLayers.showModelActualControlPoints ) {
+				const engineeringMatrix = composeModelRawLocalToArMatrix( {
+					arFromEnuSolution,
+					registrationSolution: this.registrationSolution
+				} );
 				this.addDebugQuad( {
-					name: 'model-cp-actual',
+					name: 'model-cp-actual-engineering',
 					points: this.registrationSolution.controlPoints
 						.slice( 0, 4 )
-						.map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) ),
-					labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}` ),
+						.map( ( point ) => point.modelLocal.clone().applyMatrix4( engineeringMatrix ) ),
+					labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}-engineering` ),
 					color: 0xff4dff
 				} );
+				if ( import.meta.env.VITE_AR_DEBUG === 'true' ) {
+					this.addDebugQuad( {
+						name: 'model-cp-actual-visual',
+						points: this.registrationSolution.controlPoints
+							.slice( 0, 4 )
+							.map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) ),
+						labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}-visual` ),
+						color: 0x38bdf8
+					} );
+				}
 			}
 			const bbox = new THREE.Box3().setFromObject( placedModel );
 			if ( this.engineeringDebugLayers.showModelBoundingBox && bbox.isEmpty() === false ) {
@@ -2492,19 +2508,27 @@ export class ThreeEngine {
 		placedModel.updateMatrixWorld( true );
 		const modelContent = this.getModelContentObject( placedModel );
 		modelContent?.updateMatrixWorld( true );
+		const engineeringMatrix = composeModelRawLocalToArMatrix( {
+			arFromEnuSolution,
+			registrationSolution: this.registrationSolution
+		} );
 		const rootErrors: number[] = [];
 		const contentErrors: number[] = [];
+		const visualErrors: number[] = [];
 		const points = this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
 			const expectedAr = point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
+			const actualArEngineering = point.modelLocal.clone().applyMatrix4( engineeringMatrix );
 			const actualArFromWrapper = placedModel.localToWorld( point.modelLocal.clone() );
 			const actualArFromContent = modelContent === null
 				? null
 				: modelContent.localToWorld( point.modelLocal.clone() );
+			const engineeringError = expectedAr.distanceTo( actualArEngineering );
 			const errorWrapper = expectedAr.distanceTo( actualArFromWrapper );
 			const errorContent = actualArFromContent === null
 				? null
 				: expectedAr.distanceTo( actualArFromContent );
-			rootErrors.push( errorWrapper );
+			rootErrors.push( engineeringError );
+			visualErrors.push( errorWrapper );
 			if ( errorContent !== null ) {
 				contentErrors.push( errorContent );
 			}
@@ -2514,8 +2538,10 @@ export class ThreeEngine {
 				modelLocal: vector3ToRoundedObject( point.modelLocal ),
 				worldEnu: vector3ToRoundedObject( point.worldEnu ),
 				expectedAr: vector3ToRoundedObject( expectedAr ),
+				actualArEngineering: vector3ToRoundedObject( actualArEngineering ),
 				actualArFromWrapper: vector3ToRoundedObject( actualArFromWrapper ),
 				actualArFromContent: actualArFromContent === null ? null : vector3ToRoundedObject( actualArFromContent ),
+				engineeringError: Number( engineeringError.toFixed( 6 ) ),
 				errorWrapper: Number( errorWrapper.toFixed( 6 ) ),
 				errorContent: errorContent === null ? null : Number( errorContent.toFixed( 6 ) )
 			};
@@ -2533,6 +2559,8 @@ export class ThreeEngine {
 		}
 		const roundedMaxErrorRoot = Number( maxErrorRoot.toFixed( 6 ) );
 		const roundedRmsErrorRoot = Number( rmsErrorRoot.toFixed( 6 ) );
+		const roundedVisualRmsError = Number( computeRms( visualErrors ).toFixed( 6 ) );
+		const roundedVisualMaxError = Number( Math.max( ...visualErrors, 0 ).toFixed( 6 ) );
 		const roundedMaxErrorContent = contentErrors.length === 0 ? null : Number( maxErrorContent.toFixed( 6 ) );
 		const roundedRmsErrorContent = contentErrors.length === 0 ? null : Number( rmsErrorContent.toFixed( 6 ) );
 		const likelyModelLocalSpace = contentErrors.length > 0 && rmsErrorContent + 0.02 < rmsErrorRoot
@@ -2545,6 +2573,7 @@ export class ThreeEngine {
 			contentObjectName: modelContent?.name || modelContent?.type || null,
 			placedWrapperMatrixWorld: matrixToRoundedArray( placedModel.matrixWorld ),
 			modelContentMatrixWorld: modelContent === null ? null : matrixToRoundedArray( modelContent.matrixWorld ),
+			engineeringMatrix: matrixToRoundedArray( engineeringMatrix ),
 			points: points.map( ( point ) => ( {
 				...point,
 				maxErrorWrapper: roundedMaxErrorRoot,
@@ -2554,6 +2583,10 @@ export class ThreeEngine {
 			} ) ),
 			maxErrorWrapper: roundedMaxErrorRoot,
 			rmsErrorWrapper: roundedRmsErrorRoot,
+			maxErrorEngineering: roundedMaxErrorRoot,
+			rmsErrorEngineering: roundedRmsErrorRoot,
+			maxErrorVisual: roundedVisualMaxError,
+			rmsErrorVisual: roundedVisualRmsError,
 			maxErrorContent: roundedMaxErrorContent,
 			rmsErrorContent: roundedRmsErrorContent,
 			warning: warnings,
@@ -2576,7 +2609,7 @@ export class ThreeEngine {
 			registrationStatusDetail: message,
 			footprintDiagnostics: {
 				...this.store.getState().footprintDiagnostics,
-				modelControlPointPlacementText: `wrapper RMS ${rmsErrorRoot.toFixed( 3 )}m / Max ${maxErrorRoot.toFixed( 3 )}m；content RMS ${
+				modelControlPointPlacementText: `engineering RMS ${rmsErrorRoot.toFixed( 3 )}m / Max ${maxErrorRoot.toFixed( 3 )}m；visual RMS ${roundedVisualRmsError.toFixed( 3 )}m；content RMS ${
 					roundedRmsErrorContent === null ? '-' : `${roundedRmsErrorContent.toFixed( 3 )}m`
 				}；likely ${likelyModelLocalSpace}${warnings.length > 0 ? `；${warnings.join( '；' )}` : ''}`
 			}
@@ -3799,6 +3832,16 @@ function boxToRoundedObject(box: THREE.Box3): {
 		min: vector3ToRoundedObject( box.min ),
 		max: vector3ToRoundedObject( box.max )
 	};
+
+}
+
+function resolveXrayOpacityPercent(value: number | undefined): number {
+
+	if ( typeof value !== 'number' || Number.isFinite( value ) === false ) {
+		return 50;
+	}
+	const percent = value <= 1 ? value * 100 : value;
+	return Math.round( THREE.MathUtils.clamp( percent, 0, 100 ) );
 
 }
 

@@ -82,6 +82,14 @@ interface RawMarkerEngineeringConfig extends Omit<MarkerEngineeringConfig, 'enu'
 
 export type DemoModelRegistrationMode = 'rigid-ground-plane';
 export type DemoModelVisualPlacementMode = 'surface' | 'underground';
+export interface UndergroundDisplayConfig {
+	defaultMode?: 'true-depth' | 'x-ray' | 'surface-projection' | 'lifted-preview';
+	buriedDepthMeters?: number;
+	liftedPreviewOffsetMeters?: number;
+	xrayOpacity?: number;
+	showSurfaceProjection?: boolean;
+	showDepthGuideLines?: boolean;
+}
 
 export interface DemoModelConfig {
 	modelId: string;
@@ -106,6 +114,7 @@ export interface DemoModelConfig {
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters: number;
 	visualPlacementMode: DemoModelVisualPlacementMode;
+	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
@@ -173,6 +182,7 @@ interface LocalDebugModelConfig {
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters?: number;
 	visualPlacementMode?: DemoModelVisualPlacementMode;
+	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
@@ -181,7 +191,7 @@ interface LocalDebugModelConfig {
 	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters' | 'visualPlacementMode' | 'annotations' | 'annotationStyleRules'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters' | 'visualPlacementMode' | 'undergroundDisplay' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	controlPoints: Record<string, {
@@ -198,6 +208,7 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters?: number;
 	visualPlacementMode?: DemoModelVisualPlacementMode;
+	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
@@ -341,6 +352,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
 		visualPlacementMode: normalizeVisualPlacementMode( config.visualPlacementMode ),
+		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
@@ -389,6 +401,7 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
 		visualPlacementMode: normalizeVisualPlacementMode( config.visualPlacementMode ),
+		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
@@ -1079,6 +1092,46 @@ function normalizeVisualGroundOffsetMeters(value: number | undefined): number {
 function normalizeVisualPlacementMode(value: DemoModelVisualPlacementMode | undefined): DemoModelVisualPlacementMode {
 
 	return value === 'underground' ? 'underground' : 'surface';
+
+}
+
+function normalizeUndergroundDisplayConfig(value: UndergroundDisplayConfig | undefined): UndergroundDisplayConfig | undefined {
+
+	if ( typeof value !== 'object' || value === null ) {
+		return undefined;
+	}
+
+	const config: UndergroundDisplayConfig = {};
+	if (
+		value.defaultMode === 'true-depth'
+		|| value.defaultMode === 'x-ray'
+		|| value.defaultMode === 'surface-projection'
+		|| value.defaultMode === 'lifted-preview'
+	) {
+		config.defaultMode = value.defaultMode;
+	}
+
+	if ( typeof value.buriedDepthMeters === 'number' && Number.isFinite( value.buriedDepthMeters ) ) {
+		config.buriedDepthMeters = Math.max( 0, value.buriedDepthMeters );
+	}
+
+	if ( typeof value.liftedPreviewOffsetMeters === 'number' && Number.isFinite( value.liftedPreviewOffsetMeters ) ) {
+		config.liftedPreviewOffsetMeters = value.liftedPreviewOffsetMeters;
+	}
+
+	if ( typeof value.xrayOpacity === 'number' && Number.isFinite( value.xrayOpacity ) ) {
+		config.xrayOpacity = value.xrayOpacity;
+	}
+
+	if ( typeof value.showSurfaceProjection === 'boolean' ) {
+		config.showSurfaceProjection = value.showSurfaceProjection;
+	}
+
+	if ( typeof value.showDepthGuideLines === 'boolean' ) {
+		config.showDepthGuideLines = value.showDepthGuideLines;
+	}
+
+	return Object.keys( config ).length === 0 ? undefined : config;
 
 }
 

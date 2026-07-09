@@ -346,13 +346,14 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return false;
 			}
 
-			const modelRawLocalToArMatrix = composeModelRawLocalToArMatrix( {
+			const engineeringMatrix = composeModelRawLocalToArMatrix( {
 				arFromEnuSolution,
 				registrationSolution
 			} );
-			const visualOffsetMeters = resolveConfiguredVisualYOffsetMeters( modelTemplate, registrationSolution, modelRawLocalToArMatrix );
+			const visualMatrix = engineeringMatrix.clone();
+			const visualOffsetMeters = resolveConfiguredVisualYOffsetMeters( registrationSolution );
 			if ( visualOffsetMeters !== 0 ) {
-				modelRawLocalToArMatrix.premultiply( visualOffsetMatrix.makeTranslation( 0, visualOffsetMeters, 0 ) );
+				visualMatrix.premultiply( visualOffsetMatrix.makeTranslation( 0, visualOffsetMeters, 0 ) );
 			}
 			resetArPlacementAnchorTransform();
 			arPlacementBase = null;
@@ -360,8 +361,15 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelTemplate,
 				arPlacedModel,
 				sceneBundle.arModelAnchor,
-				modelRawLocalToArMatrix
+				visualMatrix
 			);
+			logUndergroundPlacementDiagnostic( {
+				registrationSolution,
+				arFromEnuSolution,
+				engineeringMatrix,
+				visualMatrix,
+				visualOffsetMeters
+			} );
 			trackArPlacement( resolvePlacementSourceFromArLocalization( arFromEnuSolution.source ) );
 			updateRegistrationStatusDetail( '状态：模型已按工程矩阵显示' );
 			updatePlacementSummary();
@@ -373,7 +381,9 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				usedPlacementBase: false,
 				modelToSiteMatrix: registrationSolution.modelToSite.matrix.toArray(),
 				arFromEnuMatrix: arFromEnuSolution.matrix.toArray(),
-				modelRawLocalToArMatrix: modelRawLocalToArMatrix.toArray(),
+				engineeringMatrix: engineeringMatrix.toArray(),
+				visualMatrix: visualMatrix.toArray(),
+				modelRawLocalToArMatrix: visualMatrix.toArray(),
 				visualPlacementMode: registrationSolution.visualPlacementMode,
 				visualYOffsetMeters: visualOffsetMeters,
 				createdAt: Date.now()
@@ -419,27 +429,95 @@ function requiresCurrentSession(source: ArFromEnuSolution['source'] | undefined)
 
 }
 
-function resolveConfiguredVisualYOffsetMeters(
-	modelTemplate: THREE.Group,
-	registrationSolution: EngineeringRegistrationSolution,
-	modelRawLocalToArMatrix: THREE.Matrix4
-): number {
+function resolveConfiguredVisualYOffsetMeters(registrationSolution: EngineeringRegistrationSolution): number {
 
 	const explicitOffset = registrationSolution.visualGroundOffsetMeters;
 	if ( registrationSolution.visualPlacementMode !== 'underground' ) {
 		return explicitOffset;
 	}
 
-	const bounds = new THREE.Box3().setFromObject( modelTemplate );
-	if ( bounds.isEmpty() ) {
+	if ( explicitOffset !== 0 ) {
 		return explicitOffset;
 	}
 
-	const localHeight = bounds.max.y - bounds.min.y;
-	const arHeight = new THREE.Vector3( 0, localHeight, 0 )
-		.applyMatrix3( new THREE.Matrix3().setFromMatrix4( modelRawLocalToArMatrix ) )
-		.length();
-	return explicitOffset - arHeight;
+	const buriedDepthMeters = registrationSolution.undergroundDisplay?.buriedDepthMeters;
+	return typeof buriedDepthMeters === 'number' && buriedDepthMeters > 0
+		? - buriedDepthMeters
+		: 0;
+
+}
+
+function logUndergroundPlacementDiagnostic(args: {
+	registrationSolution: EngineeringRegistrationSolution;
+	arFromEnuSolution: ArFromEnuSolution;
+	engineeringMatrix: THREE.Matrix4;
+	visualMatrix: THREE.Matrix4;
+	visualOffsetMeters: number;
+}): void {
+
+	const {
+		registrationSolution,
+		arFromEnuSolution,
+		engineeringMatrix,
+		visualMatrix,
+		visualOffsetMeters
+	} = args;
+	const engineeringHorizontalErrors: number[] = [];
+	const engineeringVerticalErrors: number[] = [];
+	const visualHorizontalErrors: number[] = [];
+	const visualVerticalErrors: number[] = [];
+	const points = registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
+		const expectedAr = point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
+		const engineeringActualAr = point.modelLocal.clone().applyMatrix4( engineeringMatrix );
+		const visualActualAr = point.modelLocal.clone().applyMatrix4( visualMatrix );
+		const horizontalErrorXZEngineering = horizontalErrorXZ( expectedAr, engineeringActualAr );
+		const verticalErrorYEngineering = Math.abs( expectedAr.y - engineeringActualAr.y );
+		const horizontalErrorXZVisual = horizontalErrorXZ( expectedAr, visualActualAr );
+		const verticalErrorYVisual = Math.abs( expectedAr.y - visualActualAr.y );
+		engineeringHorizontalErrors.push( horizontalErrorXZEngineering );
+		engineeringVerticalErrors.push( verticalErrorYEngineering );
+		visualHorizontalErrors.push( horizontalErrorXZVisual );
+		visualVerticalErrors.push( verticalErrorYVisual );
+		return {
+			controlPointId: point.id,
+			expectedAr: vector3ToObject( expectedAr ),
+			engineeringActualAr: vector3ToObject( engineeringActualAr ),
+			visualActualAr: vector3ToObject( visualActualAr ),
+			horizontalErrorXZEngineering: Number( horizontalErrorXZEngineering.toFixed( 6 ) ),
+			verticalErrorYEngineering: Number( verticalErrorYEngineering.toFixed( 6 ) ),
+			horizontalErrorXZVisual: Number( horizontalErrorXZVisual.toFixed( 6 ) ),
+			verticalErrorYVisual: Number( verticalErrorYVisual.toFixed( 6 ) )
+		};
+	} );
+
+	console.info( '[UndergroundPlacementDiagnostic]', {
+		modelId: registrationSolution.modelId,
+		visualPlacementMode: registrationSolution.visualPlacementMode,
+		visualOffsetY: Number( visualOffsetMeters.toFixed( 6 ) ),
+		engineeringMatrix: engineeringMatrix.toArray(),
+		visualMatrix: visualMatrix.toArray(),
+		engineeringHorizontalRms: Number( computeRms( engineeringHorizontalErrors ).toFixed( 6 ) ),
+		engineeringVerticalMax: Number( Math.max( ...engineeringVerticalErrors, 0 ).toFixed( 6 ) ),
+		visualHorizontalRms: Number( computeRms( visualHorizontalErrors ).toFixed( 6 ) ),
+		visualVerticalMax: Number( Math.max( ...visualVerticalErrors, 0 ).toFixed( 6 ) ),
+		points,
+		note: 'engineeringMatrix checks registration closure; visualMatrix includes display-only Y offset'
+	} );
+
+}
+
+function horizontalErrorXZ(a: THREE.Vector3, b: THREE.Vector3): number {
+
+	return Math.hypot( a.x - b.x, a.z - b.z );
+
+}
+
+function computeRms(values: number[]): number {
+
+	if ( values.length === 0 ) {
+		return 0;
+	}
+	return Math.sqrt( values.reduce( ( sum, value ) => sum + value * value, 0 ) / values.length );
 
 }
 

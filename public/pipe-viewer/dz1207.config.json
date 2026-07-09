@@ -237,5 +237,10 @@
   "placementAnchorMeaning": "site-origin-ground-reference",
   "visualGroundOffsetMeters": 0,
   "visualPlacementMode": "underground",
+  "undergroundDisplay": {
+    "defaultMode": "x-ray",
+    "xrayOpacity": 0.5,
+    "showSurfaceProjection": true
+  },
   "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json"
 }
