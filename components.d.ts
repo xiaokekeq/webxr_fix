@@ -9,7 +9,6 @@ declare module 'vue' {
   export interface GlobalComponents {
     AppTabBar: typeof import('./src/components/AppTabBar.vue')['default']
     ArInfoGrid: typeof import('./src/components/ar/ArInfoGrid.vue')['default']
-    ArModelInfoPanel: typeof import('./src/components/ar/ArModelInfoPanel.vue')['default']
     ArPanelSection: typeof import('./src/components/ar/ArPanelSection.vue')['default']
     ArPlacementStatusSection: typeof import('./src/components/ar/ArPlacementStatusSection.vue')['default']
     CpuDepthDebugOverlay: typeof import('./src/components/ar/CpuDepthDebugOverlay.vue')['default']

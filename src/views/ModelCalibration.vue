@@ -2,7 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
-import ArModelInfoPanel from '@/components/ar/ArModelInfoPanel.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import CpuDepthDebugOverlay from '@/components/ar/CpuDepthDebugOverlay.vue';
@@ -594,11 +593,6 @@ function setArOverlayClass(active: boolean): void {
 			</button>
 		</nav>
 
-		<ArModelInfoPanel
-			v-if="hasArSession && ui.drawerOpen === false && showMarkerCalibrationOverlay === false"
-			:state="engine"
-			@close="store.actions.closePropertyPanel()"
-		/>
 	</div>
 </template>
 

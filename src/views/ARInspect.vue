@@ -2,7 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
-import ArModelInfoPanel from '@/components/ar/ArModelInfoPanel.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
@@ -939,11 +938,6 @@ function setArOverlayClass(active: boolean): void {
 			</div>
 		</section>
 
-		<ArModelInfoPanel
-			v-if="hasArSession && ui.drawerOpen === false && showMarkerCalibrationOverlay === false"
-			:state="engine"
-			@close="store.actions.closePropertyPanel()"
-		/>
 	</div>
 </template>
 

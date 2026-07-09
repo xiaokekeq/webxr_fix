@@ -311,7 +311,6 @@ export class ThreeEngine {
 		} );
 
 		this.propertySelection = createPropertySelectionController( {
-			store: this.store,
 			shouldRenderSelectionOutline: () => this.sceneBundle.renderer.xr.isPresenting
 		} );
 

@@ -1,13 +1,8 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { createHighlightedMaterial, disposeDynamicMaterials } from '@/engine/interaction/material-highlighting.js';
 import type { PipeRecord } from '@/models/types/pipe-record.js';
-import {
-	createDefaultPropertyPanelState,
-	type RegistrationStore
-} from '@/localization/core/registration-store.js';
 
 interface CreatePropertySelectionControllerOptions {
-	store: RegistrationStore;
 	shouldRenderSelectionOutline?(): boolean;
 }
 
@@ -34,7 +29,6 @@ export function createPropertySelectionController(
 	options: CreatePropertySelectionControllerOptions
 ): PropertySelectionController {
 
-	const { store } = options;
 	let selectedMeshes: THREE.Mesh[] = [];
 	let selectedOutlines: THREE.LineSegments[] = [];
 	const shouldRenderSelectionOutline = options.shouldRenderSelectionOutline ?? ( () => false );
@@ -74,9 +68,7 @@ export function createPropertySelectionController(
 		selectBusinessObject(businessObject, properties, highlightObject) {
 
 			clearSelection();
-
 			const highlightRoot = highlightObject ?? businessObject;
-			const selectionMetadata = getSelectionMetadata( highlightRoot, businessObject );
 			highlightRoot.traverse( ( child ) => {
 				if ( child instanceof THREE.Mesh ) {
 					selectedMeshes.push( child );
@@ -96,23 +88,10 @@ export function createPropertySelectionController(
 				}
 			} );
 
-			const businessName = getBusinessName( businessObject );
-			store.patch( {
-				propertyPanel: {
-					name: businessName,
-					meshName: selectionMetadata.meshName,
-					materialName: selectionMetadata.materialName,
-					statusBadge: properties?.status || '待核查',
-					type: properties?.type || '-',
-					diameter: properties?.diameter || '-',
-					material: properties?.material || '-',
-					depth: properties?.depth || '-',
-					status: properties?.status || '-',
-					remark: properties?.remark || '未找到匹配的业务属性记录。'
-				}
-			} );
-
-			return { businessName, properties };
+			return {
+				businessName: getBusinessName( businessObject ),
+				properties
+			};
 
 		}
 	};
@@ -143,7 +122,6 @@ export function createPropertySelectionController(
 		}
 
 		selectedMeshes = [];
-		store.patch( { propertyPanel: createDefaultPropertyPanelState() } );
 
 	}
 
@@ -184,61 +162,4 @@ export function createPropertySelectionController(
 
 	}
 
-	function getSelectionMetadata(
-		highlightRoot: THREE.Object3D,
-		businessObject: THREE.Object3D
-	): { meshName: string; materialName: string } {
-
-		const sourceMesh = resolveSelectionMesh( highlightRoot ) ?? resolveSelectionMesh( businessObject );
-		if ( sourceMesh === null ) {
-			return {
-				meshName: businessObject.name || 'UnnamedMesh',
-				materialName: '-'
-			};
-		}
-
-		return {
-			meshName: sourceMesh.name || businessObject.name || 'UnnamedMesh',
-			materialName: getMaterialName( sourceMesh.material )
-		};
-
-	}
-
-	function resolveSelectionMesh(object: THREE.Object3D): THREE.Mesh | null {
-
-		if ( object instanceof THREE.Mesh ) {
-			return object;
-		}
-
-		let resolvedMesh: THREE.Mesh | null = null;
-		object.traverse( ( child ) => {
-			if ( resolvedMesh === null && child instanceof THREE.Mesh ) {
-				resolvedMesh = child;
-			}
-		} );
-		return resolvedMesh;
-
-	}
-
-	function getMaterialName(material: THREE.Material | THREE.Material[]): string {
-
-		if ( Array.isArray( material ) ) {
-			const names = material
-				.map( ( item ) => item.name )
-				.filter( ( item ) => item.length > 0 );
-			return names.length > 0 ? names.join( ', ' ) : '-';
-		}
-
-		return material.name || '-';
-
-	}
-
 }
-
-
-
-
-
-
-
-
