@@ -36,6 +36,7 @@ const markerApplyFeedback = ref<{
 const arDebugMode = isArDebugEnabled();
 const debugInfoOpen = ref( false );
 const registrationDiagnosticOpen = ref( false );
+const modelPlacementDiagnosticOpen = ref( false );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
@@ -167,6 +168,52 @@ const registrationDiagnosticCards = computed( () => [
 	{ label: 'hasMockEngineeringData', value: configStatus.value.hasMockEngineeringData ? 'true' : 'false' },
 	{ label: 'mock/demo reason', value: formatMockReason(), wide: true }
 ] );
+
+const modelPlacementDebugCards = computed( () => {
+	const debug = engine.value.modelPlacementDebug;
+	return [
+		{
+			label: '地下显示',
+			value: `模式 ${debug.undergroundMode ?? debug.visualPlacementMode ?? '-'}；深度 ${formatMeters( debug.depthMeters )}；来源 ${formatBuriedDepthSource( debug.buriedDepthSource )}`,
+			wide: true
+		},
+		{
+			label: '显示偏移',
+			value: `visualOffsetY ${formatMeters( debug.visualOffsetY )}；groundOffset ${formatMeters( debug.visualGroundOffsetMeters )}；透明度 ${formatOpacity( debug.xrayOpacity )}`,
+			wide: true
+		},
+		{
+			label: '工程误差',
+			value: `${formatHorizontalStatus( debug.engineeringHorizontalRms )}；水平 RMS ${formatMeters( debug.engineeringHorizontalRms )}；高度 Max ${formatMeters( debug.engineeringVerticalMax )}`,
+			wide: true
+		},
+		{
+			label: '显示误差',
+			value: `水平 RMS ${formatMeters( debug.visualHorizontalRms )}；高度 Max ${formatMeters( debug.visualVerticalMax )}`,
+			wide: true
+		},
+		{
+			label: 'World Lock',
+			value: `${formatWorldLockStatus( debug.worldLockStatus, debug.isWorldLocked )}；相机移动 ${formatMeters( debug.cameraMovedDistance )}；模型漂移 ${formatMeters( debug.modelWorldDeltaXZ )}`,
+			wide: true
+		},
+		{
+			label: '父级挂载',
+			value: `model ${debug.modelParentName ?? '-'}；anchor ${debug.arModelAnchorParentName ?? '-'}；scene ${formatBoolean( debug.isArModelAnchorChildOfScene )}；camera ${formatBoolean( debug.isArModelAnchorChildOfCamera )}；reticle ${formatBoolean( debug.isArModelAnchorChildOfReticle )}`,
+			wide: true
+		},
+		{
+			label: '放置调用',
+			value: `次数 ${debug.engineeringPlacementCallCount ?? 0}；替换 ${debug.replacedModelCount ?? 0}；原因 ${debug.lastPlacementReason ?? '-'}`,
+			wide: true
+		},
+		{
+			label: '结论',
+			value: debug.conclusion ?? '-',
+			wide: true
+		}
+	];
+} );
 
 const configWarnings = computed( () => {
 	const warnings: string[] = [];
@@ -416,6 +463,68 @@ function formatMockReason(): string {
 		return configStatus.value.mockRtkPointIds.join( ', ' );
 	}
 	return 'mock/demo engineering data';
+}
+
+function formatMeters(value: number | null | undefined): string {
+	return typeof value === 'number' && Number.isFinite( value )
+		? `${value.toFixed( 2 )}m`
+		: '-';
+}
+
+function formatOpacity(value: number | null | undefined): string {
+	if ( typeof value !== 'number' || Number.isFinite( value ) === false ) {
+		return '-';
+	}
+	return value <= 1 ? value.toFixed( 2 ) : `${value.toFixed( 0 )}%`;
+}
+
+function formatBoolean(value: boolean | undefined): string {
+	if ( value === true ) {
+		return '是';
+	}
+	if ( value === false ) {
+		return '否';
+	}
+	return '-';
+}
+
+function formatBuriedDepthSource(source: string | undefined): string {
+	if ( source === 'model-height' ) {
+		return '模型高度';
+	}
+	if ( source === 'configured-number' ) {
+		return '配置数值';
+	}
+	return '未配置';
+}
+
+function formatHorizontalStatus(value: number | undefined): string {
+	if ( typeof value !== 'number' || Number.isFinite( value ) === false ) {
+		return '工程水平误差未知';
+	}
+	if ( value < 0.1 ) {
+		return '工程水平误差正常';
+	}
+	if ( value <= 0.3 ) {
+		return '工程水平误差警告';
+	}
+	return '工程水平误差异常';
+}
+
+function formatWorldLockStatus(
+	status: string | undefined,
+	isWorldLocked: boolean | null | undefined
+): string {
+	if ( status === 'normal' || isWorldLocked === true ) {
+		return 'World Lock 正常';
+	}
+	if ( status === 'error' ) {
+		return 'World Lock 异常';
+	}
+	if ( status === 'warning' ) {
+		return 'World Lock 警告';
+	}
+	return '请移动手机后再判断';
 }
 
 function formatActiveMarkerText(): string {
@@ -813,6 +922,10 @@ function setArOverlayClass(active: boolean): void {
 						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
 							{{ warning }}
 						</div>
+						<button type="button" class="debug-toggle" @click="modelPlacementDiagnosticOpen = !modelPlacementDiagnosticOpen">
+							{{ modelPlacementDiagnosticOpen ? '收起模型诊断' : '模型诊断' }}
+						</button>
+						<ArInfoGrid v-if="modelPlacementDiagnosticOpen" :items="modelPlacementDebugCards" />
 						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="debugInfoOpen = !debugInfoOpen">
 							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
 						</button>

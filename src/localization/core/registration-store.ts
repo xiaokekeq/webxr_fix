@@ -107,6 +107,42 @@ export interface FootprintDiagnosticsState {
 	updatedAtText: string;
 }
 
+export interface ModelPlacementDebugState {
+	visualPlacementMode?: string;
+	undergroundMode?: string;
+	buriedDepthRaw?: number | 'model-height' | null;
+	buriedDepthSource?: 'model-height' | 'configured-number' | 'none';
+	modelHeight?: number | null;
+	depthMeters?: number;
+	visualGroundOffsetMeters?: number;
+	visualOffsetY?: number;
+	xrayOpacity?: number;
+	engineeringHorizontalRms?: number;
+	engineeringVerticalMax?: number;
+	visualHorizontalRms?: number;
+	visualVerticalMax?: number;
+	initialModelWorldPosition?: { x: number; y: number; z: number };
+	currentModelWorldPosition?: { x: number; y: number; z: number };
+	modelWorldDeltaXZ?: number;
+	modelWorldDeltaY?: number;
+	initialCameraWorldPosition?: { x: number; y: number; z: number };
+	currentCameraWorldPosition?: { x: number; y: number; z: number };
+	cameraMovedDistance?: number;
+	isWorldLocked?: boolean | null;
+	worldLockStatus?: 'unknown' | 'normal' | 'warning' | 'error';
+	modelParentName?: string;
+	arModelAnchorParentName?: string;
+	isArModelAnchorChildOfCamera?: boolean;
+	isArModelAnchorChildOfReticle?: boolean;
+	isArModelAnchorChildOfScene?: boolean;
+	engineeringPlacementCallCount?: number;
+	lastPlacementReason?: string;
+	lastPlacementTimestamp?: number;
+	replacedModelCount?: number;
+	hasExistingPlacedModel?: boolean;
+	conclusion?: string;
+}
+
 export interface SiteCalibrationBaselineState {
 	available: boolean;
 	siteId?: string;
@@ -260,6 +296,7 @@ export interface RegistrationStoreState {
 	modelScaleSummary: ModelScaleSummaryState;
 	registrationChainDebug: RegistrationChainDebugState;
 	footprintDiagnostics: FootprintDiagnosticsState;
+	modelPlacementDebug: ModelPlacementDebugState;
 	siteCalibrationBaseline: SiteCalibrationBaselineState;
 	engineeringConfigStatus: EngineeringConfigStatusState;
 	savedMarkerLocalization: SavedMarkerLocalizationState;
@@ -412,6 +449,25 @@ export function createDefaultFootprintDiagnosticsState(): FootprintDiagnosticsSt
 		markerPhysicalText: '-',
 		verdictText: '等待 Marker 校正',
 		updatedAtText: '-'
+	};
+
+}
+
+export function createDefaultModelPlacementDebugState(): ModelPlacementDebugState {
+
+	return {
+		buriedDepthRaw: null,
+		buriedDepthSource: 'none',
+		modelHeight: null,
+		depthMeters: 0,
+		visualGroundOffsetMeters: 0,
+		visualOffsetY: 0,
+		isWorldLocked: null,
+		worldLockStatus: 'unknown',
+		engineeringPlacementCallCount: 0,
+		replacedModelCount: 0,
+		hasExistingPlacedModel: false,
+		conclusion: '等待工程放置模型'
 	};
 
 }

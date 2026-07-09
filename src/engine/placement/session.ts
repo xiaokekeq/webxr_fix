@@ -443,7 +443,7 @@ function requiresCurrentSession(source: ArFromEnuSolution['source'] | undefined)
 
 }
 
-function resolveBuriedDepthMeters(args: {
+export function resolveBuriedDepthMeters(args: {
 	undergroundDisplay: EngineeringRegistrationSolution['undergroundDisplay'];
 	modelTemplate: THREE.Group;
 }): {
