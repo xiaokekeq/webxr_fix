@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
-import { clearPlacedModel, placeModelWithMatrix } from '@/engine/core/model.js';
+import { clearPlacedModel, placeModelWithMatrix, readPlaceableTemplateReport } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
@@ -455,8 +455,7 @@ export function resolveBuriedDepthMeters(args: {
 
 	const buriedDepthMeters = args.undergroundDisplay?.buriedDepthMeters;
 	if ( buriedDepthMeters === 'model-height' ) {
-		const bounds = new THREE.Box3().setFromObject( args.modelTemplate );
-		const modelHeight = bounds.isEmpty() ? Number.NaN : bounds.max.y - bounds.min.y;
+		const modelHeight = resolveTemplateHeightMeters( args.modelTemplate );
 		if ( Number.isFinite( modelHeight ) === false || modelHeight < 0 ) {
 			return {
 				depthMeters: 0,
@@ -491,6 +490,19 @@ export function resolveBuriedDepthMeters(args: {
 		depthMeters: 0,
 		source: 'none'
 	};
+
+}
+
+function resolveTemplateHeightMeters(modelTemplate: THREE.Group): number {
+
+	const report = readPlaceableTemplateReport( modelTemplate );
+	if ( report !== null ) {
+		return Math.min( report.finalSize.x, report.finalSize.y, report.finalSize.z );
+	}
+
+	const bounds = new THREE.Box3().setFromObject( modelTemplate );
+	const size = bounds.getSize( new THREE.Vector3() );
+	return bounds.isEmpty() ? Number.NaN : Math.min( size.x, size.y, size.z );
 
 }
 

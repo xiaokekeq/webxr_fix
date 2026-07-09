@@ -239,7 +239,7 @@
   "visualPlacementMode": "underground",
   "undergroundDisplay": {
     "defaultMode": "x-ray",
-    "buriedDepthMeters": 1,
+    "buriedDepthMeters": "model-height",
     "xrayOpacity": 0.5,
     "showSurfaceProjection": true,
     "showDepthGuideLines": true

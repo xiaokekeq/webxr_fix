@@ -4125,8 +4125,10 @@ function formatUndergroundDisplayText(config: DemoModelConfig, modelTemplate: TH
 		: config.undergroundDisplay?.defaultMode ?? 'underground';
 	const buriedDepth = config.undergroundDisplay?.buriedDepthMeters;
 	if ( buriedDepth === 'model-height' ) {
-		const bounds = new THREE.Box3().setFromObject( modelTemplate );
-		const modelHeight = bounds.isEmpty() ? 0 : bounds.max.y - bounds.min.y;
+		const report = readPlaceableTemplateReport( modelTemplate );
+		const modelHeight = report === null
+			? resolveSmallestBoundsDimension( modelTemplate )
+			: Math.min( report.finalSize.x, report.finalSize.y, report.finalSize.z );
 		return `地下显示：${modeText}；下沉深度：${modelHeight.toFixed( 2 )} m；深度来源：模型高度。下沉深度使用模型高度。`;
 	}
 
@@ -4135,6 +4137,17 @@ function formatUndergroundDisplayText(config: DemoModelConfig, modelTemplate: TH
 	}
 
 	return `地下显示：${modeText}；下沉深度：0.00 m；深度来源：未配置。`;
+
+}
+
+function resolveSmallestBoundsDimension(object: THREE.Object3D): number {
+
+	const bounds = new THREE.Box3().setFromObject( object );
+	if ( bounds.isEmpty() ) {
+		return 0;
+	}
+	const size = bounds.getSize( new THREE.Vector3() );
+	return Math.min( size.x, size.y, size.z );
 
 }
 
