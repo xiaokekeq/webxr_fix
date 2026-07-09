@@ -239,8 +239,10 @@
   "visualPlacementMode": "underground",
   "undergroundDisplay": {
     "defaultMode": "x-ray",
+    "buriedDepthMeters": "model-height",
     "xrayOpacity": 0.5,
-    "showSurfaceProjection": true
+    "showSurfaceProjection": true,
+    "showDepthGuideLines": true
   },
   "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json"
 }

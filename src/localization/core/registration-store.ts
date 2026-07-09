@@ -96,6 +96,7 @@ export interface FootprintDiagnosticsState {
 	modelControlPointPlacementText: string;
 	modelControlPointOrderText: string;
 	modelLocalFootprintText: string;
+	undergroundDisplayText: string;
 	modelAxisText: string;
 	footprintShapeText: string;
 	footprintControlPointIdsText: string;
@@ -402,6 +403,7 @@ export function createDefaultFootprintDiagnosticsState(): FootprintDiagnosticsSt
 		modelControlPointPlacementText: '-',
 		modelControlPointOrderText: '-',
 		modelLocalFootprintText: '-',
+		undergroundDisplayText: '-',
 		modelAxisText: '-',
 		footprintShapeText: '-',
 		footprintControlPointIdsText: '-',

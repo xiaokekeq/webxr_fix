@@ -148,6 +148,7 @@ const registrationDiagnosticCards = computed( () => [
 	{ label: 'model CP placement', value: engine.value.footprintDiagnostics.modelControlPointPlacementText, wide: true },
 	{ label: 'model CP order', value: engine.value.footprintDiagnostics.modelControlPointOrderText, wide: true },
 	{ label: 'modelLocal footprint', value: engine.value.footprintDiagnostics.modelLocalFootprintText, wide: true },
+	{ label: 'underground display', value: engine.value.footprintDiagnostics.undergroundDisplayText, wide: true },
 	{ label: 'model axis', value: engine.value.footprintDiagnostics.modelAxisText, wide: true },
 	{ label: 'marker self-check', value: engine.value.footprintDiagnostics.groundPlaneSelfCheckText, wide: true },
 	{ label: 'marker->footprint distance', value: engine.value.footprintDiagnostics.markerToFootprintDistanceText, wide: true },

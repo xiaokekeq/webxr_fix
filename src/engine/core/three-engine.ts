@@ -628,6 +628,15 @@ export class ThreeEngine {
 					bundle.demoModelConfig.annotations,
 					bundle.demoModelConfig.annotationStyleRules
 				);
+				this.store.patch( {
+					footprintDiagnostics: {
+						...this.store.getState().footprintDiagnostics,
+						undergroundDisplayText: formatUndergroundDisplayText(
+							bundle.demoModelConfig,
+							bundle.modelTemplate
+						)
+					}
+				} );
 				if ( bundle.demoModelConfig.visualPlacementMode === 'underground' ) {
 					const opacity = resolveXrayOpacityPercent( bundle.demoModelConfig.undergroundDisplay?.xrayOpacity );
 					this.store.patch( {
@@ -3842,6 +3851,30 @@ function resolveXrayOpacityPercent(value: number | undefined): number {
 	}
 	const percent = value <= 1 ? value * 100 : value;
 	return Math.round( THREE.MathUtils.clamp( percent, 0, 100 ) );
+
+}
+
+function formatUndergroundDisplayText(config: DemoModelConfig, modelTemplate: THREE.Group): string {
+
+	if ( config.visualPlacementMode !== 'underground' ) {
+		return '-';
+	}
+
+	const modeText = config.undergroundDisplay?.defaultMode === 'x-ray'
+		? 'X-Ray'
+		: config.undergroundDisplay?.defaultMode ?? 'underground';
+	const buriedDepth = config.undergroundDisplay?.buriedDepthMeters;
+	if ( buriedDepth === 'model-height' ) {
+		const bounds = new THREE.Box3().setFromObject( modelTemplate );
+		const modelHeight = bounds.isEmpty() ? 0 : bounds.max.y - bounds.min.y;
+		return `地下显示：${modeText}；下沉深度：${modelHeight.toFixed( 2 )} m；深度来源：模型高度。下沉深度使用模型高度。`;
+	}
+
+	if ( typeof buriedDepth === 'number' && Number.isFinite( buriedDepth ) ) {
+		return `地下显示：${modeText}；下沉深度：${buriedDepth.toFixed( 2 )} m；深度来源：配置数值。下沉深度使用配置值：${buriedDepth.toFixed( 2 )} m。`;
+	}
+
+	return `地下显示：${modeText}；下沉深度：0.00 m；深度来源：未配置。`;
 
 }
 
