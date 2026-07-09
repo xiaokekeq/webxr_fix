@@ -47,7 +47,6 @@ import {
 	type WorkspaceMode
 } from '@/localization/core/registration-store.js';
 import {
-	solveSimilarityTransform,
 	type EngineeringControlPoint,
 	type EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
@@ -108,8 +107,6 @@ import { readPlaceableTemplateReport } from '@/engine/core/model.js';
 const MAX_LOG_ITEMS = 24;
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
 const AUTO_PLACE_AFTER_MARKER_CALIBRATION = import.meta.env.VITE_AUTO_PLACE_AFTER_MARKER_CALIBRATION === 'true';
-const DIRECT_CONTROL_POINT_PLACEMENT_ENABLED = import.meta.env.VITE_USE_DIRECT_MODEL_CP_FIT === 'true'
-	|| import.meta.env.VITE_USE_DIRECT_CONTROL_POINT_PLACEMENT === 'true';
 
 interface EngineeringDebugLayerOptions {
 	showMarkerExpected: boolean;
@@ -2761,136 +2758,6 @@ export class ThreeEngine {
 
 	}
 
-	private applyDirectControlPointPlacementIfEnabled(arFromEnuSolution: ArFromEnuSolution): void {
-
-		if ( DIRECT_CONTROL_POINT_PLACEMENT_ENABLED === false ) {
-			return;
-		}
-
-		const placedModel = this.placementSession.getArPlacedModel();
-		if ( placedModel === null || this.registrationSolution === null ) {
-			return;
-		}
-
-		const modelContent = this.getModelContentObject( placedModel );
-		const controlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
-		const targetAr = controlPoints.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
-		const contentLocalToRootMatrix = modelContent === null
-			? null
-			: getRelativeMatrix( modelContent, placedModel );
-		const rootCandidate = this.createDirectPlacementCandidate(
-			'root',
-			controlPoints.map( ( point ) => point.modelLocal.clone() ),
-			targetAr,
-			placedModel,
-			null
-		);
-		const contentCandidate = contentLocalToRootMatrix === null
-			? null
-			: this.createDirectPlacementCandidate(
-				'content',
-				controlPoints.map( ( point ) => point.modelLocal.clone() ),
-				targetAr,
-				placedModel,
-				contentLocalToRootMatrix
-			);
-		const candidate = contentCandidate !== null && contentCandidate.rmsError + 0.02 < rootCandidate.rmsError
-			? contentCandidate
-			: rootCandidate;
-
-		console.info( '[DirectModelControlPointFitSolved]', {
-			fitMode: '3d-similarity',
-			sourceSpace: candidate.controlPointSpace === 'root' ? 'wrapper' : 'content',
-			yawDeg: null,
-			translation: vector3ToRoundedObject( new THREE.Vector3().setFromMatrixPosition( candidate.sourceLocalToArMatrix ) ),
-			rmsError: Number( candidate.rmsError.toFixed( 6 ) ),
-			maxError: Number( candidate.maxError.toFixed( 6 ) ),
-			sourcePoints: controlPoints.map( ( point ) => vector3ToRoundedObject( point.modelLocal ) ),
-			targetPoints: targetAr.map( vector3ToRoundedObject ),
-			matrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix )
-		} );
-		console.warn( '[DirectControlPointPlacementEnabled]', {
-			reason: 'dev verification only; fitting modelLocal control points to expected AR footprint',
-			modelId: this.demoModelConfig?.modelId ?? null,
-			chosenControlPointSpace: candidate.controlPointSpace,
-			rootRmsError: Number( rootCandidate.rmsError.toFixed( 6 ) ),
-			contentRmsError: contentCandidate === null ? null : Number( contentCandidate.rmsError.toFixed( 6 ) )
-		} );
-
-		this.applyPlacedRootWorldMatrix( placedModel, candidate.placedRootMatrixWorld );
-		if ( candidate.controlPointSpace === 'content' && contentLocalToRootMatrix !== null ) {
-			console.info( '[PlacedWrapperMatrixComputed]', {
-				modelLocalSpace: 'content',
-				modelLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
-				contentLocalToWrapperMatrix: matrixToRoundedArray( contentLocalToRootMatrix ),
-				inverseContentLocalToWrapperMatrix: matrixToRoundedArray( contentLocalToRootMatrix.clone().invert() ),
-				finalWrapperMatrix: matrixToRoundedArray( candidate.placedRootMatrixWorld ),
-				verificationRmsError: Number( candidate.rmsError.toFixed( 6 ) )
-			} );
-			console.info( '[ContentSpacePlacementMatrixComputed]', {
-				controlPointSpace: 'content',
-				contentLocalToRootMatrix: matrixToRoundedArray( contentLocalToRootMatrix ),
-				inverseContentLocalToRootMatrix: matrixToRoundedArray( contentLocalToRootMatrix.clone().invert() ),
-				contentLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
-				placedRootMatrixWorld: matrixToRoundedArray( candidate.placedRootMatrixWorld ),
-				verificationRmsError: Number( candidate.rmsError.toFixed( 6 ) )
-			} );
-			return;
-		}
-		console.info( '[PlacedWrapperMatrixComputed]', {
-			modelLocalSpace: 'wrapper',
-			modelLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
-			contentLocalToWrapperMatrix: contentLocalToRootMatrix === null ? null : matrixToRoundedArray( contentLocalToRootMatrix ),
-			inverseContentLocalToWrapperMatrix: contentLocalToRootMatrix === null ? null : matrixToRoundedArray( contentLocalToRootMatrix.clone().invert() ),
-			finalWrapperMatrix: matrixToRoundedArray( candidate.placedRootMatrixWorld ),
-			verificationRmsError: Number( candidate.rmsError.toFixed( 6 ) )
-		} );
-		console.info( '[RootSpacePlacementMatrixComputed]', {
-			controlPointSpace: 'root',
-			rootLocalToArMatrix: matrixToRoundedArray( candidate.sourceLocalToArMatrix ),
-			placedRootMatrixWorld: matrixToRoundedArray( candidate.placedRootMatrixWorld ),
-			verificationRmsError: Number( candidate.rmsError.toFixed( 6 ) )
-		} );
-
-	}
-
-	private createDirectPlacementCandidate(
-		controlPointSpace: 'root' | 'content',
-		sourceLocalPoints: THREE.Vector3[],
-		targetArPoints: THREE.Vector3[],
-		placedModel: THREE.Group,
-		contentLocalToRootMatrix: THREE.Matrix4 | null
-	): {
-		controlPointSpace: 'root' | 'content';
-		sourceLocalToArMatrix: THREE.Matrix4;
-		placedRootMatrixWorld: THREE.Matrix4;
-		rmsError: number;
-		maxError: number;
-	} {
-
-		const fit = solveSimilarityTransform( sourceLocalPoints, targetArPoints, 'similarity' );
-		const sourceLocalToArMatrix = fit.matrix.clone();
-		const placedRootMatrixWorld = controlPointSpace === 'content' && contentLocalToRootMatrix !== null
-			? sourceLocalToArMatrix.clone().multiply( contentLocalToRootMatrix.clone().invert() )
-			: sourceLocalToArMatrix.clone();
-		const verificationErrors = this.registrationSolution?.controlPoints.slice( 0, 4 ).map( ( point, index ) => {
-			const rootLocal = controlPointSpace === 'content' && contentLocalToRootMatrix !== null
-				? point.modelLocal.clone().applyMatrix4( contentLocalToRootMatrix )
-				: point.modelLocal.clone();
-			return rootLocal.applyMatrix4( placedRootMatrixWorld ).distanceTo( targetArPoints[ index ] );
-		} ) ?? [];
-
-		void placedModel;
-		return {
-			controlPointSpace,
-			sourceLocalToArMatrix,
-			placedRootMatrixWorld,
-			rmsError: computeRms( verificationErrors ),
-			maxError: Math.max( ...verificationErrors, 0 )
-		};
-
-	}
-
 	private applyPlacedRootWorldMatrix(placedModel: THREE.Group, rootWorldMatrix: THREE.Matrix4): void {
 
 		const parentInverse = placedModel.parent === null
@@ -3278,7 +3145,6 @@ export class ThreeEngine {
 		this.logModelHierarchyCoordinateSpaceCheck();
 		this.logModelControlPointOrderCheck();
 		this.logModelLocalFootprintCheck();
-		this.applyDirectControlPointPlacementIfEnabled( arFromEnuSolution );
 		this.logModelFinalAxisCheck( arFromEnuSolution );
 		this.renderEngineeringCornerDebug(
 			arFromEnuSolution,
@@ -3849,14 +3715,6 @@ function computeRms(errors: number[]): number {
 		return 0;
 	}
 	return Math.sqrt( errors.reduce( ( total, error ) => total + error * error, 0 ) / errors.length );
-
-}
-
-function getRelativeMatrix(object: THREE.Object3D, root: THREE.Object3D): THREE.Matrix4 {
-
-	root.updateMatrixWorld( true );
-	object.updateMatrixWorld( true );
-	return root.matrixWorld.clone().invert().multiply( object.matrixWorld );
 
 }
 

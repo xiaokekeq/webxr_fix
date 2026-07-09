@@ -46,6 +46,8 @@ export interface EngineeringRegistrationSolution {
 	visualGroundOffsetMeters: number;
 }
 
+export type SimilarityTransformMode = 'rigid' | 'similarity';
+
 const tempRotated = new THREE.Vector3();
 const tempQuaternion = new THREE.Quaternion();
 const tempScale = new THREE.Vector3();
@@ -93,18 +95,11 @@ export function solveEngineeringRegistration(
 	}
 	console.info( '[ModelToEnuCorrespondenceCheck]', createModelToEnuCorrespondencePayload( config, controlPoints ) );
 
-	// This is the offline/model-side registration: find the transform that maps
-	// model-local control points into the engineering site ENU frame.
-	const modelToSite = config.registration.mode === 'rigid'
-		? solveGroundPlaneRigidTransform(
-			controlPoints.map( ( point ) => point.modelLocal ),
-			controlPoints.map( ( point ) => point.worldEnu )
-		)
-		: solveSimilarityTransform(
-			controlPoints.map( ( point ) => point.modelLocal ),
-			controlPoints.map( ( point ) => point.worldEnu ),
-			config.registration.mode
-		);
+	// Formal chain: modelLocal -> ENU is a fixed-scale ground-plane rigid transform.
+	const modelToSite = solveGroundPlaneRigidTransform(
+		controlPoints.map( ( point ) => point.modelLocal ),
+		controlPoints.map( ( point ) => point.worldEnu )
+	);
 
 	const rootSiteEnu = modelToSite.translation.clone();
 	const rootWorldGeodetic = enuToGeodetic( rootSiteEnu, siteEnuFrame );
@@ -165,7 +160,7 @@ export function transformSiteEnuToModelLocal(
 export function solveSimilarityTransform(
 	sourcePoints: THREE.Vector3[],
 	targetPoints: THREE.Vector3[],
-	mode: DemoModelRegistrationMode
+	mode: SimilarityTransformMode
 ): SimilarityTransformSolution {
 
 	// Centering separates rotation/scale from translation. The final translation

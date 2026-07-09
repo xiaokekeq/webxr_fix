@@ -72,7 +72,7 @@ interface RawMarkerEngineeringConfig extends Omit<MarkerEngineeringConfig, 'enu'
 	enu?: MarkerEngineeringConfig['enu'] | number[];
 }
 
-export type DemoModelRegistrationMode = 'rigid' | 'similarity';
+export type DemoModelRegistrationMode = 'rigid-ground-plane';
 
 export interface DemoModelConfig {
 	modelId: string;
@@ -260,7 +260,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 	};
 
 	const registration = config.registration ?? {
-		mode: 'similarity',
+		mode: 'rigid-ground-plane',
 		minControlPoints: 3
 	};
 
@@ -353,9 +353,7 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		yaw: config.yawDeg ?? 0,
 		scale: config.scale ?? 1,
 		registration: {
-			// Local debug configs usually represent a single surveyed anchor point.
-			// Keep scale fixed and only solve rigid placement around that anchor.
-			mode: 'rigid',
+			mode: 'rigid-ground-plane',
 			minControlPoints: 3
 		},
 		controlPoints: normalizedControlPoints,
@@ -495,8 +493,8 @@ function validateDemoModelConfig(config: DemoModelConfig): void {
 		throw new Error( 'Model config is missing a valid scale.' );
 	}
 
-	if ( config.registration.mode !== 'rigid' && config.registration.mode !== 'similarity' ) {
-		throw new Error( 'registration.mode must be "rigid" or "similarity".' );
+	if ( config.registration.mode !== 'rigid-ground-plane' ) {
+		throw new Error( 'registration.mode must be "rigid-ground-plane".' );
 	}
 
 	if ( config.registration.minControlPoints < 3 ) {

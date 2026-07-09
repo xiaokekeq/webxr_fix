@@ -441,7 +441,7 @@ export class RegistrationStateRuntime {
 		return {
 			siteId: demoModelConfig.modelId,
 			siteOrigin: { ...demoModelConfig.siteFrame.origin },
-			modelLocalToEnuVersion: 'engineering-registration-v1',
+			modelLocalToEnuVersion: 'rigid-ground-plane-model-local-to-enu-v1',
 			controlTargets: this.options.resolveBaselineControlTargets(),
 			rtkSurveyDataset: demoModelConfig.rtkSurveyDataset,
 			placementAnchorEnu: demoModelConfig.placementAnchorEnu,

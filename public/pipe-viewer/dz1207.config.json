@@ -32,7 +32,7 @@
   "yaw": 0,
   "scale": 1,
   "registration": {
-    "mode": "rigid",
+    "mode": "rigid-ground-plane",
     "minControlPoints": 3
   },
   "markerCalibration": {
