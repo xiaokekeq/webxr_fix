@@ -1982,25 +1982,39 @@ export class ThreeEngine {
 		if ( placedModel !== null && this.registrationSolution !== null ) {
 			placedModel.updateMatrixWorld( true );
 			if ( this.engineeringDebugLayers.showModelActualControlPoints ) {
-				const engineeringMatrix = composeModelRawLocalToArMatrix( {
-					arFromEnuSolution,
-					registrationSolution: this.registrationSolution
-				} );
+				const useVisualActualPoints = this.registrationSolution.visualPlacementMode === 'underground';
 				this.addDebugQuad( {
-					name: 'model-cp-actual-engineering',
+					name: useVisualActualPoints ? 'model-cp-actual-visual' : 'model-cp-actual-engineering',
 					points: this.registrationSolution.controlPoints
 						.slice( 0, 4 )
-						.map( ( point ) => point.modelLocal.clone().applyMatrix4( engineeringMatrix ) ),
-					labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}-engineering` ),
+						.map( ( point ) => (
+							useVisualActualPoints
+								? placedModel.localToWorld( point.modelLocal.clone() )
+								: point.modelLocal.clone().applyMatrix4( composeModelRawLocalToArMatrix( {
+									arFromEnuSolution,
+									registrationSolution: this.registrationSolution as EngineeringRegistrationSolution
+								} ) )
+						) ),
+					labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}` ),
 					color: 0xff4dff
 				} );
 				if ( import.meta.env.VITE_AR_DEBUG === 'true' ) {
+					const engineeringMatrix = composeModelRawLocalToArMatrix( {
+						arFromEnuSolution,
+						registrationSolution: this.registrationSolution
+					} );
 					this.addDebugQuad( {
-						name: 'model-cp-actual-visual',
+						name: useVisualActualPoints ? 'model-cp-actual-engineering' : 'model-cp-actual-visual',
 						points: this.registrationSolution.controlPoints
 							.slice( 0, 4 )
-							.map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) ),
-						labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => `actual-${point.id}-visual` ),
+							.map( ( point ) => (
+								useVisualActualPoints
+									? point.modelLocal.clone().applyMatrix4( engineeringMatrix )
+									: placedModel.localToWorld( point.modelLocal.clone() )
+							) ),
+						labels: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => (
+							useVisualActualPoints ? `engineering-${point.id}` : `visual-${point.id}`
+						) ),
 						color: 0x38bdf8
 					} );
 				}
