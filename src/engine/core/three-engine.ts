@@ -25,6 +25,11 @@ import { createStatusRuntime } from '@/engine/session/status-runtime.js';
 import { createWorkspaceRuntime } from '@/engine/session/workspace-runtime.js';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
 import {
+	resolveModelObjectProperties,
+	resolveModelObjectSelection,
+	type CanvasModelPropertyPanelData
+} from '@/engine/models/model-property-resolver.js';
+import {
 	PROJECT_NAME,
 	STATIC_LAYER_NAMES,
 	TIMELINE_STAGES
@@ -324,6 +329,7 @@ export class ThreeEngine {
 	private undergroundExpectedLastUpdateReason = 'none';
 	private currentModelActualLastUpdateReason = 'none';
 	private purpleDiagnosticsUpdatedInFrameLoop = false;
+	private canvasPropertyPanelAuditLogged = false;
 	private placementDebugLastWorldLockUpdateAt = 0;
 	private engineeringPlacementCallCount = 0;
 	private replacedModelCount = 0;
@@ -576,7 +582,7 @@ export class ThreeEngine {
 				this.emit();
 			},
 			onSelectionApplied: ( selection ) => {
-				this.updateAnnotationDetailFromSelection(
+				this.showCanvasModelPropertyPanel(
 					selection.businessObject,
 					selection.properties
 				);
@@ -585,6 +591,10 @@ export class ThreeEngine {
 				this.clearAnnotationDetail();
 			},
 			handlePreSelectionRaycast: ( selection ) => {
+				if ( this.annotationLabelsController.hitDetailPanel( selection.raycaster ) ) {
+					return true;
+				}
+
 				if ( this.handleBusinessAnnotationPick( selection.raycaster ) ) {
 					return true;
 				}
@@ -3898,6 +3908,92 @@ export class ThreeEngine {
 		} );
 		this.setStatus( `已选择 ${item.title}。` );
 		this.emit();
+
+	}
+
+	private showCanvasModelPropertyPanel(
+		businessObject: THREE.Object3D,
+		properties: PipeRecord | null,
+		preferredLayerName?: string
+	): void {
+
+		this.logCanvasPropertyPanelAuditOnce();
+		const bounds = new THREE.Box3().setFromObject( businessObject );
+		const selection = resolveModelObjectSelection( {
+			object: businessObject,
+			properties
+		} );
+		const panelData = resolveModelObjectProperties( {
+			selection,
+			properties,
+			layerName: preferredLayerName
+				?? getLayerLabelForObject( businessObject, this.store.getState().modelLayers )
+				?? undefined,
+			materialName: getObjectMaterialName( businessObject ),
+			bounds
+		} );
+
+		this.store.patch( {
+			selectedAnnotationId: null,
+			annotationDetail: createDefaultAnnotationDetailState()
+		} );
+		this.annotationLayer.setSelected( null );
+		this.annotationLabelsController.setDetail(
+			this.createCanvasModelPropertyOverlay( businessObject, panelData )
+		);
+
+		arInfo( 'CanvasModelPropertyPanelShown', {
+			modelInstanceId: panelData.modelInstanceId,
+			modelInstanceName: panelData.modelInstanceName,
+			modelRole: panelData.modelRole,
+			objectId: panelData.objectId,
+			objectName: panelData.objectName,
+			rowCount: panelData.sections.reduce( ( total, section ) => total + section.rows.length, 0 )
+		} );
+
+	}
+
+	private createCanvasModelPropertyOverlay(
+		targetObject: THREE.Object3D,
+		panelData: CanvasModelPropertyPanelData
+	): ArAnnotationDetailOverlay | null {
+
+		const fields = panelData.sections.flatMap( ( section ) => section.rows.map( ( row ) => ( {
+			label: row.label,
+			value: row.unit === undefined ? row.value : `${row.value}${row.unit}`
+		} ) ) );
+		if ( fields.length === 0 ) {
+			return null;
+		}
+
+		return {
+			targetObject,
+			title: panelData.title,
+			subtitle: `${panelData.modelInstanceName} / ${panelData.modelRole}`,
+			fields
+		};
+
+	}
+
+	private logCanvasPropertyPanelAuditOnce(): void {
+
+		if ( this.canvasPropertyPanelAuditLogged ) {
+			return;
+		}
+		this.canvasPropertyPanelAuditLogged = true;
+		arInfo( 'CanvasPropertyPanelAudit', {
+			canvasEntry: 'src/engine/annotation/ar-annotation-labels.ts:createDetailTexture',
+			rendererEntry: 'createArAnnotationLabelController.setDetail -> THREE.CanvasTexture -> THREE.Sprite',
+			selectionEntry: 'src/engine/interaction/pointer-selection.ts:onSelectionApplied',
+			propertyDataType: 'CanvasModelPropertyPanelData',
+			renderMode: 'CanvasTexture Sprite in AR scene',
+			closeInteraction: 'clearSelection / blank tap / replacement selection calls setDetail(null)',
+			refreshStrategy: 'redraw only when selected object changes',
+			currentLimitations: [
+				'screen-boundary clamping is not implemented for world-space sprite panels',
+				'full multi-model loading manager is not introduced in this minimal pass'
+			]
+		} );
 
 	}
 

@@ -26,6 +26,7 @@ export interface ArAnnotationLabelController {
 	setDetail(detail: ArAnnotationDetailOverlay | null): void;
 	update(camera: THREE.Camera): void;
 	handleTap(clientX: number, clientY: number, camera: THREE.Camera): ArAnnotationItem | null;
+	hitDetailPanel(raycaster: THREE.Raycaster): boolean;
 	pick(raycaster: THREE.Raycaster): ArAnnotationItem | null;
 	clear(): void;
 	dispose(): void;
@@ -114,6 +115,13 @@ export function createArAnnotationLabelController(options: {
 
 	}
 
+	function hitDetailPanel(activeRaycaster: THREE.Raycaster): boolean {
+
+		return detailEntry !== null
+			&& activeRaycaster.intersectObject( detailEntry.sprite, true ).length > 0;
+
+	}
+
 	function clear(): void {
 
 		clearLabelEntries();
@@ -132,6 +140,7 @@ export function createArAnnotationLabelController(options: {
 		setDetail,
 		update,
 		handleTap,
+		hitDetailPanel,
 		pick,
 		clear,
 		dispose
@@ -243,7 +252,7 @@ function createDetailEntry(detail: ArAnnotationDetailOverlay): AnnotationDetailE
 	sprite.center.set( 0.5, 0 );
 	sprite.renderOrder = 220;
 	sprite.scale.set( localWidth, localHeight, 1 );
-	sprite.raycast = () => {};
+	sprite.raycast = THREE.Sprite.prototype.raycast;
 	sprite.userData[ DISPLAY_MODE_HELPER_TAG ] = true;
 	sprite.userData.__nonSelectableHelper = true;
 	sprite.userData.__excludeFromLayerIndex = true;

@@ -542,6 +542,11 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				sceneBundle.arModelAnchor,
 				engineeringMatrix
 			);
+			applyModelInstanceUserData( arPlacedModel, {
+				id: registrationSolution.modelId,
+				name: registrationSolution.modelId,
+				role: 'primary'
+			} );
 			initializeWorldLockSnapshot( {
 				engineeringMatrix,
 				visualMatrix: engineeringMatrix,
@@ -671,6 +676,7 @@ export function deriveUndergroundRegistrationSolution(args: {
 	const undergroundControlPoints = args.registrationSolution.controlPoints.map( ( point ) => ( {
 		...point,
 		modelLocal: point.modelLocal.clone(),
+		// ENU is x=east, y=north, z=up; arFromEnu later maps ENU up to AR/Three y.
 		worldEnu: point.worldEnu.clone().setZ( point.worldEnu.z - totalBottomDepthMeters )
 	} ) );
 
@@ -773,6 +779,21 @@ function resolveEngineeringModelHeightMeters(args: {
 		modelSizeZ: measured.z,
 		coverDepthMeters
 	};
+
+}
+
+function applyModelInstanceUserData(
+	root: THREE.Object3D,
+	instance: {
+		id: string;
+		name: string;
+		role: string;
+	}
+): void {
+
+	root.userData.modelInstanceId = instance.id;
+	root.userData.modelInstanceName = instance.name;
+	root.userData.modelRole = instance.role;
 
 }
 
