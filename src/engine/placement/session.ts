@@ -22,6 +22,30 @@ interface TrackedArPlacementTransform {
 	scale: THREE.Vector3;
 }
 
+interface WorldLockSnapshot {
+	placedModelWorldPosition: THREE.Vector3;
+	arModelAnchorWorldPosition: THREE.Vector3;
+	arPlacementAnchorWorldPosition: THREE.Vector3;
+	cameraWorldPosition: THREE.Vector3;
+	cameraToModelDistance: number;
+	timestamp: number;
+	placedModelMatrixWorld: THREE.Matrix4;
+	arModelAnchorMatrixWorld: THREE.Matrix4;
+	arPlacementAnchorMatrixWorld: THREE.Matrix4;
+	engineeringMatrix?: THREE.Matrix4;
+	visualMatrix?: THREE.Matrix4;
+	arFromEnuMatrix?: THREE.Matrix4;
+}
+
+export interface PlacementWorldLockDiagnostics {
+	initialSnapshot: WorldLockSnapshot | null;
+	currentSnapshot: WorldLockSnapshot | null;
+	updateCount: number;
+	lastUpdateReason: string;
+	lastUpdateTimestamp: number | null;
+	updatedInFrameLoop: boolean;
+}
+
 interface CreatePlacementSessionOptions {
 	store: {
 		patch(partialState: {
@@ -65,6 +89,7 @@ export interface PlacementSession {
 	}): boolean;
 	updateArPlacementAnchor(frame: XRFrame): void;
 	verifyWorldLockedPlacement(caller: string): void;
+	getWorldLockDiagnostics(): PlacementWorldLockDiagnostics;
 }
 
 export function createPlacementSession(options: CreatePlacementSessionOptions): PlacementSession {
@@ -81,6 +106,13 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	let arPlacementBase: ManualPlacementBase | null = null;
 	let autoPlacementPending = false;
 	let trackedArPlacementTransform: TrackedArPlacementTransform | null = null;
+	let worldLockInitialSnapshot: WorldLockSnapshot | null = null;
+	let worldLockCurrentSnapshot: WorldLockSnapshot | null = null;
+	let worldLockUpdateCount = 0;
+	let lastWorldLockUpdateReason = 'none';
+	let lastWorldLockUpdateTimestamp: number | null = null;
+	let worldLockUpdatedInFrameLoop = false;
+	let lastWorldLockVerificationAt = 0;
 	const visualOffsetMatrix = new THREE.Matrix4();
 
 	function updatePlacementSummary(): void {
@@ -101,6 +133,132 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	function clearArPlacementTracking(): void {
 
 		trackedArPlacementTransform = null;
+		worldLockInitialSnapshot = null;
+		worldLockCurrentSnapshot = null;
+		worldLockUpdateCount = 0;
+		lastWorldLockUpdateReason = 'none';
+		lastWorldLockUpdateTimestamp = null;
+		worldLockUpdatedInFrameLoop = false;
+		lastWorldLockVerificationAt = 0;
+
+	}
+
+	function getCurrentCameraWorldPosition(): THREE.Vector3 {
+
+		const camera = sceneBundle.renderer.xr.isPresenting
+			? sceneBundle.renderer.xr.getCamera()
+			: sceneBundle.camera;
+		camera.updateMatrixWorld( true );
+		return camera.getWorldPosition( new THREE.Vector3() );
+
+	}
+
+	function captureWorldLockSnapshot(args?: {
+		engineeringMatrix?: THREE.Matrix4;
+		visualMatrix?: THREE.Matrix4;
+		arFromEnuMatrix?: THREE.Matrix4;
+	}): WorldLockSnapshot | null {
+
+		if ( arPlacedModel === null ) {
+			return null;
+		}
+
+		sceneBundle.scene.updateMatrixWorld( true );
+		sceneBundle.camera.updateMatrixWorld( true );
+		sceneBundle.arModelAnchor.updateMatrixWorld( true );
+		sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
+		arPlacedModel.updateMatrixWorld( true );
+
+		const placedModelWorldPosition = arPlacedModel.getWorldPosition( new THREE.Vector3() );
+		const cameraWorldPosition = getCurrentCameraWorldPosition();
+
+		return {
+			placedModelWorldPosition,
+			arModelAnchorWorldPosition: sceneBundle.arModelAnchor.getWorldPosition( new THREE.Vector3() ),
+			arPlacementAnchorWorldPosition: sceneBundle.arPlacementAnchor.getWorldPosition( new THREE.Vector3() ),
+			cameraWorldPosition,
+			cameraToModelDistance: cameraWorldPosition.distanceTo( placedModelWorldPosition ),
+			timestamp: Date.now(),
+			placedModelMatrixWorld: arPlacedModel.matrixWorld.clone(),
+			arModelAnchorMatrixWorld: sceneBundle.arModelAnchor.matrixWorld.clone(),
+			arPlacementAnchorMatrixWorld: sceneBundle.arPlacementAnchor.matrixWorld.clone(),
+			engineeringMatrix: args?.engineeringMatrix?.clone(),
+			visualMatrix: args?.visualMatrix?.clone(),
+			arFromEnuMatrix: args?.arFromEnuMatrix?.clone()
+		};
+
+	}
+
+	function initializeWorldLockSnapshot(args: {
+		engineeringMatrix: THREE.Matrix4;
+		visualMatrix: THREE.Matrix4;
+		arFromEnuMatrix: THREE.Matrix4;
+		reason: string;
+	}): void {
+
+		const snapshot = captureWorldLockSnapshot( args );
+		worldLockInitialSnapshot = snapshot;
+		worldLockCurrentSnapshot = snapshot === null ? null : {
+			...snapshot,
+			placedModelWorldPosition: snapshot.placedModelWorldPosition.clone(),
+			arModelAnchorWorldPosition: snapshot.arModelAnchorWorldPosition.clone(),
+			arPlacementAnchorWorldPosition: snapshot.arPlacementAnchorWorldPosition.clone(),
+			cameraWorldPosition: snapshot.cameraWorldPosition.clone(),
+			placedModelMatrixWorld: snapshot.placedModelMatrixWorld.clone(),
+			arModelAnchorMatrixWorld: snapshot.arModelAnchorMatrixWorld.clone(),
+			arPlacementAnchorMatrixWorld: snapshot.arPlacementAnchorMatrixWorld.clone(),
+			engineeringMatrix: snapshot.engineeringMatrix?.clone(),
+			visualMatrix: snapshot.visualMatrix?.clone(),
+			arFromEnuMatrix: snapshot.arFromEnuMatrix?.clone()
+		};
+		worldLockUpdateCount = snapshot === null ? 0 : 1;
+		lastWorldLockUpdateReason = args.reason;
+		lastWorldLockUpdateTimestamp = snapshot?.timestamp ?? null;
+		worldLockUpdatedInFrameLoop = args.reason === 'xr-frame';
+		lastWorldLockVerificationAt = snapshot?.timestamp ?? 0;
+		if ( snapshot !== null ) {
+			console.info( '[WorldLockSnapshotInitialized]', {
+				reason: args.reason,
+				timestamp: snapshot.timestamp,
+				placedModelWorldPosition: vector3ToObject( snapshot.placedModelWorldPosition ),
+				arModelAnchorWorldPosition: vector3ToObject( snapshot.arModelAnchorWorldPosition ),
+				arPlacementAnchorWorldPosition: vector3ToObject( snapshot.arPlacementAnchorWorldPosition ),
+				cameraWorldPosition: vector3ToObject( snapshot.cameraWorldPosition ),
+				cameraToModelDistance: snapshot.cameraToModelDistance,
+				engineeringMatrix: snapshot.engineeringMatrix?.toArray() ?? null,
+				visualMatrix: snapshot.visualMatrix?.toArray() ?? null,
+				arFromEnuMatrix: snapshot.arFromEnuMatrix?.toArray() ?? null
+			} );
+		}
+
+	}
+
+	function updateWorldLockSnapshot(reason: string): void {
+
+		if ( worldLockInitialSnapshot === null ) {
+			return;
+		}
+
+		const snapshot = captureWorldLockSnapshot();
+		if ( snapshot === null ) {
+			return;
+		}
+
+		worldLockCurrentSnapshot = snapshot;
+		worldLockUpdateCount += 1;
+		lastWorldLockUpdateReason = reason;
+		lastWorldLockUpdateTimestamp = snapshot.timestamp;
+		worldLockUpdatedInFrameLoop = reason === 'xr-frame';
+		console.info( '[WorldLockSnapshotUpdated]', {
+			reason,
+			updateCount: worldLockUpdateCount,
+			timestamp: snapshot.timestamp,
+			placedModelWorldPosition: vector3ToObject( snapshot.placedModelWorldPosition ),
+			arModelAnchorWorldPosition: vector3ToObject( snapshot.arModelAnchorWorldPosition ),
+			arPlacementAnchorWorldPosition: vector3ToObject( snapshot.arPlacementAnchorWorldPosition ),
+			cameraWorldPosition: vector3ToObject( snapshot.cameraWorldPosition ),
+			cameraToModelDistance: snapshot.cameraToModelDistance
+		} );
 
 	}
 
@@ -369,6 +527,12 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				sceneBundle.arModelAnchor,
 				visualMatrix
 			);
+			initializeWorldLockSnapshot( {
+				engineeringMatrix,
+				visualMatrix,
+				arFromEnuMatrix: arFromEnuSolution.matrix,
+				reason: 'engineering-place-button'
+			} );
 			logUndergroundPlacementDiagnostic( {
 				registrationSolution,
 				arFromEnuSolution,
@@ -393,10 +557,15 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelRawLocalToArMatrix: visualMatrix.toArray(),
 				visualPlacementMode: registrationSolution.visualPlacementMode,
 				undergroundDefaultMode: registrationSolution.undergroundDisplay?.defaultMode ?? null,
-				buriedDepthMeters: registrationSolution.undergroundDisplay?.buriedDepthMeters ?? null,
-				buriedDepthSource: buriedDepth.source,
-				modelHeight: buriedDepth.modelHeight ?? null,
-				depthMeters: buriedDepth.depthMeters,
+		buriedDepthMeters: registrationSolution.undergroundDisplay?.buriedDepthMeters ?? null,
+		buriedDepthSource: buriedDepth.source,
+		modelHeight: buriedDepth.modelHeight ?? null,
+		modelHeightAxis: buriedDepth.modelHeightAxis ?? null,
+		modelHeightX: buriedDepth.modelHeightX ?? null,
+		modelHeightY: buriedDepth.modelHeightY ?? null,
+		modelHeightZ: buriedDepth.modelHeightZ ?? null,
+		chosenModelHeight: buriedDepth.chosenModelHeight ?? null,
+		depthMeters: buriedDepth.depthMeters,
 				visualGroundOffsetMeters: registrationSolution.visualGroundOffsetMeters,
 				visualYOffsetMeters: visualOffsetMeters,
 				warning: buriedDepth.warning ?? null,
@@ -414,22 +583,34 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		},
 
-		verifyWorldLockedPlacement(_caller) {
+		verifyWorldLockedPlacement(caller) {
 
 			if (
 				sceneBundle.renderer.xr.isPresenting === false
 				|| arPlacedModel === null
-				|| trackedArPlacementTransform === null
+				|| worldLockInitialSnapshot === null
 			) {
 				return;
 			}
 
-			arPlacedModel.updateMatrixWorld( true );
-			trackedArPlacementTransform = {
-				source: trackedArPlacementTransform.source,
-				position: arPlacedModel.getWorldPosition( new THREE.Vector3() ),
-				quaternion: arPlacedModel.getWorldQuaternion( new THREE.Quaternion() ),
-				scale: arPlacedModel.getWorldScale( new THREE.Vector3() )
+			const now = Date.now();
+			if ( now - lastWorldLockVerificationAt < 1000 ) {
+				return;
+			}
+			lastWorldLockVerificationAt = now;
+			updateWorldLockSnapshot( caller );
+
+		},
+
+		getWorldLockDiagnostics() {
+
+			return {
+				initialSnapshot: worldLockInitialSnapshot,
+				currentSnapshot: worldLockCurrentSnapshot,
+				updateCount: worldLockUpdateCount,
+				lastUpdateReason: lastWorldLockUpdateReason,
+				lastUpdateTimestamp: lastWorldLockUpdateTimestamp,
+				updatedInFrameLoop: worldLockUpdatedInFrameLoop
 			};
 
 		}
@@ -450,24 +631,41 @@ export function resolveBuriedDepthMeters(args: {
 	depthMeters: number;
 	source: 'model-height' | 'configured-number' | 'none';
 	modelHeight?: number;
+	modelHeightAxis?: 'y' | 'shortest-edge' | 'bbox-y';
+	modelHeightX?: number;
+	modelHeightY?: number;
+	modelHeightZ?: number;
+	chosenModelHeight?: number;
 	warning?: string;
 } {
 
 	const buriedDepthMeters = args.undergroundDisplay?.buriedDepthMeters;
 	if ( buriedDepthMeters === 'model-height' ) {
-		const modelHeight = resolveTemplateHeightMeters( args.modelTemplate );
-		if ( Number.isFinite( modelHeight ) === false || modelHeight < 0 ) {
+		const modelHeight = resolveTemplateHeightMeters(
+			args.modelTemplate,
+			args.undergroundDisplay?.modelHeightAxis ?? 'y'
+		);
+		if ( Number.isFinite( modelHeight.chosenModelHeight ) === false || modelHeight.chosenModelHeight < 0 ) {
 			return {
 				depthMeters: 0,
 				source: 'model-height',
+				modelHeightAxis: modelHeight.axis,
+				modelHeightX: modelHeight.x,
+				modelHeightY: modelHeight.y,
+				modelHeightZ: modelHeight.z,
 				warning: 'model bbox height is invalid; underground depth fell back to 0'
 			};
 		}
 
 		return {
-			depthMeters: modelHeight,
+			depthMeters: modelHeight.chosenModelHeight,
 			source: 'model-height',
-			modelHeight
+			modelHeight: modelHeight.chosenModelHeight,
+			modelHeightAxis: modelHeight.axis,
+			modelHeightX: modelHeight.x,
+			modelHeightY: modelHeight.y,
+			modelHeightZ: modelHeight.z,
+			chosenModelHeight: modelHeight.chosenModelHeight
 		};
 	}
 
@@ -493,16 +691,53 @@ export function resolveBuriedDepthMeters(args: {
 
 }
 
-function resolveTemplateHeightMeters(modelTemplate: THREE.Group): number {
+function resolveTemplateHeightMeters(
+	modelTemplate: THREE.Group,
+	axis: 'y' | 'shortest-edge' | 'bbox-y'
+): {
+	axis: 'y' | 'shortest-edge' | 'bbox-y';
+	x: number;
+	y: number;
+	z: number;
+	chosenModelHeight: number;
+} {
 
 	const report = readPlaceableTemplateReport( modelTemplate );
 	if ( report !== null ) {
-		return Math.min( report.finalSize.x, report.finalSize.y, report.finalSize.z );
+		const x = report.finalSize.x;
+		const y = report.finalSize.y;
+		const z = report.finalSize.z;
+		return {
+			axis,
+			x,
+			y,
+			z,
+			chosenModelHeight: axis === 'shortest-edge'
+				? Math.min( x, y, z )
+				: axis === 'bbox-y'
+					? new THREE.Box3().setFromObject( modelTemplate ).getSize( new THREE.Vector3() ).y
+					: y
+		};
 	}
 
 	const bounds = new THREE.Box3().setFromObject( modelTemplate );
 	const size = bounds.getSize( new THREE.Vector3() );
-	return bounds.isEmpty() ? Number.NaN : Math.min( size.x, size.y, size.z );
+	if ( bounds.isEmpty() ) {
+		return {
+			axis,
+			x: Number.NaN,
+			y: Number.NaN,
+			z: Number.NaN,
+			chosenModelHeight: Number.NaN
+		};
+	}
+	return {
+		axis,
+		x: size.x,
+		y: size.y,
+		z: size.z,
+		chosenModelHeight: axis === 'shortest-edge' ? Math.min( size.x, size.y, size.z ) : size.y
+	};
 
 }
 

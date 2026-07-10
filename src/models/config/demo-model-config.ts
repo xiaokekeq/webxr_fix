@@ -83,9 +83,11 @@ interface RawMarkerEngineeringConfig extends Omit<MarkerEngineeringConfig, 'enu'
 export type DemoModelRegistrationMode = 'rigid-ground-plane';
 export type DemoModelVisualPlacementMode = 'surface' | 'underground';
 export type UndergroundBuriedDepth = number | 'model-height';
+export type UndergroundModelHeightAxis = 'y' | 'shortest-edge' | 'bbox-y';
 export interface UndergroundDisplayConfig {
 	defaultMode?: 'true-depth' | 'x-ray' | 'surface-projection' | 'lifted-preview';
 	buriedDepthMeters?: UndergroundBuriedDepth;
+	modelHeightAxis?: UndergroundModelHeightAxis;
 	liftedPreviewOffsetMeters?: number;
 	xrayOpacity?: number;
 	showSurfaceProjection?: boolean;
@@ -1116,6 +1118,14 @@ function normalizeUndergroundDisplayConfig(value: UndergroundDisplayConfig | und
 		config.buriedDepthMeters = 'model-height';
 	} else if ( typeof value.buriedDepthMeters === 'number' && Number.isFinite( value.buriedDepthMeters ) ) {
 		config.buriedDepthMeters = value.buriedDepthMeters;
+	}
+
+	if (
+		value.modelHeightAxis === 'y'
+		|| value.modelHeightAxis === 'shortest-edge'
+		|| value.modelHeightAxis === 'bbox-y'
+	) {
+		config.modelHeightAxis = value.modelHeightAxis;
 	}
 
 	if ( typeof value.liftedPreviewOffsetMeters === 'number' && Number.isFinite( value.liftedPreviewOffsetMeters ) ) {

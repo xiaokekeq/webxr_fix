@@ -245,6 +245,48 @@ const modelPlacementDebugCards = computed( () => {
 	];
 } );
 
+const modelPlacementDebugCardsExtended = computed( () => {
+	const debug = engine.value.modelPlacementDebug;
+	return [
+		...modelPlacementDebugCards.value,
+		{
+			label: 'depth semantics',
+			value: `raw ${formatBuriedDepthRaw( debug.buriedDepthRaw )}; axis ${formatDepthAxis( debug.buriedDepthModelHeightAxis )}; size ${formatMeters( debug.modelHeightX )}/${formatMeters( debug.modelHeightY )}/${formatMeters( debug.modelHeightZ )}; chosen ${formatMeters( debug.chosenModelHeight )}`,
+			wide: true
+		},
+		{
+			label: 'camera baseline',
+			value: `initial ${formatMeters( debug.cameraToModelDistanceInitial )}; current ${formatMeters( debug.cameraToModelDistanceCurrent ?? debug.cameraToModelDistance )}; delta ${formatMeters( debug.cameraToModelDistanceDelta )}`,
+			wide: true
+		},
+		{
+			label: 'parent runtime',
+			value: `unexpected ${formatBoolean( debug.unexpectedArModelAnchorParent )}; camera ${debug.cameraParentChain ?? '-'}; reticle ${debug.reticleParentChain ?? '-'}`,
+			wide: true
+		},
+		{
+			label: 'surface centers',
+			value: `yellow ${formatVector3Compact( debug.yellowSurfaceCenterWorld )}; eng ${formatVector3Compact( debug.purpleEngineeringCenterWorld )}; visual ${formatVector3Compact( debug.purpleVisualCenterWorld )}`,
+			wide: true
+		},
+		{
+			label: 'surface world delta',
+			value: `yellow ${formatMeters( debug.yellowSurfaceDeltaXZ )}/${formatMeters( debug.yellowSurfaceDeltaY )}; eng ${formatMeters( debug.purpleEngineeringDeltaXZ )}/${formatMeters( debug.purpleEngineeringDeltaY )}; visual ${formatMeters( debug.purpleVisualDeltaXZ )}/${formatMeters( debug.purpleVisualDeltaY )}`,
+			wide: true
+		},
+		{
+			label: 'surface delta',
+			value: `eng-yellow ${formatMeters( debug.engineeringMinusYellowXZ )}/${formatMeters( debug.engineeringMinusYellowY )}; visual-yellow ${formatMeters( debug.visualMinusYellowXZ )}/${formatMeters( debug.visualMinusYellowY )}; visual-eng ${formatMeters( debug.visualMinusEngineeringXZ )}/${formatMeters( debug.visualMinusEngineeringY )}`,
+			wide: true
+		},
+		{
+			label: 'purple updates',
+			value: `yellow ${formatUpdateMeta( debug.yellowUpdateCount, debug.yellowLastUpdateReason )}; eng ${formatUpdateMeta( debug.purpleEngineeringUpdateCount, debug.purpleEngineeringLastUpdateReason )}; visual ${formatUpdateMeta( debug.purpleVisualUpdateCount, debug.purpleVisualLastUpdateReason )}; current ${formatUpdateMeta( debug.currentModelActualUpdateCount, debug.currentModelActualLastUpdateReason )}; frameLoop ${formatBoolean( debug.purpleDiagnosticsUpdatedInFrameLoop )}`,
+			wide: true
+		}
+	];
+} );
+
 const configWarnings = computed( () => {
 	const warnings: string[] = [];
 	if ( configStatus.value.hasRtkSurveyDataset === false ) {
@@ -501,11 +543,38 @@ function formatMeters(value: number | null | undefined): string {
 		: '-';
 }
 
+function formatBuriedDepthRaw(value: number | 'model-height' | null | undefined): string {
+	if ( value === 'model-height' ) {
+		return 'model-height';
+	}
+	if ( typeof value === 'number' && Number.isFinite( value ) ) {
+		return value.toFixed( 2 );
+	}
+	return '-';
+}
+
+function formatDepthAxis(value: 'y' | 'shortest-edge' | 'bbox-y' | undefined): string {
+	return value ?? '-';
+}
+
 function formatOpacity(value: number | null | undefined): string {
 	if ( typeof value !== 'number' || Number.isFinite( value ) === false ) {
 		return '-';
 	}
 	return value <= 1 ? value.toFixed( 2 ) : `${value.toFixed( 0 )}%`;
+}
+
+function formatVector3Compact(
+	value: { x: number; y: number; z: number } | null | undefined
+): string {
+	if ( value === undefined || value === null ) {
+		return '-';
+	}
+	return `${value.x.toFixed( 2 )},${value.y.toFixed( 2 )},${value.z.toFixed( 2 )}`;
+}
+
+function formatUpdateMeta(count: number | undefined, reason: string | undefined): string {
+	return `${count ?? 0}@${reason ?? 'none'}`;
 }
 
 function formatBoolean(value: boolean | undefined): string {
@@ -959,7 +1028,7 @@ function setArOverlayClass(active: boolean): void {
 						<button type="button" class="debug-toggle" @click="modelPlacementDiagnosticOpen = !modelPlacementDiagnosticOpen">
 							{{ modelPlacementDiagnosticOpen ? '收起模型诊断' : '模型诊断' }}
 						</button>
-						<ArInfoGrid v-if="modelPlacementDiagnosticOpen" :items="modelPlacementDebugCards" />
+						<ArInfoGrid v-if="modelPlacementDiagnosticOpen" :items="modelPlacementDebugCardsExtended" />
 						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="debugInfoOpen = !debugInfoOpen">
 							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
 						</button>
