@@ -84,6 +84,17 @@ export type DemoModelRegistrationMode = 'rigid-ground-plane';
 export type DemoModelVisualPlacementMode = 'surface' | 'underground';
 export type UndergroundBuriedDepth = number | 'model-height';
 export type UndergroundModelHeightAxis = 'y' | 'shortest-edge' | 'bbox-y';
+export interface UndergroundPlacementConfig {
+	enabled: boolean;
+	placementMode: 'visual-offset' | 'rtk-derived-elevation';
+	surfaceReference: 'control-point-world-enu';
+	modelReference: 'bottom';
+	depthMode: 'model-height' | 'fixed-depth';
+	fixedDepthMeters?: number;
+	coverDepthMeters?: number;
+	modelHeightAxis?: UndergroundModelHeightAxis;
+	preserveSurfaceTargets?: boolean;
+}
 export interface UndergroundDisplayConfig {
 	defaultMode?: 'true-depth' | 'x-ray' | 'surface-projection' | 'lifted-preview';
 	buriedDepthMeters?: UndergroundBuriedDepth;
@@ -117,6 +128,7 @@ export interface DemoModelConfig {
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters: number;
 	visualPlacementMode: DemoModelVisualPlacementMode;
+	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
@@ -185,6 +197,7 @@ interface LocalDebugModelConfig {
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters?: number;
 	visualPlacementMode?: DemoModelVisualPlacementMode;
+	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
@@ -194,7 +207,7 @@ interface LocalDebugModelConfig {
 	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters' | 'visualPlacementMode' | 'undergroundDisplay' | 'annotations' | 'annotationStyleRules'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters' | 'visualPlacementMode' | 'undergroundPlacement' | 'undergroundDisplay' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	controlPoints: Record<string, {
@@ -211,6 +224,7 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	placementAnchorModelLocal?: [ number, number, number ];
 	visualGroundOffsetMeters?: number;
 	visualPlacementMode?: DemoModelVisualPlacementMode;
+	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
@@ -355,6 +369,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
 		visualPlacementMode: normalizeVisualPlacementMode( config.visualPlacementMode ),
+		undergroundPlacement: normalizeUndergroundPlacementConfig( config.undergroundPlacement ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
@@ -404,6 +419,7 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
 		visualPlacementMode: normalizeVisualPlacementMode( config.visualPlacementMode ),
+		undergroundPlacement: normalizeUndergroundPlacementConfig( config.undergroundPlacement ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
@@ -1095,6 +1111,32 @@ function normalizeVisualGroundOffsetMeters(value: number | undefined): number {
 function normalizeVisualPlacementMode(value: DemoModelVisualPlacementMode | undefined): DemoModelVisualPlacementMode {
 
 	return value === 'underground' ? 'underground' : 'surface';
+
+}
+
+function normalizeUndergroundPlacementConfig(value: UndergroundPlacementConfig | undefined): UndergroundPlacementConfig | undefined {
+
+	if ( typeof value !== 'object' || value === null || value.enabled !== true ) {
+		return undefined;
+	}
+
+	return {
+		enabled: true,
+		placementMode: value.placementMode === 'rtk-derived-elevation' ? 'rtk-derived-elevation' : 'visual-offset',
+		surfaceReference: 'control-point-world-enu',
+		modelReference: 'bottom',
+		depthMode: value.depthMode === 'fixed-depth' ? 'fixed-depth' : 'model-height',
+		fixedDepthMeters: typeof value.fixedDepthMeters === 'number' && Number.isFinite( value.fixedDepthMeters )
+			? Math.max( 0, value.fixedDepthMeters )
+			: undefined,
+		coverDepthMeters: typeof value.coverDepthMeters === 'number' && Number.isFinite( value.coverDepthMeters )
+			? Math.max( 0, value.coverDepthMeters )
+			: 0,
+		modelHeightAxis: value.modelHeightAxis === 'y' || value.modelHeightAxis === 'shortest-edge'
+			? value.modelHeightAxis
+			: 'bbox-y',
+		preserveSurfaceTargets: value.preserveSurfaceTargets !== false
+	};
 
 }
 

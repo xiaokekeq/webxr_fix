@@ -125,10 +125,16 @@ export interface ModelPlacementDebugState {
 	updatedAt?: number;
 	diagnosticSampleCount?: number;
 	visualPlacementMode?: string;
+	undergroundPlacementMode?: 'visual-offset' | 'rtk-derived-elevation';
 	undergroundMode?: string;
 	buriedDepthRaw?: number | 'model-height' | null;
 	buriedDepthSource?: 'model-height' | 'configured-number' | 'none';
 	modelHeight?: number | null;
+	coverDepthMeters?: number;
+	totalBottomDepthMeters?: number;
+	engineeringUndergroundOffsetY?: number;
+	surfaceElevationText?: string;
+	undergroundElevationText?: string;
 	depthMeters?: number;
 	visualGroundOffsetMeters?: number;
 	visualOffsetY?: number;

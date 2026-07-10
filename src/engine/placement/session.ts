@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
 import { clearPlacedModel, placeModelWithMatrix, readPlaceableTemplateReport } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
-import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
+import {
+	solveGroundPlaneRigidTransform,
+	type EngineeringControlPoint,
+	type EngineeringRegistrationSolution
+} from '@/localization/coarse/engineering-registration.js';
 import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
 import { createDefaultTargetGuidanceState } from '@/localization/core/registration-store.js';
 import { createPlacementSummaryState } from '@/engine/session/view-state.js';
@@ -519,21 +523,30 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return false;
 			}
 
-			const engineeringMatrix = composeModelRawLocalToArMatrix( {
-				arFromEnuSolution,
-				registrationSolution
-			} );
-			const visualMatrix = engineeringMatrix.clone();
-			const buriedDepth = resolveBuriedDepthMeters( {
-				undergroundDisplay: registrationSolution.undergroundDisplay,
+			const undergroundPlacement = deriveUndergroundRegistrationSolution( {
+				registrationSolution,
 				modelTemplate
 			} );
-			const visualOffsetMeters = registrationSolution.visualPlacementMode === 'underground'
-				? - buriedDepth.depthMeters + registrationSolution.visualGroundOffsetMeters
-				: registrationSolution.visualGroundOffsetMeters;
+			const effectiveRegistrationSolution = undergroundPlacement.registrationSolution;
+			const engineeringMatrix = composeModelRawLocalToArMatrix( {
+				arFromEnuSolution,
+				registrationSolution: effectiveRegistrationSolution
+			} );
+			const visualMatrix = engineeringMatrix.clone();
+			const visualOffsetMeters = undergroundPlacement.placementMode === 'rtk-derived-elevation'
+				? 0
+				: registrationSolution.visualPlacementMode === 'underground'
+					? - undergroundPlacement.totalBottomDepthMeters + registrationSolution.visualGroundOffsetMeters
+					: registrationSolution.visualGroundOffsetMeters;
 			if ( visualOffsetMeters !== 0 ) {
 				visualMatrix.premultiply( visualOffsetMatrix.makeTranslation( 0, visualOffsetMeters, 0 ) );
 			}
+			logUndergroundEngineeringPlacementAudit( {
+				registrationSolution,
+				placementMode: undergroundPlacement.placementMode,
+				visualOffsetMeters,
+				undergroundPlacement
+			} );
 			resetArPlacementAnchorTransform( 'engineering-place-button' );
 			arPlacementBase = null;
 			arPlacedModel = placeModelWithMatrix(
@@ -554,7 +567,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				engineeringMatrix,
 				visualMatrix,
 				visualOffsetMeters,
-				buriedDepth
+				undergroundPlacement
 			} );
 			trackArPlacement( resolvePlacementSourceFromArLocalization( arFromEnuSolution.source ) );
 			updateRegistrationStatusDetail( '状态：模型已按工程矩阵显示' );
@@ -565,25 +578,28 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				matrixChain: 'modelLocal -> modelToSite -> arFromEnu',
 				usedHitTestForFinalPlacement: false,
 				usedPlacementBase: false,
-				modelToSiteMatrix: registrationSolution.modelToSite.matrix.toArray(),
+				modelToSiteMatrix: effectiveRegistrationSolution.modelToSite.matrix.toArray(),
 				arFromEnuMatrix: arFromEnuSolution.matrix.toArray(),
 				engineeringMatrix: engineeringMatrix.toArray(),
 				visualMatrix: visualMatrix.toArray(),
 				modelRawLocalToArMatrix: visualMatrix.toArray(),
 				visualPlacementMode: registrationSolution.visualPlacementMode,
+				undergroundPlacementMode: undergroundPlacement.placementMode,
 				undergroundDefaultMode: registrationSolution.undergroundDisplay?.defaultMode ?? null,
-		buriedDepthMeters: registrationSolution.undergroundDisplay?.buriedDepthMeters ?? null,
-		buriedDepthSource: buriedDepth.source,
-		modelHeight: buriedDepth.modelHeight ?? null,
-		modelHeightAxis: buriedDepth.modelHeightAxis ?? null,
-		modelHeightX: buriedDepth.modelHeightX ?? null,
-		modelHeightY: buriedDepth.modelHeightY ?? null,
-		modelHeightZ: buriedDepth.modelHeightZ ?? null,
-		chosenModelHeight: buriedDepth.chosenModelHeight ?? null,
-		depthMeters: buriedDepth.depthMeters,
+				buriedDepthMeters: registrationSolution.undergroundDisplay?.buriedDepthMeters ?? null,
+				buriedDepthSource: undergroundPlacement.depthSource,
+				modelHeight: undergroundPlacement.modelHeightMeters,
+				modelHeightAxis: undergroundPlacement.buriedDepth.modelHeightAxis ?? null,
+				modelHeightX: undergroundPlacement.buriedDepth.modelHeightX ?? null,
+				modelHeightY: undergroundPlacement.buriedDepth.modelHeightY ?? null,
+				modelHeightZ: undergroundPlacement.buriedDepth.modelHeightZ ?? null,
+				chosenModelHeight: undergroundPlacement.buriedDepth.chosenModelHeight ?? null,
+				coverDepthMeters: undergroundPlacement.coverDepthMeters,
+				totalBottomDepthMeters: undergroundPlacement.totalBottomDepthMeters,
+				depthMeters: undergroundPlacement.totalBottomDepthMeters,
 				visualGroundOffsetMeters: registrationSolution.visualGroundOffsetMeters,
 				visualYOffsetMeters: visualOffsetMeters,
-				warning: buriedDepth.warning ?? null,
+				warning: undergroundPlacement.buriedDepth.warning ?? null,
 				createdAt: Date.now()
 			} );
 			setStatus( '模型已按工程矩阵显示，未使用 hit-test 决定最终位置。' );
@@ -712,6 +728,101 @@ export function resolveBuriedDepthMeters(args: {
 
 }
 
+export function deriveUndergroundRegistrationSolution(args: {
+	registrationSolution: EngineeringRegistrationSolution;
+	modelTemplate: THREE.Group;
+}): {
+	registrationSolution: EngineeringRegistrationSolution;
+	placementMode: 'visual-offset' | 'rtk-derived-elevation';
+	modelHeightMeters: number;
+	coverDepthMeters: number;
+	totalBottomDepthMeters: number;
+	depthSource: 'model-height' | 'configured-number' | 'none';
+	buriedDepth: ReturnType<typeof resolveBuriedDepthMeters>;
+	undergroundControlPoints: EngineeringControlPoint[];
+} {
+
+	const config = args.registrationSolution.undergroundPlacement;
+	const placementMode = config?.enabled === true ? config.placementMode : 'visual-offset';
+	const buriedDepth = resolveUndergroundEngineeringDepth( args.registrationSolution, args.modelTemplate );
+	const coverDepthMeters = config?.coverDepthMeters ?? 0;
+	const totalBottomDepthMeters = buriedDepth.depthMeters + coverDepthMeters;
+	const undergroundControlPoints = args.registrationSolution.controlPoints.map( ( point ) => ( {
+		...point,
+		modelLocal: point.modelLocal.clone(),
+		worldEnu: point.worldEnu.clone().setY( point.worldEnu.y - totalBottomDepthMeters )
+	} ) );
+
+	if ( placementMode !== 'rtk-derived-elevation' ) {
+		return {
+			registrationSolution: args.registrationSolution,
+			placementMode,
+			modelHeightMeters: buriedDepth.depthMeters,
+			coverDepthMeters,
+			totalBottomDepthMeters,
+			depthSource: buriedDepth.source,
+			buriedDepth,
+			undergroundControlPoints
+		};
+	}
+
+	const modelToSite = solveGroundPlaneRigidTransform(
+		undergroundControlPoints.map( ( point ) => point.modelLocal ),
+		undergroundControlPoints.map( ( point ) => point.worldEnu )
+	);
+
+	return {
+		registrationSolution: {
+			...args.registrationSolution,
+			controlPoints: undergroundControlPoints,
+			modelToSite,
+			rootSiteEnu: modelToSite.translation.clone()
+		},
+		placementMode,
+		modelHeightMeters: buriedDepth.depthMeters,
+		coverDepthMeters,
+		totalBottomDepthMeters,
+		depthSource: buriedDepth.source,
+		buriedDepth,
+		undergroundControlPoints
+	};
+
+}
+
+function resolveUndergroundEngineeringDepth(
+	registrationSolution: EngineeringRegistrationSolution,
+	modelTemplate: THREE.Group
+): ReturnType<typeof resolveBuriedDepthMeters> {
+
+	const config = registrationSolution.undergroundPlacement;
+	if ( config?.enabled === true && config.depthMode === 'fixed-depth' ) {
+		const fixedDepthMeters = config.fixedDepthMeters;
+		return typeof fixedDepthMeters === 'number' && Number.isFinite( fixedDepthMeters ) && fixedDepthMeters >= 0
+			? { depthMeters: fixedDepthMeters, source: 'configured-number' }
+			: {
+				depthMeters: 0,
+				source: 'configured-number',
+				warning: 'configured fixedDepthMeters is invalid; underground engineering depth fell back to 0'
+			};
+	}
+
+	if ( config?.enabled === true ) {
+		return resolveBuriedDepthMeters( {
+			undergroundDisplay: {
+				buriedDepthMeters: 'model-height',
+				modelHeightAxis: config.modelHeightAxis ?? 'bbox-y'
+			},
+			modelTemplate
+		} );
+	}
+
+	return resolveBuriedDepthMeters( {
+		undergroundDisplay: registrationSolution.undergroundDisplay,
+		modelTemplate
+	} );
+
+}
+
 function resolveTemplateHeightMeters(
 	modelTemplate: THREE.Group,
 	axis: 'y' | 'shortest-edge' | 'bbox-y'
@@ -768,7 +879,7 @@ function logUndergroundPlacementDiagnostic(args: {
 	engineeringMatrix: THREE.Matrix4;
 	visualMatrix: THREE.Matrix4;
 	visualOffsetMeters: number;
-	buriedDepth: ReturnType<typeof resolveBuriedDepthMeters>;
+	undergroundPlacement: ReturnType<typeof deriveUndergroundRegistrationSolution>;
 }): void {
 
 	const {
@@ -777,55 +888,118 @@ function logUndergroundPlacementDiagnostic(args: {
 		engineeringMatrix,
 		visualMatrix,
 		visualOffsetMeters,
-		buriedDepth
+		undergroundPlacement
 	} = args;
 	const engineeringHorizontalErrors: number[] = [];
 	const engineeringVerticalErrors: number[] = [];
 	const visualHorizontalErrors: number[] = [];
 	const visualVerticalErrors: number[] = [];
-	const points = registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
-		const expectedAr = point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
-		const engineeringActualAr = point.modelLocal.clone().applyMatrix4( engineeringMatrix );
-		const visualActualAr = point.modelLocal.clone().applyMatrix4( visualMatrix );
-		const horizontalErrorXZEngineering = horizontalErrorXZ( expectedAr, engineeringActualAr );
-		const verticalErrorYEngineering = Math.abs( expectedAr.y - engineeringActualAr.y );
-		const horizontalErrorXZVisual = horizontalErrorXZ( expectedAr, visualActualAr );
-		const verticalErrorYVisual = Math.abs( expectedAr.y - visualActualAr.y );
+	const surfaceProjectionErrors: number[] = [];
+	const bottomDepthErrors: number[] = [];
+	const points = registrationSolution.controlPoints.slice( 0, 4 ).map( ( surfacePoint, index ) => {
+		const undergroundPoint = undergroundPlacement.undergroundControlPoints[ index ] ?? surfacePoint;
+		const surfaceAr = surfacePoint.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
+		const expectedUndergroundAr = undergroundPoint.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
+		const engineeringActualAr = undergroundPoint.modelLocal.clone().applyMatrix4( engineeringMatrix );
+		const visualActualAr = undergroundPoint.modelLocal.clone().applyMatrix4( visualMatrix );
+		const horizontalErrorXZEngineering = horizontalErrorXZ( expectedUndergroundAr, engineeringActualAr );
+		const verticalErrorYEngineering = Math.abs( expectedUndergroundAr.y - engineeringActualAr.y );
+		const horizontalErrorXZVisual = horizontalErrorXZ( expectedUndergroundAr, visualActualAr );
+		const verticalErrorYVisual = Math.abs( expectedUndergroundAr.y - visualActualAr.y );
+		const measuredBottomDepth = surfaceAr.y - expectedUndergroundAr.y;
+		const bottomDepthError = Math.abs( measuredBottomDepth - undergroundPlacement.totalBottomDepthMeters );
 		engineeringHorizontalErrors.push( horizontalErrorXZEngineering );
 		engineeringVerticalErrors.push( verticalErrorYEngineering );
 		visualHorizontalErrors.push( horizontalErrorXZVisual );
 		visualVerticalErrors.push( verticalErrorYVisual );
+		surfaceProjectionErrors.push( horizontalErrorXZ( surfaceAr, engineeringActualAr ) );
+		bottomDepthErrors.push( bottomDepthError );
 		return {
-			controlPointId: point.id,
-			expectedAr: vector3ToObject( expectedAr ),
+			controlPointId: surfacePoint.id,
+			surfaceAr: vector3ToObject( surfaceAr ),
+			expectedUndergroundAr: vector3ToObject( expectedUndergroundAr ),
 			engineeringActualAr: vector3ToObject( engineeringActualAr ),
 			visualActualAr: vector3ToObject( visualActualAr ),
 			horizontalErrorXZEngineering: Number( horizontalErrorXZEngineering.toFixed( 6 ) ),
 			verticalErrorYEngineering: Number( verticalErrorYEngineering.toFixed( 6 ) ),
 			horizontalErrorXZVisual: Number( horizontalErrorXZVisual.toFixed( 6 ) ),
-			verticalErrorYVisual: Number( verticalErrorYVisual.toFixed( 6 ) )
+			verticalErrorYVisual: Number( verticalErrorYVisual.toFixed( 6 ) ),
+			surfaceProjectionHorizontalError: Number( horizontalErrorXZ( surfaceAr, engineeringActualAr ).toFixed( 6 ) ),
+			measuredBottomDepth: Number( measuredBottomDepth.toFixed( 6 ) ),
+			bottomDepthError: Number( bottomDepthError.toFixed( 6 ) )
 		};
 	} );
 
 	console.info( '[UndergroundPlacementDiagnostic]', {
 		modelId: registrationSolution.modelId,
 		visualPlacementMode: registrationSolution.visualPlacementMode,
+		placementDepthSource: undergroundPlacement.placementMode,
 		defaultMode: registrationSolution.undergroundDisplay?.defaultMode ?? null,
 		buriedDepthMeters: registrationSolution.undergroundDisplay?.buriedDepthMeters ?? null,
-		buriedDepthSource: buriedDepth.source,
-		modelHeight: buriedDepth.modelHeight ?? null,
-		depthMeters: Number( buriedDepth.depthMeters.toFixed( 6 ) ),
+		buriedDepthSource: undergroundPlacement.depthSource,
+		modelHeight: Number( undergroundPlacement.modelHeightMeters.toFixed( 6 ) ),
+		coverDepthMeters: Number( undergroundPlacement.coverDepthMeters.toFixed( 6 ) ),
+		totalBottomDepthMeters: Number( undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
+		depthMeters: Number( undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
 		visualGroundOffsetMeters: Number( registrationSolution.visualGroundOffsetMeters.toFixed( 6 ) ),
 		visualOffsetY: Number( visualOffsetMeters.toFixed( 6 ) ),
+		engineeringUndergroundOffsetY: Number( ( - undergroundPlacement.totalBottomDepthMeters ).toFixed( 6 ) ),
 		engineeringMatrix: engineeringMatrix.toArray(),
 		visualMatrix: visualMatrix.toArray(),
-		engineeringHorizontalRms: Number( computeRms( engineeringHorizontalErrors ).toFixed( 6 ) ),
-		engineeringVerticalMax: Number( Math.max( ...engineeringVerticalErrors, 0 ).toFixed( 6 ) ),
+		undergroundEngineeringHorizontalRms: Number( computeRms( engineeringHorizontalErrors ).toFixed( 6 ) ),
+		undergroundEngineeringVerticalMax: Number( Math.max( ...engineeringVerticalErrors, 0 ).toFixed( 6 ) ),
+		surfaceProjectionHorizontalRms: Number( computeRms( surfaceProjectionErrors ).toFixed( 6 ) ),
+		expectedBottomDepth: Number( undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
+		bottomDepthErrorMax: Number( Math.max( ...bottomDepthErrors, 0 ).toFixed( 6 ) ),
 		visualHorizontalRms: Number( computeRms( visualHorizontalErrors ).toFixed( 6 ) ),
 		visualVerticalMax: Number( Math.max( ...visualVerticalErrors, 0 ).toFixed( 6 ) ),
-		warning: buriedDepth.warning ?? null,
+		warning: undergroundPlacement.buriedDepth.warning ?? null,
 		points,
-		note: 'engineeringMatrix checks registration closure; visualMatrix includes display-only Y offset'
+		note: undergroundPlacement.placementMode === 'rtk-derived-elevation'
+			? 'engineeringMatrix uses RTK surface elevations minus model height and cover depth; visualMatrix has no extra underground Y offset'
+			: 'engineeringMatrix checks surface registration closure; visualMatrix includes display-only Y offset'
+	} );
+
+}
+
+function logUndergroundEngineeringPlacementAudit(args: {
+	registrationSolution: EngineeringRegistrationSolution;
+	placementMode: 'visual-offset' | 'rtk-derived-elevation';
+	visualOffsetMeters: number;
+	undergroundPlacement: ReturnType<typeof deriveUndergroundRegistrationSolution>;
+}): void {
+
+	const surfacePoints = args.registrationSolution.controlPoints.slice( 0, 4 );
+	const undergroundPoints = args.undergroundPlacement.undergroundControlPoints.slice( 0, 4 );
+	console.info( '[UndergroundEngineeringPlacementAudit]', {
+		modelControlPointReference: 'config.controlPoints modelLocal after pivot/unitScale; expected bottom footprint points',
+		rtkElevationMeaning: 'controlPoint.worldEnu.y is kept as RTK surface elevation',
+		currentModelToEnuSource: args.placementMode === 'rtk-derived-elevation'
+			? 'derived from modelLocal bottom points to undergroundModelTargets'
+			: 'configured surface control points',
+		currentEngineeringMatrixFormula: args.placementMode === 'rtk-derived-elevation'
+			? 'arFromEnu * undergroundModelToEnu'
+			: 'arFromEnu * modelToEnu',
+		currentVisualMatrixFormula: args.visualOffsetMeters === 0
+			? 'visualMatrix = engineeringMatrix'
+			: 'visualMatrix = Translation(0, visualOffsetY, 0) * engineeringMatrix',
+		currentYellowFootprintSource: 'original surface controlPoint.worldEnu -> arFromEnu',
+		canUseBottomReference: true,
+		surfaceElevations: surfacePoints.map( ( point ) => ( {
+			id: point.id,
+			y: Number( point.worldEnu.y.toFixed( 6 ) )
+		} ) ),
+		undergroundElevations: undergroundPoints.map( ( point ) => ( {
+			id: point.id,
+			y: Number( point.worldEnu.y.toFixed( 6 ) )
+		} ) ),
+		modelHeightMeters: Number( args.undergroundPlacement.modelHeightMeters.toFixed( 6 ) ),
+		coverDepthMeters: Number( args.undergroundPlacement.coverDepthMeters.toFixed( 6 ) ),
+		totalBottomDepthMeters: Number( args.undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
+		visualOffsetY: Number( args.visualOffsetMeters.toFixed( 6 ) ),
+		risks: args.placementMode === 'rtk-derived-elevation' && Math.abs( args.visualOffsetMeters ) > 1e-6
+			? [ 'double underground offset detected' ]
+			: []
 	} );
 
 }

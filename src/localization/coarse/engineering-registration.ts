@@ -4,6 +4,7 @@ import type {
 	DemoModelControlPointCorrespondence,
 	DemoModelRegistrationMode,
 	DemoModelVisualPlacementMode,
+	UndergroundPlacementConfig,
 	UndergroundDisplayConfig
 } from '@/models/config/demo-model-config.js';
 import {
@@ -47,6 +48,7 @@ export interface EngineeringRegistrationSolution {
 	placementAnchorMeaning?: string;
 	visualGroundOffsetMeters: number;
 	visualPlacementMode: DemoModelVisualPlacementMode;
+	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
 }
 
@@ -125,6 +127,7 @@ export function solveEngineeringRegistration(
 		placementAnchorMeaning: config.placementAnchorMeaning,
 		visualGroundOffsetMeters: config.visualGroundOffsetMeters,
 		visualPlacementMode: config.visualPlacementMode,
+		undergroundPlacement: config.undergroundPlacement,
 		undergroundDisplay: config.undergroundDisplay
 	};
 
@@ -221,7 +224,7 @@ export function solveSimilarityTransform(
 
 }
 
-function solveGroundPlaneRigidTransform(
+export function solveGroundPlaneRigidTransform(
 	sourcePoints: THREE.Vector3[],
 	targetPoints: THREE.Vector3[]
 ): SimilarityTransformSolution {

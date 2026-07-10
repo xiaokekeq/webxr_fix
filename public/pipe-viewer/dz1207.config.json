@@ -237,9 +237,18 @@
   "placementAnchorMeaning": "site-origin-ground-reference",
   "visualGroundOffsetMeters": 0,
   "visualPlacementMode": "underground",
+  "undergroundPlacement": {
+    "enabled": true,
+    "placementMode": "rtk-derived-elevation",
+    "surfaceReference": "control-point-world-enu",
+    "modelReference": "bottom",
+    "depthMode": "model-height",
+    "coverDepthMeters": 0,
+    "modelHeightAxis": "bbox-y",
+    "preserveSurfaceTargets": true
+  },
   "undergroundDisplay": {
     "defaultMode": "x-ray",
-    "buriedDepthMeters": 1,
     "xrayOpacity": 0.5,
     "showSurfaceProjection": true,
     "showDepthGuideLines": true

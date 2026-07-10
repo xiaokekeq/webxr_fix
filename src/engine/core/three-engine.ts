@@ -3,7 +3,11 @@ import type { PipeRecord } from '@/models/types/pipe-record.js';
 import { createPointerSelectionSession } from '@/engine/interaction/pointer-selection.js';
 import { createPropertySelectionController } from '@/engine/interaction/property-selection.js';
 import { createModelSession } from '@/engine/model/session.js';
-import { createPlacementSession, resolveBuriedDepthMeters } from '@/engine/placement/session.js';
+import {
+	createPlacementSession,
+	deriveUndergroundRegistrationSolution,
+	resolveBuriedDepthMeters
+} from '@/engine/placement/session.js';
 import { createArSessionStateRuntime } from '@/engine/session/ar-session-state-runtime.js';
 import {
 	exportRegistrationSnapshotFile,
@@ -3461,19 +3465,27 @@ export class ThreeEngine {
 		}
 
 		if ( registrationSolution !== null && modelTemplate !== null ) {
-			const buriedDepth = resolveBuriedDepthMeters( {
-				undergroundDisplay: registrationSolution.undergroundDisplay,
+			const undergroundPlacement = deriveUndergroundRegistrationSolution( {
+				registrationSolution,
 				modelTemplate
 			} );
+			const buriedDepth = undergroundPlacement.buriedDepth;
 			const visualOffsetY = registrationSolution.visualPlacementMode === 'underground'
-				? - buriedDepth.depthMeters + registrationSolution.visualGroundOffsetMeters
+				? undergroundPlacement.placementMode === 'rtk-derived-elevation'
+					? 0
+					: - undergroundPlacement.totalBottomDepthMeters + registrationSolution.visualGroundOffsetMeters
 				: registrationSolution.visualGroundOffsetMeters;
 			Object.assign( partial, {
 				visualPlacementMode: registrationSolution.visualPlacementMode,
+				undergroundPlacementMode: undergroundPlacement.placementMode,
 				undergroundMode: registrationSolution.undergroundDisplay?.defaultMode ?? undefined,
-				buriedDepthRaw: registrationSolution.undergroundDisplay?.buriedDepthMeters ?? null,
+				buriedDepthRaw: registrationSolution.undergroundPlacement?.enabled === true
+					? registrationSolution.undergroundPlacement.depthMode === 'model-height'
+						? 'model-height'
+						: registrationSolution.undergroundPlacement.fixedDepthMeters ?? null
+					: registrationSolution.undergroundDisplay?.buriedDepthMeters ?? null,
 				buriedDepthSource: buriedDepth.source,
-				modelHeight: buriedDepth.modelHeight ?? null,
+				modelHeight: undergroundPlacement.modelHeightMeters,
 				buriedDepthModelHeightAxis: buriedDepth.modelHeightAxis ?? undefined,
 				modelHeightAxis: buriedDepth.modelHeightAxis ?? undefined,
 				modelHeightX: buriedDepth.modelHeightX ?? undefined,
@@ -3483,7 +3495,12 @@ export class ThreeEngine {
 				modelSizeY: buriedDepth.modelHeightY ?? undefined,
 				modelSizeZ: buriedDepth.modelHeightZ ?? undefined,
 				chosenModelHeight: buriedDepth.chosenModelHeight ?? undefined,
-				depthMeters: roundMeters( buriedDepth.depthMeters ),
+				coverDepthMeters: roundMeters( undergroundPlacement.coverDepthMeters ),
+				totalBottomDepthMeters: roundMeters( undergroundPlacement.totalBottomDepthMeters ),
+				engineeringUndergroundOffsetY: roundMeters( - undergroundPlacement.totalBottomDepthMeters ),
+				surfaceElevationText: formatControlPointElevations( registrationSolution.controlPoints ),
+				undergroundElevationText: formatControlPointElevations( undergroundPlacement.undergroundControlPoints ),
+				depthMeters: roundMeters( undergroundPlacement.totalBottomDepthMeters ),
 				visualGroundOffsetMeters: roundMeters( registrationSolution.visualGroundOffsetMeters ),
 				visualOffsetY: roundMeters( visualOffsetY ),
 				xrayOpacity: registrationSolution.undergroundDisplay?.xrayOpacity ?? undefined
@@ -3491,21 +3508,14 @@ export class ThreeEngine {
 		}
 
 		if ( registrationSolution !== null && arFromEnuSolution !== null ) {
-			const currentEngineeringMatrix = composeModelRawLocalToArMatrix( {
+			const effectiveRegistrationSolution = modelTemplate === null
+				? registrationSolution
+				: deriveUndergroundRegistrationSolution( { registrationSolution, modelTemplate } ).registrationSolution;
+			const currentEngineeringMatrix = this.fixedEngineeringMatrix ?? composeModelRawLocalToArMatrix( {
 				arFromEnuSolution,
-				registrationSolution
+				registrationSolution: effectiveRegistrationSolution
 			} );
-			const buriedDepth = modelTemplate === null ? null : resolveBuriedDepthMeters( {
-				undergroundDisplay: registrationSolution.undergroundDisplay,
-				modelTemplate
-			} );
-			const visualOffsetY = registrationSolution.visualPlacementMode === 'underground'
-				? - ( buriedDepth?.depthMeters ?? 0 ) + registrationSolution.visualGroundOffsetMeters
-				: registrationSolution.visualGroundOffsetMeters;
-			const currentVisualMatrix = currentEngineeringMatrix.clone();
-			if ( visualOffsetY !== 0 ) {
-				currentVisualMatrix.premultiply( new THREE.Matrix4().makeTranslation( 0, visualOffsetY, 0 ) );
-			}
+			const currentVisualMatrix = this.fixedVisualMatrix ?? currentEngineeringMatrix.clone();
 			const baselineEngineeringMatrix = this.fixedEngineeringMatrix
 				?? initialSnapshot?.engineeringMatrix
 				?? currentEngineeringMatrix;
@@ -3514,7 +3524,7 @@ export class ThreeEngine {
 				?? currentVisualMatrix;
 			const baselineArFromEnuMatrix = initialSnapshot?.arFromEnuMatrix ?? arFromEnuSolution.matrix;
 			Object.assign( partial, computePlacementErrorDebug( {
-				registrationSolution,
+				registrationSolution: effectiveRegistrationSolution,
 				arFromEnuSolution,
 				engineeringMatrix: baselineEngineeringMatrix,
 				visualMatrix: baselineVisualMatrix
@@ -4429,6 +4439,15 @@ function computePlacementErrorDebug(args: {
 
 }
 
+function formatControlPointElevations(points: EngineeringControlPoint[]): string {
+
+	return points
+		.slice( 0, 4 )
+		.map( ( point ) => `${point.id}:${point.worldEnu.y.toFixed( 3 )}m` )
+		.join( ' / ' );
+
+}
+
 function createModelPlacementDebugConclusion(state: ModelPlacementDebugState): string {
 
 	if ( state.unexpectedArModelAnchorParent === true || state.isArModelAnchorChildOfPlacementAnchor === true ) {
@@ -4555,14 +4574,24 @@ function formatUndergroundDisplayText(config: DemoModelConfig, modelTemplate: TH
 	const modeText = config.undergroundDisplay?.defaultMode === 'x-ray'
 		? 'X-Ray'
 		: config.undergroundDisplay?.defaultMode ?? 'underground';
+	if ( config.undergroundPlacement?.enabled === true ) {
+		const depth = config.undergroundPlacement.depthMode === 'fixed-depth'
+			? Math.max( 0, config.undergroundPlacement.fixedDepthMeters ?? 0 )
+			: resolveBuriedDepthMeters( {
+				undergroundDisplay: {
+					buriedDepthMeters: 'model-height',
+					modelHeightAxis: config.undergroundPlacement.modelHeightAxis ?? 'bbox-y'
+				},
+				modelTemplate
+			} ).depthMeters;
+		const totalDepth = depth + ( config.undergroundPlacement.coverDepthMeters ?? 0 );
+		return `地下显示：${modeText}；定位方式：${config.undergroundPlacement.placementMode}；工程下沉：${totalDepth.toFixed( 2 )} m。`;
+	}
+
 	const buriedDepth = resolveBuriedDepthMeters( {
 		undergroundDisplay: config.undergroundDisplay,
 		modelTemplate
 	} );
-	if ( config.undergroundDisplay?.buriedDepthMeters === 'model-height' ) {
-		return `地下显示：${modeText}；下沉深度：${buriedDepth.depthMeters.toFixed( 2 )} m；深度来源：模型高度（${buriedDepth.modelHeightAxis ?? 'y'}）。`;
-	}
-
 	if ( buriedDepth.source === 'configured-number' ) {
 		return `地下显示：${modeText}；下沉深度：${buriedDepth.depthMeters.toFixed( 2 )} m；深度来源：配置数值。`;
 	}

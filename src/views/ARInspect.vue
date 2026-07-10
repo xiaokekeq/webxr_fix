@@ -297,9 +297,14 @@ const modelPlacementDebugGroups = computed( () => {
 			items: [
 				{ label: 'Build / 更新时间', value: `${debug.buildCommit ?? '-'} / ${formatTimestamp( debug.updatedAt )}`, wide: true },
 				{ label: '地下模式', value: debug.undergroundMode ?? debug.visualPlacementMode ?? '-' },
+				{ label: '定位方式', value: formatUndergroundPlacementMode( debug.undergroundPlacementMode ), wide: true },
 				{ label: 'buriedDepth 原始值', value: formatBuriedDepthRaw( debug.buriedDepthRaw ) },
 				{ label: '深度来源 / 实际深度', value: `${formatBuriedDepthSource( debug.buriedDepthSource )} / ${formatMeters( debug.depthMeters )}`, wide: true },
-				{ label: 'visualOffsetY', value: formatMeters( debug.visualOffsetY ) },
+				{ label: '模型高度 / 覆土 / 总下沉', value: `${formatMeters( debug.modelHeight )} / ${formatMeters( debug.coverDepthMeters )} / ${formatMeters( debug.totalBottomDepthMeters )}`, wide: true },
+				{ label: 'engineering visualOffset', value: formatMeters( debug.visualOffsetY ) },
+				{ label: '工程地下偏移', value: formatSignedMeters( debug.engineeringUndergroundOffsetY ) },
+				{ label: 'RTK 地表高程', value: debug.surfaceElevationText ?? '-', wide: true },
+				{ label: '模型底部目标高程', value: debug.undergroundElevationText ?? '-', wide: true },
 				{ label: '模型尺寸 X/Y/Z', value: `${formatMeters( debug.modelSizeX ?? debug.modelHeightX )} / ${formatMeters( debug.modelSizeY ?? debug.modelHeightY )} / ${formatMeters( debug.modelSizeZ ?? debug.modelHeightZ )}`, wide: true },
 				{ label: '高度轴 / 选中高度', value: `${formatDepthAxis( debug.modelHeightAxis ?? debug.buriedDepthModelHeightAxis )} / ${formatMeters( debug.chosenModelHeight )}`, wide: true }
 			]
@@ -691,8 +696,15 @@ async function copyModelPlacementDiagnostics(): Promise<void> {
 	const payload = {
 		buildCommit: debug.buildCommit ?? null,
 		sessionId: debug.sessionId ?? null,
+		undergroundPlacementMode: debug.undergroundPlacementMode ?? null,
 		buriedDepthRaw: debug.buriedDepthRaw ?? null,
 		depthMeters: debug.depthMeters ?? null,
+		modelHeight: debug.modelHeight ?? null,
+		coverDepthMeters: debug.coverDepthMeters ?? null,
+		totalBottomDepthMeters: debug.totalBottomDepthMeters ?? null,
+		engineeringUndergroundOffsetY: debug.engineeringUndergroundOffsetY ?? null,
+		surfaceElevationText: debug.surfaceElevationText ?? null,
+		undergroundElevationText: debug.undergroundElevationText ?? null,
 		visualOffsetY: debug.visualOffsetY ?? null,
 		cameraMovedDistance: debug.cameraMovedDistance ?? null,
 		placedModelDeltaXZ: debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ ?? null,
@@ -753,6 +765,16 @@ function formatBuriedDepthSource(source: string | undefined): string {
 		return '配置数值';
 	}
 	return '未配置';
+}
+
+function formatUndergroundPlacementMode(mode: string | undefined): string {
+	if ( mode === 'rtk-derived-elevation' ) {
+		return 'RTK surface elevation derived';
+	}
+	if ( mode === 'visual-offset' ) {
+		return 'visual offset';
+	}
+	return '-';
 }
 
 function formatHorizontalStatus(value: number | undefined): string {
