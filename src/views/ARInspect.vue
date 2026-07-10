@@ -48,7 +48,6 @@ const currentModel = computed(
 const currentModelName = computed( () => currentModel.value?.name ?? '未选择站点' );
 const currentConfigUrl = computed( () => currentModel.value?.configUrl ?? '-' );
 const configStatus = computed( () => engine.value.engineeringConfigStatus );
-const annotationDetail = computed( () => engine.value.annotationDetail );
 const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
 const modelPlaced = computed( () => engine.value.placementSummary.positionText !== '-' );
 const hitTestReady = computed(
@@ -1108,34 +1107,6 @@ function setArOverlayClass(active: boolean): void {
 			</button>
 		</nav>
 
-		<section
-			v-if="hasArSession && annotationDetail.visible"
-			class="annotation-detail-panel"
-			data-ar-ui="true"
-			@pointerdown.stop="store.actions.handleArUiInteraction()"
-			@click.stop
-		>
-			<div class="annotation-detail-header">
-				<div>
-					<div class="annotation-detail-kicker">业务标识</div>
-					<div class="annotation-detail-title">{{ annotationDetail.title }}</div>
-					<div class="annotation-detail-subtitle">{{ annotationDetail.subtitle }}</div>
-				</div>
-				<button type="button" class="annotation-detail-close" @click="store.actions.closePropertyPanel()">
-					关闭
-				</button>
-			</div>
-			<div class="annotation-detail-fields">
-				<div
-					v-for="field in annotationDetail.fields"
-					:key="field.label"
-					class="annotation-detail-field"
-				>
-					<span>{{ field.label }}</span>
-					<strong>{{ field.value }}</strong>
-				</div>
-			</div>
-		</section>
 
 		<transition name="sheet-fade">
 			<section
@@ -1597,76 +1568,6 @@ function setArOverlayClass(active: boolean): void {
 .dock-label {
 	font-size: 11px;
 	margin-top: 2px;
-}
-
-.annotation-detail-panel {
-	position: fixed;
-	z-index: 8;
-	left: 16px;
-	right: 16px;
-	bottom: calc(82px + env(safe-area-inset-bottom));
-	max-height: 44vh;
-	overflow: auto;
-	padding: 14px;
-	border-radius: 22px;
-	background: rgba(8, 15, 27, 0.88);
-	border: 1px solid rgba(255, 255, 255, 0.12);
-	box-shadow: 0 24px 72px rgba(0, 0, 0, 0.42);
-	backdrop-filter: blur(24px);
-}
-
-.annotation-detail-header {
-	display: flex;
-	gap: 12px;
-	align-items: flex-start;
-	justify-content: space-between;
-}
-
-.annotation-detail-kicker,
-.annotation-detail-subtitle,
-.annotation-detail-field span {
-	color: rgba(191, 219, 254, 0.72);
-	font-size: 12px;
-}
-
-.annotation-detail-title {
-	margin-top: 4px;
-	color: #eff6ff;
-	font-size: 18px;
-	font-weight: 900;
-}
-
-.annotation-detail-close {
-	flex: 0 0 auto;
-	border: 1px solid rgba(148, 163, 184, 0.22);
-	border-radius: 12px;
-	background: rgba(15, 23, 42, 0.82);
-	color: #eff6ff;
-	padding: 8px 10px;
-	font-size: 12px;
-	font-weight: 800;
-}
-
-.annotation-detail-fields {
-	display: grid;
-	gap: 8px;
-	margin-top: 12px;
-}
-
-.annotation-detail-field {
-	display: grid;
-	gap: 4px;
-	padding: 10px;
-	border-radius: 12px;
-	background: rgba(15, 23, 42, 0.66);
-	border: 1px solid rgba(148, 163, 184, 0.14);
-}
-
-.annotation-detail-field strong {
-	color: #eff6ff;
-	font-size: 13px;
-	line-height: 1.45;
-	word-break: break-word;
 }
 
 .bottom-sheet {
