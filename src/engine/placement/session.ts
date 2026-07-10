@@ -44,6 +44,12 @@ export interface PlacementWorldLockDiagnostics {
 	lastUpdateReason: string;
 	lastUpdateTimestamp: number | null;
 	updatedInFrameLoop: boolean;
+	placementAnchorUpdateCount: number;
+	lastPlacementAnchorUpdateReason: string;
+	lastPlacementAnchorUpdateTimestamp: number | null;
+	placementAnchorUpdatedFromFrameLoop: boolean;
+	placementAnchorUpdatedFromHitTest: boolean;
+	placementAnchorUpdatedFromReticle: boolean;
 }
 
 interface CreatePlacementSessionOptions {
@@ -113,6 +119,9 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	let lastWorldLockUpdateTimestamp: number | null = null;
 	let worldLockUpdatedInFrameLoop = false;
 	let lastWorldLockVerificationAt = 0;
+	let placementAnchorUpdateCount = 0;
+	let lastPlacementAnchorUpdateReason = 'none';
+	let lastPlacementAnchorUpdateTimestamp: number | null = null;
 	const visualOffsetMatrix = new THREE.Matrix4();
 
 	function updatePlacementSummary(): void {
@@ -121,12 +130,15 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 	}
 
-	function resetArPlacementAnchorTransform(): void {
+	function resetArPlacementAnchorTransform(reason = 'placement-reset'): void {
 
 		sceneBundle.arPlacementAnchor.position.set( 0, 0, 0 );
 		sceneBundle.arPlacementAnchor.quaternion.identity();
 		sceneBundle.arPlacementAnchor.scale.set( 1, 1, 1 );
 		sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
+		placementAnchorUpdateCount += 1;
+		lastPlacementAnchorUpdateReason = reason;
+		lastPlacementAnchorUpdateTimestamp = Date.now();
 
 	}
 
@@ -140,6 +152,9 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		lastWorldLockUpdateTimestamp = null;
 		worldLockUpdatedInFrameLoop = false;
 		lastWorldLockVerificationAt = 0;
+		placementAnchorUpdateCount = 0;
+		lastPlacementAnchorUpdateReason = 'none';
+		lastPlacementAnchorUpdateTimestamp = null;
 
 	}
 
@@ -313,7 +328,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		}
 
 		const adjustedPlacement = createAdjustedPlacementFromBase( arPlacementBase );
-		resetArPlacementAnchorTransform();
+		resetArPlacementAnchorTransform( 'placement-base' );
 		arPlacedModel = placeAdjustedModel( {
 			modelTemplate,
 			placedModel: arPlacedModel,
@@ -376,7 +391,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
 			autoPlacementPending = false;
 			arPlacementBase = null;
-			resetArPlacementAnchorTransform();
+			resetArPlacementAnchorTransform( 'engineering-place-button' );
 			clearArPlacementTracking();
 			propertySelection.clearSelection();
 			updatePlacementSummary();
@@ -519,7 +534,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			if ( visualOffsetMeters !== 0 ) {
 				visualMatrix.premultiply( visualOffsetMatrix.makeTranslation( 0, visualOffsetMeters, 0 ) );
 			}
-			resetArPlacementAnchorTransform();
+			resetArPlacementAnchorTransform( 'engineering-place-button' );
 			arPlacementBase = null;
 			arPlacedModel = placeModelWithMatrix(
 				modelTemplate,
@@ -610,7 +625,13 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				updateCount: worldLockUpdateCount,
 				lastUpdateReason: lastWorldLockUpdateReason,
 				lastUpdateTimestamp: lastWorldLockUpdateTimestamp,
-				updatedInFrameLoop: worldLockUpdatedInFrameLoop
+				updatedInFrameLoop: worldLockUpdatedInFrameLoop,
+				placementAnchorUpdateCount,
+				lastPlacementAnchorUpdateReason,
+				lastPlacementAnchorUpdateTimestamp,
+				placementAnchorUpdatedFromFrameLoop: false,
+				placementAnchorUpdatedFromHitTest: false,
+				placementAnchorUpdatedFromReticle: false
 			};
 
 		}

@@ -13,7 +13,14 @@ import AutoImport from "unplugin-auto-import/vite";
 import Components from "unplugin-vue-components/vite";
 import { VantResolver } from "@vant/auto-import-resolver";
 
+const buildCommit = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7)
+  ?? process.env.GITHUB_SHA?.slice(0, 7)
+  ?? `v${process.env.npm_package_version ?? "dev"}@${new Date().toISOString()}`;
+
 export default defineConfig({
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(buildCommit),
+  },
   plugins: [
     vue(),
     AutoImport({

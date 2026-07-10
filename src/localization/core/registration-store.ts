@@ -107,7 +107,23 @@ export interface FootprintDiagnosticsState {
 	updatedAtText: string;
 }
 
+export interface DebugVector3 {
+	x: number;
+	y: number;
+	z: number;
+}
+
+export interface DebugScreenPoint {
+	x: number;
+	y: number;
+	visible: boolean;
+}
+
 export interface ModelPlacementDebugState {
+	sessionId?: string | null;
+	buildCommit?: string | null;
+	updatedAt?: number;
+	diagnosticSampleCount?: number;
 	visualPlacementMode?: string;
 	undergroundMode?: string;
 	buriedDepthRaw?: number | 'model-height' | null;
@@ -141,17 +157,24 @@ export interface ModelPlacementDebugState {
 	modelParentName?: string;
 	arModelAnchorParentName?: string;
 	arPlacementAnchorParentName?: string;
-	placedModelParentChain?: string;
-	arModelAnchorParentChain?: string;
-	arPlacementAnchorParentChain?: string;
-	reticleParentChain?: string;
-	cameraParentChain?: string;
+	placedModelParentChain?: string[];
+	modelAnchorParentChain?: string[];
+	placementAnchorParentChain?: string[];
+	arModelAnchorParentChain?: string[];
+	arPlacementAnchorParentChain?: string[];
+	reticleParentChain?: string[];
+	cameraParentChain?: string[];
 	unexpectedArModelAnchorParent?: boolean;
 	isArModelAnchorChildOfPlacementAnchor?: boolean;
 	isPlacedModelChildOfPlacementAnchor?: boolean;
 	isArModelAnchorChildOfCamera?: boolean;
 	isArModelAnchorChildOfReticle?: boolean;
 	isArModelAnchorChildOfScene?: boolean;
+	isModelChildOfCamera?: boolean;
+	isModelChildOfReticle?: boolean;
+	isModelChildOfPlacementAnchor?: boolean;
+	isModelAnchorChildOfScene?: boolean;
+	isPlacementAnchorChildOfScene?: boolean;
 	placementAnchorUpdateCount?: number;
 	lastPlacementAnchorUpdateReason?: string;
 	updatedPlacementAnchorFromFrameLoop?: boolean;
@@ -160,12 +183,38 @@ export interface ModelPlacementDebugState {
 	placedModelMatrixWorldChanged?: boolean;
 	arModelAnchorMatrixWorldChanged?: boolean;
 	arPlacementAnchorMatrixWorldChanged?: boolean;
+	modelAnchorMatrixWorldChanged?: boolean;
+	placementAnchorMatrixWorldChanged?: boolean;
 	arFromEnuMatrixChanged?: boolean;
 	buriedDepthModelHeightAxis?: 'y' | 'shortest-edge' | 'bbox-y';
 	modelHeightX?: number;
 	modelHeightY?: number;
 	modelHeightZ?: number;
 	chosenModelHeight?: number;
+	modelHeightAxis?: 'y' | 'shortest-edge' | 'bbox-y';
+	modelSizeX?: number;
+	modelSizeY?: number;
+	modelSizeZ?: number;
+	placedModelInitialWorld?: DebugVector3;
+	placedModelCurrentWorld?: DebugVector3;
+	placedModelDeltaX?: number;
+	placedModelDeltaY?: number;
+	placedModelDeltaZ?: number;
+	placedModelDeltaXZ?: number;
+	modelAnchorInitialWorld?: DebugVector3;
+	modelAnchorCurrentWorld?: DebugVector3;
+	modelAnchorDeltaX?: number;
+	modelAnchorDeltaY?: number;
+	modelAnchorDeltaZ?: number;
+	modelAnchorDeltaXZ?: number;
+	placementAnchorInitialWorld?: DebugVector3;
+	placementAnchorCurrentWorld?: DebugVector3;
+	placementAnchorDeltaX?: number;
+	placementAnchorDeltaY?: number;
+	placementAnchorDeltaZ?: number;
+	placementAnchorDeltaXZ?: number;
+	cameraInitialWorld?: DebugVector3;
+	cameraCurrentWorld?: DebugVector3;
 	yellowSurfaceCenterWorld?: { x: number; y: number; z: number };
 	purpleEngineeringCenterWorld?: { x: number; y: number; z: number };
 	purpleVisualCenterWorld?: { x: number; y: number; z: number };
@@ -175,6 +224,26 @@ export interface ModelPlacementDebugState {
 	purpleEngineeringDeltaY?: number;
 	purpleVisualDeltaXZ?: number;
 	purpleVisualDeltaY?: number;
+	yellowCenterInitialWorld?: DebugVector3;
+	yellowCenterCurrentWorld?: DebugVector3;
+	yellowWorldDeltaXZ?: number;
+	yellowWorldDeltaY?: number;
+	yellowScreenInitial?: DebugScreenPoint;
+	yellowScreenCurrent?: DebugScreenPoint;
+	yellowScreenDeltaPx?: number;
+	purpleEngineeringCenterInitialWorld?: DebugVector3;
+	purpleEngineeringCenterCurrentWorld?: DebugVector3;
+	purpleEngineeringWorldDeltaXZ?: number;
+	purpleEngineeringWorldDeltaY?: number;
+	purpleEngineeringScreenDeltaPx?: number;
+	purpleVisualCenterInitialWorld?: DebugVector3;
+	purpleVisualCenterCurrentWorld?: DebugVector3;
+	purpleVisualWorldDeltaXZ?: number;
+	purpleVisualWorldDeltaY?: number;
+	purpleVisualScreenDeltaPx?: number;
+	currentModelActualCenterWorld?: DebugVector3;
+	currentModelActualWorldDeltaXZ?: number;
+	currentModelActualWorldDeltaY?: number;
 	yellowUpdateCount?: number;
 	purpleEngineeringUpdateCount?: number;
 	purpleVisualUpdateCount?: number;
@@ -190,11 +259,31 @@ export interface ModelPlacementDebugState {
 	visualMinusYellowY?: number;
 	visualMinusEngineeringXZ?: number;
 	visualMinusEngineeringY?: number;
+	yellowToPurpleVisualScreenDistanceInitialPx?: number;
+	yellowToPurpleVisualScreenDistanceCurrentPx?: number;
+	yellowToPurpleVisualScreenDistanceDeltaPx?: number;
+	engineeringMatrixTranslationDelta?: number;
+	visualMatrixTranslationDelta?: number;
+	placedModelMatrixTranslationDelta?: number;
+	engineeringMatrixElements?: number[];
+	visualMatrixElements?: number[];
+	placedModelMatrixWorldElements?: number[];
+	modelAnchorMatrixWorldElements?: number[];
+	placementAnchorMatrixWorldElements?: number[];
+	arFromEnuMatrixElements?: number[];
 	engineeringPlacementCallCount?: number;
 	lastPlacementReason?: string;
 	lastPlacementTimestamp?: number;
 	replacedModelCount?: number;
 	hasExistingPlacedModel?: boolean;
+	calledFromFrameLoop?: boolean;
+	calledFromHitTest?: boolean;
+	calledFromButton?: boolean;
+	lastPlacementAnchorUpdateTimestamp?: number;
+	placementAnchorUpdatedFromFrameLoop?: boolean;
+	placementAnchorUpdatedFromHitTest?: boolean;
+	placementAnchorUpdatedFromReticle?: boolean;
+	parallaxStatus?: 'unknown' | 'likely-parallax' | 'real-world-movement' | 'matrix-space-error';
 	conclusion?: string;
 }
 
@@ -369,6 +458,9 @@ type RegistrationStoreListener = (state: RegistrationStoreState) => void;
 export interface RegistrationStore {
 	getState(): RegistrationStoreState;
 	patch(partialState: Partial<RegistrationStoreState>): void;
+	setModelPlacementDebug(state: ModelPlacementDebugState): void;
+	patchModelPlacementDebug(partial: Partial<ModelPlacementDebugState>): void;
+	clearModelPlacementDebug(): void;
 	subscribe(listener: RegistrationStoreListener): () => void;
 }
 
@@ -394,6 +486,27 @@ export function createRegistrationStore(
 			listeners.forEach( ( listener ) => {
 				listener( state );
 			} );
+
+		},
+		setModelPlacementDebug(modelPlacementDebug) {
+
+			state = { ...state, modelPlacementDebug };
+			listeners.forEach( ( listener ) => listener( state ) );
+
+		},
+		patchModelPlacementDebug(partial) {
+
+			state = {
+				...state,
+				modelPlacementDebug: { ...state.modelPlacementDebug, ...partial }
+			};
+			listeners.forEach( ( listener ) => listener( state ) );
+
+		},
+		clearModelPlacementDebug() {
+
+			state = { ...state, modelPlacementDebug: createDefaultModelPlacementDebugState() };
+			listeners.forEach( ( listener ) => listener( state ) );
 
 		},
 		subscribe(listener) {

@@ -42,6 +42,7 @@ import {
 	type AnnotationDetailState,
 	type ArDisplayMode,
 	type InspectionPlacementSource,
+	type DebugScreenPoint,
 	type ModelPlacementDebugState,
 	type RegistrationStore,
 	type RegistrationStoreState,
@@ -306,6 +307,11 @@ export class ThreeEngine {
 	private yellowSurfaceInitialCenterWorld: THREE.Vector3 | null = null;
 	private purpleEngineeringInitialCenterWorld: THREE.Vector3 | null = null;
 	private purpleVisualInitialCenterWorld: THREE.Vector3 | null = null;
+	private yellowScreenInitial: DebugScreenPoint | null = null;
+	private purpleEngineeringScreenInitial: DebugScreenPoint | null = null;
+	private purpleVisualScreenInitial: DebugScreenPoint | null = null;
+	private yellowToPurpleVisualScreenDistanceInitialPx: number | null = null;
+	private diagnosticSampleCount = 0;
 	private yellowUpdateCount = 0;
 	private purpleEngineeringUpdateCount = 0;
 	private purpleVisualUpdateCount = 0;
@@ -2023,8 +2029,6 @@ export class ThreeEngine {
 				this.purpleVisualInitialCenterWorld = averageVectors( visualPoints ).clone();
 			}
 			if ( this.engineeringDebugLayers.showModelActualControlPoints ) {
-				this.currentModelActualUpdateCount += 1;
-				this.currentModelActualLastUpdateReason = updateReason;
 				this.addDebugQuad( {
 					name: 'model-cp-actual-engineering',
 					points: engineeringPoints,
@@ -3286,6 +3290,11 @@ export class ThreeEngine {
 		this.yellowSurfaceInitialCenterWorld = null;
 		this.purpleEngineeringInitialCenterWorld = null;
 		this.purpleVisualInitialCenterWorld = null;
+		this.yellowScreenInitial = null;
+		this.purpleEngineeringScreenInitial = null;
+		this.purpleVisualScreenInitial = null;
+		this.yellowToPurpleVisualScreenDistanceInitialPx = null;
+		this.diagnosticSampleCount = 0;
 		this.yellowUpdateCount = 0;
 		this.purpleEngineeringUpdateCount = 0;
 		this.purpleVisualUpdateCount = 0;
@@ -3334,6 +3343,10 @@ export class ThreeEngine {
 		this.sceneBundle.reticle.updateMatrixWorld( true );
 		placedModel?.updateMatrixWorld( true );
 		const partial: ModelPlacementDebugState = {
+			sessionId: this.currentArSessionId,
+			buildCommit: __BUILD_COMMIT__,
+			updatedAt: Date.now(),
+			diagnosticSampleCount: this.diagnosticSampleCount,
 			engineeringPlacementCallCount: this.engineeringPlacementCallCount,
 			lastPlacementReason: this.lastPlacementReason,
 			lastPlacementTimestamp: this.lastPlacementTimestamp || undefined,
@@ -3342,7 +3355,9 @@ export class ThreeEngine {
 			modelParentName: placedModel?.parent?.name || placedModel?.parent?.type || '-',
 			arModelAnchorParentName: this.sceneBundle.arModelAnchor.parent?.name || this.sceneBundle.arModelAnchor.parent?.type || '-',
 			arPlacementAnchorParentName: this.sceneBundle.arPlacementAnchor.parent?.name || this.sceneBundle.arPlacementAnchor.parent?.type || '-',
-			placedModelParentChain: placedModel === null ? '-' : formatParentChain( placedModel ),
+			placedModelParentChain: placedModel === null ? [] : formatParentChain( placedModel ),
+			modelAnchorParentChain: formatParentChain( this.sceneBundle.arModelAnchor ),
+			placementAnchorParentChain: formatParentChain( this.sceneBundle.arPlacementAnchor ),
 			arModelAnchorParentChain: formatParentChain( this.sceneBundle.arModelAnchor ),
 			arPlacementAnchorParentChain: formatParentChain( this.sceneBundle.arPlacementAnchor ),
 			reticleParentChain: formatParentChain( this.sceneBundle.reticle ),
@@ -3353,12 +3368,26 @@ export class ThreeEngine {
 			isArModelAnchorChildOfCamera: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.camera ),
 			isArModelAnchorChildOfReticle: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.reticle ),
 			isArModelAnchorChildOfScene: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.scene ),
-			placementAnchorUpdateCount: worldLockDiagnostics.updateCount,
-			lastPlacementAnchorUpdateReason: worldLockDiagnostics.lastUpdateReason,
-			updatedPlacementAnchorFromFrameLoop: worldLockDiagnostics.updatedInFrameLoop
+			isModelChildOfCamera: placedModel === null ? false : isDescendantOf( placedModel, activeCamera ),
+			isModelChildOfReticle: placedModel === null ? false : isDescendantOf( placedModel, this.sceneBundle.reticle ),
+			isModelChildOfPlacementAnchor: placedModel === null ? false : isDescendantOf( placedModel, this.sceneBundle.arPlacementAnchor ),
+			isModelAnchorChildOfScene: isDescendantOf( this.sceneBundle.arModelAnchor, this.sceneBundle.scene ),
+			isPlacementAnchorChildOfScene: isDescendantOf( this.sceneBundle.arPlacementAnchor, this.sceneBundle.scene ),
+			placementAnchorUpdateCount: worldLockDiagnostics.placementAnchorUpdateCount,
+			lastPlacementAnchorUpdateReason: worldLockDiagnostics.lastPlacementAnchorUpdateReason,
+			lastPlacementAnchorUpdateTimestamp: worldLockDiagnostics.lastPlacementAnchorUpdateTimestamp ?? undefined,
+			placementAnchorUpdatedFromFrameLoop: worldLockDiagnostics.placementAnchorUpdatedFromFrameLoop,
+			placementAnchorUpdatedFromHitTest: worldLockDiagnostics.placementAnchorUpdatedFromHitTest,
+			placementAnchorUpdatedFromReticle: worldLockDiagnostics.placementAnchorUpdatedFromReticle,
+			updatedPlacementAnchorFromFrameLoop: worldLockDiagnostics.placementAnchorUpdatedFromFrameLoop,
+			calledFromFrameLoop: false,
+			calledFromHitTest: false,
+			calledFromButton: this.lastPlacementReason === 'engineering-place-button'
 		};
 
 		if ( placedModel !== null && initialSnapshot !== null && currentSnapshot !== null ) {
+			this.diagnosticSampleCount += 1;
+			partial.diagnosticSampleCount = this.diagnosticSampleCount;
 			const currentModelWorldPosition = currentSnapshot.placedModelWorldPosition;
 			const currentArModelAnchorWorldPosition = currentSnapshot.arModelAnchorWorldPosition;
 			const currentArPlacementAnchorWorldPosition = currentSnapshot.arPlacementAnchorWorldPosition;
@@ -3382,6 +3411,26 @@ export class ThreeEngine {
 			const cameraToModelDistance = currentSnapshot.cameraToModelDistance;
 			const worldLock = resolveWorldLockStatus( cameraMovedDistance, modelWorldDeltaXZ );
 			Object.assign( partial, {
+				placedModelInitialWorld: vector3ToRoundedObject( initialSnapshot.placedModelWorldPosition ),
+				placedModelCurrentWorld: vector3ToRoundedObject( currentModelWorldPosition ),
+				placedModelDeltaX: roundMeters( currentModelWorldPosition.x - initialSnapshot.placedModelWorldPosition.x ),
+				placedModelDeltaY: roundMeters( currentModelWorldPosition.y - initialSnapshot.placedModelWorldPosition.y ),
+				placedModelDeltaZ: roundMeters( currentModelWorldPosition.z - initialSnapshot.placedModelWorldPosition.z ),
+				placedModelDeltaXZ: roundMeters( modelWorldDeltaXZ ),
+				modelAnchorInitialWorld: vector3ToRoundedObject( initialSnapshot.arModelAnchorWorldPosition ),
+				modelAnchorCurrentWorld: vector3ToRoundedObject( currentArModelAnchorWorldPosition ),
+				modelAnchorDeltaX: roundMeters( currentArModelAnchorWorldPosition.x - initialSnapshot.arModelAnchorWorldPosition.x ),
+				modelAnchorDeltaY: roundMeters( currentArModelAnchorWorldPosition.y - initialSnapshot.arModelAnchorWorldPosition.y ),
+				modelAnchorDeltaZ: roundMeters( currentArModelAnchorWorldPosition.z - initialSnapshot.arModelAnchorWorldPosition.z ),
+				modelAnchorDeltaXZ: roundMeters( arModelAnchorWorldDeltaXZ ),
+				placementAnchorInitialWorld: vector3ToRoundedObject( initialSnapshot.arPlacementAnchorWorldPosition ),
+				placementAnchorCurrentWorld: vector3ToRoundedObject( currentArPlacementAnchorWorldPosition ),
+				placementAnchorDeltaX: roundMeters( currentArPlacementAnchorWorldPosition.x - initialSnapshot.arPlacementAnchorWorldPosition.x ),
+				placementAnchorDeltaY: roundMeters( currentArPlacementAnchorWorldPosition.y - initialSnapshot.arPlacementAnchorWorldPosition.y ),
+				placementAnchorDeltaZ: roundMeters( currentArPlacementAnchorWorldPosition.z - initialSnapshot.arPlacementAnchorWorldPosition.z ),
+				placementAnchorDeltaXZ: roundMeters( arPlacementAnchorWorldDeltaXZ ),
+				cameraInitialWorld: vector3ToRoundedObject( initialSnapshot.cameraWorldPosition ),
+				cameraCurrentWorld: vector3ToRoundedObject( currentCameraWorldPosition ),
 				initialModelWorldPosition: vector3ToRoundedObject( initialSnapshot.placedModelWorldPosition ),
 				currentModelWorldPosition: vector3ToRoundedObject( currentModelWorldPosition ),
 				modelWorldDeltaXZ: roundMeters( modelWorldDeltaXZ ),
@@ -3400,8 +3449,14 @@ export class ThreeEngine {
 				isWorldLocked: worldLock.isWorldLocked,
 				worldLockStatus: worldLock.status,
 				placedModelMatrixWorldChanged: matrixChanged( initialSnapshot.placedModelMatrixWorld, placedModel.matrixWorld ),
+				placedModelMatrixTranslationDelta: matrixTranslationDistance( initialSnapshot.placedModelMatrixWorld, placedModel.matrixWorld ),
+				placedModelMatrixWorldElements: roundMatrixElements( placedModel.matrixWorld ),
+				modelAnchorMatrixWorldElements: roundMatrixElements( this.sceneBundle.arModelAnchor.matrixWorld ),
+				placementAnchorMatrixWorldElements: roundMatrixElements( this.sceneBundle.arPlacementAnchor.matrixWorld ),
 				arModelAnchorMatrixWorldChanged: matrixChanged( initialSnapshot.arModelAnchorMatrixWorld, this.sceneBundle.arModelAnchor.matrixWorld ),
-				arPlacementAnchorMatrixWorldChanged: matrixChanged( initialSnapshot.arPlacementAnchorMatrixWorld, this.sceneBundle.arPlacementAnchor.matrixWorld )
+				arPlacementAnchorMatrixWorldChanged: matrixChanged( initialSnapshot.arPlacementAnchorMatrixWorld, this.sceneBundle.arPlacementAnchor.matrixWorld ),
+				modelAnchorMatrixWorldChanged: matrixChanged( initialSnapshot.arModelAnchorMatrixWorld, this.sceneBundle.arModelAnchor.matrixWorld ),
+				placementAnchorMatrixWorldChanged: matrixChanged( initialSnapshot.arPlacementAnchorMatrixWorld, this.sceneBundle.arPlacementAnchor.matrixWorld )
 			} );
 		}
 
@@ -3420,9 +3475,13 @@ export class ThreeEngine {
 				buriedDepthSource: buriedDepth.source,
 				modelHeight: buriedDepth.modelHeight ?? null,
 				buriedDepthModelHeightAxis: buriedDepth.modelHeightAxis ?? undefined,
+				modelHeightAxis: buriedDepth.modelHeightAxis ?? undefined,
 				modelHeightX: buriedDepth.modelHeightX ?? undefined,
 				modelHeightY: buriedDepth.modelHeightY ?? undefined,
 				modelHeightZ: buriedDepth.modelHeightZ ?? undefined,
+				modelSizeX: buriedDepth.modelHeightX ?? undefined,
+				modelSizeY: buriedDepth.modelHeightY ?? undefined,
+				modelSizeZ: buriedDepth.modelHeightZ ?? undefined,
 				chosenModelHeight: buriedDepth.chosenModelHeight ?? undefined,
 				depthMeters: roundMeters( buriedDepth.depthMeters ),
 				visualGroundOffsetMeters: roundMeters( registrationSolution.visualGroundOffsetMeters ),
@@ -3462,7 +3521,12 @@ export class ThreeEngine {
 			} ), {
 				engineeringMatrixChanged: matrixChanged( initialSnapshot?.engineeringMatrix ?? null, currentEngineeringMatrix ),
 				visualMatrixChanged: matrixChanged( initialSnapshot?.visualMatrix ?? null, currentVisualMatrix ),
-				arFromEnuMatrixChanged: matrixChanged( baselineArFromEnuMatrix, arFromEnuSolution.matrix )
+				arFromEnuMatrixChanged: matrixChanged( baselineArFromEnuMatrix, arFromEnuSolution.matrix ),
+				engineeringMatrixTranslationDelta: matrixTranslationDistance( initialSnapshot?.engineeringMatrix, currentEngineeringMatrix ),
+				visualMatrixTranslationDelta: matrixTranslationDistance( initialSnapshot?.visualMatrix, currentVisualMatrix ),
+				engineeringMatrixElements: roundMatrixElements( currentEngineeringMatrix ),
+				visualMatrixElements: roundMatrixElements( currentVisualMatrix ),
+				arFromEnuMatrixElements: roundMatrixElements( arFromEnuSolution.matrix )
 			} );
 
 			const footprintControlPoints = registrationSolution.controlPoints.slice( 0, 4 );
@@ -3476,10 +3540,72 @@ export class ThreeEngine {
 				const yellowSurfaceCenter = averageVectors( yellowSurfacePoints );
 				const purpleEngineeringCenter = averageVectors( purpleEngineeringPoints );
 				const purpleVisualCenter = averageVectors( purpleVisualPoints );
+				const currentModelActualCenter = placedModel === null
+					? null
+					: averageVectors( footprintControlPoints.map( ( point ) => point.modelLocal ) )
+						.applyMatrix4( placedModel.matrixWorld );
+				const currentModelActualInitialCenter = initialSnapshot === null
+					? currentModelActualCenter
+					: averageVectors( footprintControlPoints.map( ( point ) => point.modelLocal ) )
+						.applyMatrix4( initialSnapshot.placedModelMatrixWorld );
 				const yellowInitialCenter = this.yellowSurfaceInitialCenterWorld ?? yellowSurfaceCenter;
 				const purpleEngineeringInitialCenter = this.purpleEngineeringInitialCenterWorld ?? purpleEngineeringCenter;
 				const purpleVisualInitialCenter = this.purpleVisualInitialCenterWorld ?? purpleVisualCenter;
+				const yellowScreenCurrent = projectWorldToScreen(
+					yellowSurfaceCenter,
+					activeCamera,
+					this.sceneBundle.renderer.domElement
+				);
+				const purpleEngineeringScreenCurrent = projectWorldToScreen(
+					purpleEngineeringCenter,
+					activeCamera,
+					this.sceneBundle.renderer.domElement
+				);
+				const purpleVisualScreenCurrent = projectWorldToScreen(
+					purpleVisualCenter,
+					activeCamera,
+					this.sceneBundle.renderer.domElement
+				);
+				this.yellowScreenInitial ??= { ...yellowScreenCurrent };
+				this.purpleEngineeringScreenInitial ??= { ...purpleEngineeringScreenCurrent };
+				this.purpleVisualScreenInitial ??= { ...purpleVisualScreenCurrent };
+				const yellowToPurpleVisualScreenDistanceCurrentPx = screenPointDistance(
+					yellowScreenCurrent,
+					purpleVisualScreenCurrent
+				);
+				this.yellowToPurpleVisualScreenDistanceInitialPx ??= screenPointDistance(
+					this.yellowScreenInitial,
+					this.purpleVisualScreenInitial
+				);
+				if ( currentModelActualCenter !== null && currentModelActualInitialCenter !== null ) {
+					this.currentModelActualUpdateCount += 1;
+					this.currentModelActualLastUpdateReason = 'world-lock-sample';
+				}
 				Object.assign( partial, {
+					yellowCenterInitialWorld: vector3ToRoundedObject( yellowInitialCenter ),
+					yellowCenterCurrentWorld: vector3ToRoundedObject( yellowSurfaceCenter ),
+					yellowWorldDeltaXZ: roundMeters( horizontalDistanceXZ( yellowInitialCenter, yellowSurfaceCenter ) ),
+					yellowWorldDeltaY: roundMeters( Math.abs( yellowSurfaceCenter.y - yellowInitialCenter.y ) ),
+					yellowScreenInitial: this.yellowScreenInitial,
+					yellowScreenCurrent: yellowScreenCurrent,
+					yellowScreenDeltaPx: roundPixels( screenPointDistance( this.yellowScreenInitial, yellowScreenCurrent ) ),
+					purpleEngineeringCenterInitialWorld: vector3ToRoundedObject( purpleEngineeringInitialCenter ),
+					purpleEngineeringCenterCurrentWorld: vector3ToRoundedObject( purpleEngineeringCenter ),
+					purpleEngineeringWorldDeltaXZ: roundMeters( horizontalDistanceXZ( purpleEngineeringInitialCenter, purpleEngineeringCenter ) ),
+					purpleEngineeringWorldDeltaY: roundMeters( Math.abs( purpleEngineeringCenter.y - purpleEngineeringInitialCenter.y ) ),
+					purpleEngineeringScreenDeltaPx: roundPixels( screenPointDistance( this.purpleEngineeringScreenInitial, purpleEngineeringScreenCurrent ) ),
+					purpleVisualCenterInitialWorld: vector3ToRoundedObject( purpleVisualInitialCenter ),
+					purpleVisualCenterCurrentWorld: vector3ToRoundedObject( purpleVisualCenter ),
+					purpleVisualWorldDeltaXZ: roundMeters( horizontalDistanceXZ( purpleVisualInitialCenter, purpleVisualCenter ) ),
+					purpleVisualWorldDeltaY: roundMeters( Math.abs( purpleVisualCenter.y - purpleVisualInitialCenter.y ) ),
+					purpleVisualScreenDeltaPx: roundPixels( screenPointDistance( this.purpleVisualScreenInitial, purpleVisualScreenCurrent ) ),
+					currentModelActualCenterWorld: currentModelActualCenter === null ? undefined : vector3ToRoundedObject( currentModelActualCenter ),
+					currentModelActualWorldDeltaXZ: currentModelActualCenter === null || currentModelActualInitialCenter === null
+						? undefined
+						: roundMeters( horizontalDistanceXZ( currentModelActualInitialCenter, currentModelActualCenter ) ),
+					currentModelActualWorldDeltaY: currentModelActualCenter === null || currentModelActualInitialCenter === null
+						? undefined
+						: roundMeters( Math.abs( currentModelActualCenter.y - currentModelActualInitialCenter.y ) ),
 					yellowSurfaceCenterWorld: vector3ToRoundedObject( yellowSurfaceCenter ),
 					purpleEngineeringCenterWorld: vector3ToRoundedObject( purpleEngineeringCenter ),
 					purpleVisualCenterWorld: vector3ToRoundedObject( purpleVisualCenter ),
@@ -3503,16 +3629,19 @@ export class ThreeEngine {
 					visualMinusYellowXZ: roundMeters( horizontalDistanceXZ( purpleVisualCenter, yellowSurfaceCenter ) ),
 					visualMinusYellowY: roundMeters( Math.abs( purpleVisualCenter.y - yellowSurfaceCenter.y ) ),
 					visualMinusEngineeringXZ: roundMeters( horizontalDistanceXZ( purpleVisualCenter, purpleEngineeringCenter ) ),
-					visualMinusEngineeringY: roundMeters( Math.abs( purpleVisualCenter.y - purpleEngineeringCenter.y ) )
+					visualMinusEngineeringY: roundMeters( Math.abs( purpleVisualCenter.y - purpleEngineeringCenter.y ) ),
+					yellowToPurpleVisualScreenDistanceInitialPx: roundPixels( this.yellowToPurpleVisualScreenDistanceInitialPx ),
+					yellowToPurpleVisualScreenDistanceCurrentPx: roundPixels( yellowToPurpleVisualScreenDistanceCurrentPx ),
+					yellowToPurpleVisualScreenDistanceDeltaPx: roundPixels(
+						Math.abs( yellowToPurpleVisualScreenDistanceCurrentPx - this.yellowToPurpleVisualScreenDistanceInitialPx )
+					)
 				} );
 			}
 		}
 
+		partial.parallaxStatus = resolveParallaxStatus( partial );
 		partial.conclusion = createModelPlacementDebugConclusion( partial );
-		this.store.patch( { modelPlacementDebug: {
-			...this.store.getState().modelPlacementDebug,
-			...partial
-		} } );
+		this.store.patchModelPlacementDebug( partial );
 
 	}
 
@@ -3580,6 +3709,7 @@ export class ThreeEngine {
 		this.annotationLayer.setSelected( null );
 		this.clearAnnotationDetail();
 		this.clearEngineeringCornerDebug();
+		this.store.clearModelPlacementDebug();
 
 	}
 
@@ -3644,6 +3774,7 @@ export class ThreeEngine {
 
 	private handleXRSessionStart(): void {
 
+		this.store.clearModelPlacementDebug();
 		this.sessionLifecycleRuntime.handleXRSessionStart();
 
 	}
@@ -3656,6 +3787,7 @@ export class ThreeEngine {
 		this.annotationLayer.clear();
 		this.annotationLayer.setSelected( null );
 		this.clearAnnotationDetail();
+		this.store.clearModelPlacementDebug();
 		this.sessionLifecycleRuntime.handleXRSessionEnd();
 
 	}
@@ -4135,7 +4267,7 @@ function isDescendantOf(object: THREE.Object3D, ancestor: THREE.Object3D): boole
 
 }
 
-function formatParentChain(object: THREE.Object3D): string {
+function formatParentChain(object: THREE.Object3D): string[] {
 
 	const names: string[] = [];
 	let current: THREE.Object3D | null = object;
@@ -4143,7 +4275,7 @@ function formatParentChain(object: THREE.Object3D): string {
 		names.push( current.name || current.type );
 		current = current.parent;
 	}
-	return names.join( ' -> ' );
+	return names;
 
 }
 
@@ -4160,6 +4292,84 @@ function matrixChanged(initial: THREE.Matrix4 | null, current: THREE.Matrix4): b
 		}
 	}
 	return false;
+
+}
+
+function matrixTranslationDistance(
+	initial: THREE.Matrix4 | null | undefined,
+	current: THREE.Matrix4
+): number {
+
+	if ( initial === null || initial === undefined ) {
+		return 0;
+	}
+	return roundMeters(
+		new THREE.Vector3().setFromMatrixPosition( initial )
+			.distanceTo( new THREE.Vector3().setFromMatrixPosition( current ) )
+	);
+
+}
+
+function projectWorldToScreen(
+	world: THREE.Vector3,
+	camera: THREE.Camera,
+	canvas: HTMLCanvasElement
+): DebugScreenPoint {
+
+	const projectionCamera = camera instanceof THREE.ArrayCamera && camera.cameras.length > 0
+		? camera.cameras[ 0 ]
+		: camera;
+	const ndc = world.clone().project( projectionCamera );
+	const rect = canvas.getBoundingClientRect();
+	return {
+		x: ( ndc.x + 1 ) * rect.width / 2,
+		y: ( 1 - ndc.y ) * rect.height / 2,
+		visible: ndc.z >= -1 && ndc.z <= 1 && Math.abs( ndc.x ) <= 1 && Math.abs( ndc.y ) <= 1
+	};
+
+}
+
+function screenPointDistance(a: DebugScreenPoint, b: DebugScreenPoint): number {
+
+	return Math.hypot( a.x - b.x, a.y - b.y );
+
+}
+
+function roundPixels(value: number): number {
+
+	return Number( value.toFixed( 1 ) );
+
+}
+
+function roundMatrixElements(matrix: THREE.Matrix4): number[] {
+
+	return matrix.toArray().map( ( value ) => Number( value.toFixed( 6 ) ) );
+
+}
+
+function resolveParallaxStatus(
+	state: ModelPlacementDebugState
+): NonNullable<ModelPlacementDebugState['parallaxStatus']> {
+
+	if ( state.arFromEnuMatrixChanged === true || ( state.visualMinusEngineeringXZ ?? 0 ) > 0.1 ) {
+		return 'matrix-space-error';
+	}
+	if (
+		( state.placedModelDeltaXZ ?? state.modelWorldDeltaXZ ?? 0 ) > 0.1
+		|| ( state.purpleVisualWorldDeltaXZ ?? 0 ) > 0.1
+	) {
+		return 'real-world-movement';
+	}
+	if (
+		( state.placedModelDeltaXZ ?? state.modelWorldDeltaXZ ?? 0 ) < 0.05
+		&& ( state.purpleVisualWorldDeltaXZ ?? 0 ) < 0.05
+		&& state.visualMatrixChanged !== true
+		&& ( state.visualMinusEngineeringXZ ?? 0 ) < 0.05
+		&& ( state.yellowToPurpleVisualScreenDistanceDeltaPx ?? 0 ) > 5
+	) {
+		return 'likely-parallax';
+	}
+	return 'unknown';
 
 }
 
@@ -4230,11 +4440,14 @@ function createModelPlacementDebugConclusion(state: ModelPlacementDebugState): s
 	if ( state.arFromEnuMatrixChanged === true ) {
 		return 'arFromEnu 在放置后发生变化，可能导致模型重定位。';
 	}
+	if ( ( state.visualMinusEngineeringXZ ?? 0 ) > 0.1 && ( state.visualOffsetY ?? 0 ) !== 0 ) {
+		return '下沉偏移影响了水平位置，请检查 visualMatrix 的乘法顺序或偏移坐标空间。';
+	}
 	if (
 		state.isPlacedModelChildOfPlacementAnchor === true
-		&& ( state.arPlacementAnchorWorldDeltaXZ ?? 0 ) > 0.05
+		&& ( state.placementAnchorDeltaXZ ?? state.arPlacementAnchorWorldDeltaXZ ?? 0 ) > 0.1
 	) {
-		return '模型疑似跟随 moving placementAnchor，请改挂 fixed model root。';
+		return '模型受到移动 placementAnchor 影响。';
 	}
 	if ( ( state.engineeringPlacementCallCount ?? 0 ) > 1 || ( state.replacedModelCount ?? 0 ) > 0 ) {
 		return '模型被重复放置，请检查工程放置入口。';
@@ -4246,11 +4459,20 @@ function createModelPlacementDebugConclusion(state: ModelPlacementDebugState): s
 	) {
 		return '模型与相机距离几乎不变，但模型世界坐标在变化，疑似存在跟随相机的挂载或重算。';
 	}
-	if ( state.worldLockStatus === 'error' ) {
-		return '模型疑似跟随相机移动，请检查 anchor parent。';
+	if (
+		( state.placedModelDeltaXZ ?? state.modelWorldDeltaXZ ?? 0 ) > 0.1
+		|| ( state.purpleVisualWorldDeltaXZ ?? 0 ) > 0.1
+	) {
+		return '模型或地下紫色点在 AR 世界中发生真实移动。';
 	}
 	if ( ( state.visualMinusEngineeringXZ ?? 0 ) > 0.05 ) {
 		return 'visualMatrix 相对 engineeringMatrix 产生了水平偏移，请检查地下显示偏移是否只作用于 Y。';
+	}
+	if ( state.parallaxStatus === 'likely-parallax' ) {
+		return '模型和地下紫色点的世界坐标固定；当前屏幕相对位移来自不同深度平面的视差。';
+	}
+	if ( state.worldLockStatus === 'error' ) {
+		return '模型疑似跟随相机移动，请检查 anchor parent。';
 	}
 	if ( typeof state.engineeringHorizontalRms === 'number' && state.engineeringHorizontalRms > 0.3 ) {
 		return '工程水平误差较大，请检查 modelLocal / placement 矩阵。';

@@ -37,6 +37,7 @@ const arDebugMode = isArDebugEnabled();
 const debugInfoOpen = ref( false );
 const registrationDiagnosticOpen = ref( false );
 const modelPlacementDiagnosticOpen = ref( false );
+const diagnosticCopyFeedback = ref( '' );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
@@ -283,6 +284,81 @@ const modelPlacementDebugCardsExtended = computed( () => {
 			label: 'purple updates',
 			value: `yellow ${formatUpdateMeta( debug.yellowUpdateCount, debug.yellowLastUpdateReason )}; eng ${formatUpdateMeta( debug.purpleEngineeringUpdateCount, debug.purpleEngineeringLastUpdateReason )}; visual ${formatUpdateMeta( debug.purpleVisualUpdateCount, debug.purpleVisualLastUpdateReason )}; current ${formatUpdateMeta( debug.currentModelActualUpdateCount, debug.currentModelActualLastUpdateReason )}; frameLoop ${formatBoolean( debug.purpleDiagnosticsUpdatedInFrameLoop )}`,
 			wide: true
+		}
+	];
+} );
+
+const modelPlacementDebugGroups = computed( () => {
+	const debug = engine.value.modelPlacementDebug;
+	return [
+		{
+			title: '当前配置',
+			tone: 'normal',
+			items: [
+				{ label: 'Build / 更新时间', value: `${debug.buildCommit ?? '-'} / ${formatTimestamp( debug.updatedAt )}`, wide: true },
+				{ label: '地下模式', value: debug.undergroundMode ?? debug.visualPlacementMode ?? '-' },
+				{ label: 'buriedDepth 原始值', value: formatBuriedDepthRaw( debug.buriedDepthRaw ) },
+				{ label: '深度来源 / 实际深度', value: `${formatBuriedDepthSource( debug.buriedDepthSource )} / ${formatMeters( debug.depthMeters )}`, wide: true },
+				{ label: 'visualOffsetY', value: formatMeters( debug.visualOffsetY ) },
+				{ label: '模型尺寸 X/Y/Z', value: `${formatMeters( debug.modelSizeX ?? debug.modelHeightX )} / ${formatMeters( debug.modelSizeY ?? debug.modelHeightY )} / ${formatMeters( debug.modelSizeZ ?? debug.modelHeightZ )}`, wide: true },
+				{ label: '高度轴 / 选中高度', value: `${formatDepthAxis( debug.modelHeightAxis ?? debug.buriedDepthModelHeightAxis )} / ${formatMeters( debug.chosenModelHeight )}`, wide: true }
+			]
+		},
+		{
+			title: 'World Lock',
+			tone: worldDeltaTone( Math.max( debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ ?? 0, debug.modelAnchorDeltaXZ ?? debug.arModelAnchorWorldDeltaXZ ?? 0, debug.placementAnchorDeltaXZ ?? debug.arPlacementAnchorWorldDeltaXZ ?? 0 ) ),
+			items: [
+				{ label: '相机移动', value: formatMeters( debug.cameraMovedDistance ) },
+				{ label: '模型漂移 XZ / Y', value: `${formatMeters( debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ )} / ${formatSignedMeters( debug.placedModelDeltaY ?? debug.modelWorldDeltaY )}`, wide: true },
+				{ label: 'modelAnchor 漂移 XZ', value: formatMeters( debug.modelAnchorDeltaXZ ?? debug.arModelAnchorWorldDeltaXZ ) },
+				{ label: 'placementAnchor 漂移 XZ', value: formatMeters( debug.placementAnchorDeltaXZ ?? debug.arPlacementAnchorWorldDeltaXZ ) },
+				{ label: '相机到模型 初始/当前/变化', value: `${formatMeters( debug.cameraToModelDistanceInitial )} / ${formatMeters( debug.cameraToModelDistanceCurrent )} / ${formatSignedMeters( debug.cameraToModelDistanceDelta )}`, wide: true },
+				{ label: '模型父级链路', value: formatParentChain( debug.placedModelParentChain ), wide: true },
+				{ label: 'modelAnchor 父级链路', value: formatParentChain( debug.modelAnchorParentChain ?? debug.arModelAnchorParentChain ), wide: true },
+				{ label: 'placementAnchor 父级链路', value: formatParentChain( debug.placementAnchorParentChain ?? debug.arPlacementAnchorParentChain ), wide: true }
+			]
+		},
+		{
+			title: '矩阵变化',
+			tone: matrixTone( debug ),
+			items: [
+				{ label: 'engineering / visual', value: `${formatChanged( debug.engineeringMatrixChanged )} / ${formatChanged( debug.visualMatrixChanged )}`, wide: true },
+				{ label: 'model / modelAnchor', value: `${formatChanged( debug.placedModelMatrixWorldChanged )} / ${formatChanged( debug.modelAnchorMatrixWorldChanged ?? debug.arModelAnchorMatrixWorldChanged )}`, wide: true },
+				{ label: 'placementAnchor / arFromEnu', value: `${formatChanged( debug.placementAnchorMatrixWorldChanged ?? debug.arPlacementAnchorMatrixWorldChanged )} / ${formatChanged( debug.arFromEnuMatrixChanged )}`, wide: true },
+				{ label: '矩阵平移变化 eng/visual/model', value: `${formatMeters( debug.engineeringMatrixTranslationDelta )} / ${formatMeters( debug.visualMatrixTranslationDelta )} / ${formatMeters( debug.placedModelMatrixTranslationDelta )}`, wide: true }
+			]
+		},
+		{
+			title: '707 点位诊断',
+			tone: worldDeltaTone( Math.max( debug.currentModelActualWorldDeltaXZ ?? 0, debug.purpleVisualWorldDeltaXZ ?? 0, debug.visualMinusEngineeringXZ ?? 0 ) ),
+			items: [
+				{ label: '黄/工程紫/地下紫漂移 XZ', value: `${formatMeters( debug.yellowWorldDeltaXZ )} / ${formatMeters( debug.purpleEngineeringWorldDeltaXZ )} / ${formatMeters( debug.purpleVisualWorldDeltaXZ )}`, wide: true },
+				{ label: '当前模型实际点漂移 XZ / Y', value: `${formatMeters( debug.currentModelActualWorldDeltaXZ )} / ${formatMeters( debug.currentModelActualWorldDeltaY )}`, wide: true },
+				{ label: '工程紫 - 黄色 XZ / Y', value: `${formatMeters( debug.engineeringMinusYellowXZ )} / ${formatMeters( debug.engineeringMinusYellowY )}`, wide: true },
+				{ label: '地下紫 - 工程紫 XZ / Y', value: `${formatMeters( debug.visualMinusEngineeringXZ )} / ${formatMeters( debug.visualMinusEngineeringY )}`, wide: true },
+				{ label: '地下紫 - 黄色 XZ / Y', value: `${formatMeters( debug.visualMinusYellowXZ )} / ${formatMeters( debug.visualMinusYellowY )}`, wide: true }
+			]
+		},
+		{
+			title: '屏幕视差',
+			tone: debug.parallaxStatus === 'real-world-movement' || debug.parallaxStatus === 'matrix-space-error' ? 'error' : debug.parallaxStatus === 'likely-parallax' ? 'warning' : 'normal',
+			items: [
+				{ label: '黄色屏幕漂移', value: formatPixels( debug.yellowScreenDeltaPx ) },
+				{ label: '地下紫点屏幕漂移', value: formatPixels( debug.purpleVisualScreenDeltaPx ) },
+				{ label: '黄-地下紫屏幕距离 初始/当前/变化', value: `${formatPixels( debug.yellowToPurpleVisualScreenDistanceInitialPx )} / ${formatPixels( debug.yellowToPurpleVisualScreenDistanceCurrentPx )} / ${formatPixels( debug.yellowToPurpleVisualScreenDistanceDeltaPx )}`, wide: true },
+				{ label: '说明', value: '屏幕像素变化需结合 world delta 判断，不能单独判定模型移动。', wide: true }
+			]
+		},
+		{
+			title: '更新来源',
+			tone: 'normal',
+			items: [
+				{ label: '黄色 / 工程紫更新', value: `${formatUpdateMeta( debug.yellowUpdateCount, debug.yellowLastUpdateReason )} / ${formatUpdateMeta( debug.purpleEngineeringUpdateCount, debug.purpleEngineeringLastUpdateReason )}`, wide: true },
+				{ label: '地下紫 / 当前实际点更新', value: `${formatUpdateMeta( debug.purpleVisualUpdateCount, debug.purpleVisualLastUpdateReason )} / ${formatUpdateMeta( debug.currentModelActualUpdateCount, debug.currentModelActualLastUpdateReason )}`, wide: true },
+				{ label: 'placementAnchor 更新', value: `${formatUpdateMeta( debug.placementAnchorUpdateCount, debug.lastPlacementAnchorUpdateReason )}; frame ${formatBoolean( debug.placementAnchorUpdatedFromFrameLoop )}; hit-test ${formatBoolean( debug.placementAnchorUpdatedFromHitTest )}; reticle ${formatBoolean( debug.placementAnchorUpdatedFromReticle )}`, wide: true },
+				{ label: '模型放置', value: `次数 ${debug.engineeringPlacementCallCount ?? 0}; 替换 ${debug.replacedModelCount ?? 0}; 原因 ${debug.lastPlacementReason ?? '-'}`, wide: true },
+				{ label: '结论', value: debug.conclusion ?? '-', wide: true }
+			]
 		}
 	];
 } );
@@ -543,6 +619,39 @@ function formatMeters(value: number | null | undefined): string {
 		: '-';
 }
 
+function formatSignedMeters(value: number | null | undefined): string {
+	return typeof value === 'number' && Number.isFinite( value )
+		? `${value >= 0 ? '+' : ''}${value.toFixed( 2 )}m`
+		: '-';
+}
+
+function formatPixels(value: number | null | undefined): string {
+	return typeof value === 'number' && Number.isFinite( value ) ? `${value.toFixed( 1 )}px` : '-';
+}
+
+function formatTimestamp(value: number | undefined): string {
+	return value === undefined ? '-' : new Date( value ).toLocaleTimeString( 'zh-CN', { hour12: false } );
+}
+
+function formatParentChain(value: string[] | undefined): string {
+	return value?.join( ' -> ' ) || '-';
+}
+
+function worldDeltaTone(value: number): 'normal' | 'warning' | 'error' {
+	return value > 0.1 ? 'error' : value >= 0.05 ? 'warning' : 'normal';
+}
+
+function matrixTone(debug: {
+	engineeringMatrixChanged?: boolean;
+	visualMatrixChanged?: boolean;
+	placedModelMatrixWorldChanged?: boolean;
+	modelAnchorMatrixWorldChanged?: boolean;
+	placementAnchorMatrixWorldChanged?: boolean;
+	arFromEnuMatrixChanged?: boolean;
+}): 'normal' | 'error' {
+	return Object.values( debug ).some( Boolean ) ? 'error' : 'normal';
+}
+
 function formatBuriedDepthRaw(value: number | 'model-height' | null | undefined): string {
 	if ( value === 'model-height' ) {
 		return 'model-height';
@@ -575,6 +684,51 @@ function formatVector3Compact(
 
 function formatUpdateMeta(count: number | undefined, reason: string | undefined): string {
 	return `${count ?? 0}@${reason ?? 'none'}`;
+}
+
+async function copyModelPlacementDiagnostics(): Promise<void> {
+	const debug = engine.value.modelPlacementDebug;
+	const payload = {
+		buildCommit: debug.buildCommit ?? null,
+		sessionId: debug.sessionId ?? null,
+		buriedDepthRaw: debug.buriedDepthRaw ?? null,
+		depthMeters: debug.depthMeters ?? null,
+		visualOffsetY: debug.visualOffsetY ?? null,
+		cameraMovedDistance: debug.cameraMovedDistance ?? null,
+		placedModelDeltaXZ: debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ ?? null,
+		modelAnchorDeltaXZ: debug.modelAnchorDeltaXZ ?? debug.arModelAnchorWorldDeltaXZ ?? null,
+		placementAnchorDeltaXZ: debug.placementAnchorDeltaXZ ?? debug.arPlacementAnchorWorldDeltaXZ ?? null,
+		cameraToModelDistanceInitial: debug.cameraToModelDistanceInitial ?? null,
+		cameraToModelDistanceCurrent: debug.cameraToModelDistanceCurrent ?? null,
+		cameraToModelDistanceDelta: debug.cameraToModelDistanceDelta ?? null,
+		engineeringMatrixChanged: debug.engineeringMatrixChanged ?? null,
+		visualMatrixChanged: debug.visualMatrixChanged ?? null,
+		placedModelMatrixWorldChanged: debug.placedModelMatrixWorldChanged ?? null,
+		arFromEnuMatrixChanged: debug.arFromEnuMatrixChanged ?? null,
+		engineeringMinusYellowXZ: debug.engineeringMinusYellowXZ ?? null,
+		engineeringMinusYellowY: debug.engineeringMinusYellowY ?? null,
+		visualMinusEngineeringXZ: debug.visualMinusEngineeringXZ ?? null,
+		visualMinusEngineeringY: debug.visualMinusEngineeringY ?? null,
+		yellowWorldDeltaXZ: debug.yellowWorldDeltaXZ ?? null,
+		purpleEngineeringWorldDeltaXZ: debug.purpleEngineeringWorldDeltaXZ ?? null,
+		purpleVisualWorldDeltaXZ: debug.purpleVisualWorldDeltaXZ ?? null,
+		currentModelActualWorldDeltaXZ: debug.currentModelActualWorldDeltaXZ ?? null,
+		yellowToPurpleVisualScreenDistanceDeltaPx: debug.yellowToPurpleVisualScreenDistanceDeltaPx ?? null,
+		yellowUpdateCount: debug.yellowUpdateCount ?? 0,
+		purpleEngineeringUpdateCount: debug.purpleEngineeringUpdateCount ?? 0,
+		purpleVisualUpdateCount: debug.purpleVisualUpdateCount ?? 0,
+		currentModelActualUpdateCount: debug.currentModelActualUpdateCount ?? 0,
+		placementAnchorUpdateCount: debug.placementAnchorUpdateCount ?? 0,
+		engineeringPlacementCallCount: debug.engineeringPlacementCallCount ?? 0,
+		replacedModelCount: debug.replacedModelCount ?? 0,
+		conclusion: debug.conclusion ?? null
+	};
+	try {
+		await navigator.clipboard.writeText( JSON.stringify( payload, null, 2 ) );
+		diagnosticCopyFeedback.value = '诊断数据已复制';
+	} catch {
+		diagnosticCopyFeedback.value = '复制失败，请检查浏览器剪贴板权限';
+	}
 }
 
 function formatBoolean(value: boolean | undefined): string {
@@ -1028,7 +1182,27 @@ function setArOverlayClass(active: boolean): void {
 						<button type="button" class="debug-toggle" @click="modelPlacementDiagnosticOpen = !modelPlacementDiagnosticOpen">
 							{{ modelPlacementDiagnosticOpen ? '收起模型诊断' : '模型诊断' }}
 						</button>
-						<ArInfoGrid v-if="modelPlacementDiagnosticOpen" :items="modelPlacementDebugCardsExtended" />
+						<div v-if="modelPlacementDiagnosticOpen" class="model-diagnostic-groups">
+							<div
+								v-for="group in modelPlacementDebugGroups"
+								:key="group.title"
+								class="model-diagnostic-group"
+								:class="group.tone"
+							>
+								<div class="section-label">{{ group.title }}</div>
+								<ArInfoGrid :items="group.items" />
+							</div>
+							<button type="button" class="debug-toggle" @click="copyModelPlacementDiagnostics()">
+								复制诊断数据
+							</button>
+							<div v-if="diagnosticCopyFeedback" class="runtime-banner">
+								{{ diagnosticCopyFeedback }}
+							</div>
+							<details v-if="arDebugMode" class="diagnostic-raw">
+								<summary>Raw debug JSON / matrices</summary>
+								<pre>{{ JSON.stringify(engine.modelPlacementDebug, null, 2) }}</pre>
+							</details>
+						</div>
 						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="debugInfoOpen = !debugInfoOpen">
 							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
 						</button>
@@ -1497,6 +1671,37 @@ function setArOverlayClass(active: boolean): void {
 	padding: 8px 10px;
 	font-size: 12px;
 	font-weight: 800;
+}
+
+.model-diagnostic-groups {
+	display: grid;
+	gap: 12px;
+	margin-top: 10px;
+}
+
+.model-diagnostic-group {
+	padding-left: 8px;
+	border-left: 3px solid #22c55e;
+}
+
+.model-diagnostic-group.warning {
+	border-left-color: #facc15;
+}
+
+.model-diagnostic-group.error {
+	border-left-color: #ef4444;
+}
+
+.diagnostic-raw {
+	font-size: 12px;
+	color: rgba(230, 240, 255, 0.88);
+}
+
+.diagnostic-raw pre {
+	max-height: 320px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
 }
 
 .sheet-header {
