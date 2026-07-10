@@ -304,6 +304,8 @@ export class ThreeEngine {
 	private currentArSessionId: string | null = null;
 	private siteOriginReferencePanelOpen = false;
 	private currentArSessionRequestMode: ArSessionRequestMode = 'normal';
+	private readonly frameTaskErrorCounts = new Map<string, number>();
+	private readonly frameTaskLastErrorLogAt = new Map<string, number>();
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
 	private arSessionEndPending = false;
 	private lastAnnotationLabelsSignature = '';
@@ -728,19 +730,37 @@ export class ThreeEngine {
 				this.placementWorkflow.attemptAutoPlacement();
 			},
 			onFrameUpdate: ( frame ) => {
-				this.displayModeController.updateDepthState( frame );
-				updateCpuDepthFromFrame(
-					frame,
-					this.sceneBundle.renderer.xr.getReferenceSpace(),
-					this.currentArSessionRequestMode
-				);
-				this.inspectionMarkerWorkflow.syncHints();
-				this.placementSession.updateArPlacementAnchor( frame );
-				this.syncArSessionPhase();
-				this.annotationLabelsController.update( this.sceneBundle.renderer.xr.getCamera() );
-				this.updateTargetGuidance();
-				this.placementSession.verifyWorldLockedPlacement( 'xr-frame' );
-				this.updateModelPlacementWorldLockDebug();
+				this.safeFrameTask( 'display-depth-state', () => {
+					this.displayModeController.updateDepthState( frame );
+				} );
+				this.safeFrameTask( 'cpu-depth-debug', () => {
+					updateCpuDepthFromFrame(
+						frame,
+						this.sceneBundle.renderer.xr.getReferenceSpace(),
+						this.currentArSessionRequestMode
+					);
+				} );
+				this.safeFrameTask( 'marker-hints', () => {
+					this.inspectionMarkerWorkflow.syncHints();
+				} );
+				this.safeFrameTask( 'placement-anchor', () => {
+					this.placementSession.updateArPlacementAnchor( frame );
+				} );
+				this.safeFrameTask( 'session-phase', () => {
+					this.syncArSessionPhase();
+				} );
+				this.safeFrameTask( 'annotation-labels', () => {
+					this.annotationLabelsController.update( this.sceneBundle.renderer.xr.getCamera() );
+				} );
+				this.safeFrameTask( 'target-guidance', () => {
+					this.updateTargetGuidance();
+				} );
+				this.safeFrameTask( 'world-lock-verify', () => {
+					this.placementSession.verifyWorldLockedPlacement( 'xr-frame' );
+				} );
+				this.safeFrameTask( 'world-lock-debug', () => {
+					this.updateModelPlacementWorldLockDebug();
+				} );
 			}
 		} );
 
@@ -1488,6 +1508,51 @@ export class ThreeEngine {
 
 		this.currentStatus = message;
 		this.store.patch( { runtimeStatus: message } );
+
+	}
+
+	private safeFrameTask(stage: string, task: () => void): void {
+
+		const startedAt = performance.now();
+		try {
+			task();
+		} catch ( error ) {
+			this.reportFrameTaskError( stage, error );
+		} finally {
+			const durationMs = performance.now() - startedAt;
+			if ( import.meta.env.VITE_AR_DEBUG === 'true' && durationMs > 33 ) {
+				console.warn( '[ThreeEngineFrameTaskSlow]', {
+					stage,
+					durationMs: Number( durationMs.toFixed( 2 ) )
+				} );
+			}
+		}
+
+	}
+
+	private reportFrameTaskError(stage: string, error: unknown): void {
+
+		const now = performance.now();
+		const previousLogAt = this.frameTaskLastErrorLogAt.get( stage ) ?? 0;
+		const count = ( this.frameTaskErrorCounts.get( stage ) ?? 0 ) + 1;
+		this.frameTaskErrorCounts.set( stage, count );
+		if ( now - previousLogAt < 3000 ) {
+			return;
+		}
+		this.frameTaskLastErrorLogAt.set( stage, now );
+		const message = error instanceof Error ? error.message : String( error );
+		console.error( '[ThreeEngineFrameTaskError]', {
+			stage,
+			errorName: error instanceof Error ? error.name : typeof error,
+			errorMessage: message,
+			stack: error instanceof Error ? error.stack : undefined,
+			timestamp: Date.now(),
+			errorCount: count,
+			sessionMode: this.currentArSessionRequestMode,
+			isPresenting: this.sceneBundle.renderer.xr.isPresenting
+		} );
+		this.setStatus( `XR 帧任务异常：${stage}；已继续渲染。` );
+		this.emit();
 
 	}
 

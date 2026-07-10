@@ -27,6 +27,7 @@ interface XRDepthSensingSessionInit {
 	depthSensing?: {
 		usagePreference: Array<'cpu-optimized' | 'gpu-optimized'>;
 		dataFormatPreference: Array<'luminance-alpha' | 'float32' | 'unsigned-short'>;
+		matchDepthView?: boolean;
 	};
 }
 
@@ -51,6 +52,7 @@ const RETICLE_PERSIST_MS = 350;
 const PLACEABLE_HIT_RETENTION_MS = 1600;
 const HIT_QUALITY_WINDOW_MS = 700;
 const MAX_HIT_QUALITY_SAMPLES = 24;
+const ENABLE_DEPTH_IN_NORMAL_AR = import.meta.env.VITE_ENABLE_DEPTH_IN_NORMAL_AR === 'true';
 
 export interface ImmersiveArSupportInfo {
 	supported: boolean;
@@ -142,6 +144,14 @@ export function createXRHitTestController(
 
 		activeSession = session;
 		session.addEventListener( 'select', handleSelect );
+		console.info( '[ArSessionStarted]', {
+			mode: currentSessionMode,
+			depthRequested: currentSessionMode !== 'normal',
+			depthGranted: readXrSessionProperty( session, 'depthUsage' ) !== undefined,
+			depthUsage: readXrSessionProperty( session, 'depthUsage' ),
+			depthDataFormat: readXrSessionProperty( session, 'depthDataFormat' ),
+			depthActive: readXrSessionProperty( session, 'depthActive' )
+		} );
 
 		// Detect CPU Depth sensing availability on session start
 		resetDepthSensingSessionState();
@@ -412,7 +422,10 @@ export function createXRHitTestController(
 			}
 
 			sessionRequestPending = true;
-			currentSessionMode = options.mode ?? ( options.cpuDepthDebug ? 'cpu-depth-debug' : 'normal' );
+			const requestedMode = options.mode ?? ( options.cpuDepthDebug ? 'cpu-depth-debug' : 'normal' );
+			currentSessionMode = requestedMode === 'normal' && ENABLE_DEPTH_IN_NORMAL_AR
+				? 'normal-with-depth'
+				: requestedMode;
 			setStatus( '正在请求 AR 会话...' );
 
 			try {
@@ -471,8 +484,8 @@ export function createXRHitTestController(
  * 且 WebXR 没有取消 API。因此绝不能用超时 race 去“放弃”一个请求，
  * 否则会产生占用摄像头却无渲染循环驱动的“孤儿 session”，直接导致画面卡死。
  *
- * 普通 AR 把 depth-sensing 放在 optionalFeatures，拿得到就用于真实遮挡诊断，
- * 拿不到也不阻塞会话。CPU Depth 调试模式仍可显式请求并安全降级。
+ * 默认普通 AR 不请求 depth；depth 只在 normal-with-depth 或 cpu-depth-debug 请求。
+ * 这样 depth 接入未完成时不会拖垮正式 AR 帧循环。
  */
 async function requestArSession(
 	xr: XRSystem,
@@ -481,7 +494,12 @@ async function requestArSession(
 
 	const mode = options.mode ?? ( options.cpuDepthDebug ? 'cpu-depth-debug' : 'normal' );
 
-	const plainInit = {
+	const normalInit = {
+		requiredFeatures: [ 'hit-test' ],
+		optionalFeatures: [ 'dom-overlay', 'anchors' ],
+		domOverlay: { root: document.body }
+	};
+	const normalDepthInit = {
 		requiredFeatures: [ 'hit-test', 'depth-sensing' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		depthSensing: {
@@ -491,33 +509,39 @@ async function requestArSession(
 		},
 		domOverlay: { root: document.body }
 	};
-	const plainInitWithoutDepth = {
-		requiredFeatures: [ 'hit-test' ],
-		optionalFeatures: [ 'dom-overlay', 'anchors' ],
-		domOverlay: { root: document.body }
-	};
 
 	if ( mode === 'normal' ) {
 		console.info( '[ArSessionRequestedNormal]' );
+		return {
+			session: await xr.requestSession( 'immersive-ar', normalInit as XRSessionInit ),
+			mode: 'normal'
+		};
+	}
+
+	if ( mode === 'normal-with-depth' ) {
+		console.info( '[ArSessionRequestedNormalWithDepth]' );
 		try {
 			return {
-				session: await xr.requestSession( 'immersive-ar', plainInit as XRSessionInit ),
-				mode: 'normal'
+				session: await xr.requestSession( 'immersive-ar', normalDepthInit as XRSessionInit ),
+				mode: 'normal-with-depth'
 			};
 		} catch ( error ) {
-			console.warn( '[ArSessionDepthOptionalFallbackWithoutDepth]', {
-				reason: error instanceof Error ? error.message : String( error )
-			} );
-			return {
-				session: await xr.requestSession( 'immersive-ar', plainInitWithoutDepth as XRSessionInit ),
-				mode: 'normal'
-			};
+			if ( error instanceof DOMException && error.name === 'NotSupportedError' ) {
+				console.warn( '[ArSessionDepthNotSupportedFallbackWithoutDepth]', {
+					reason: error.message
+				} );
+				return {
+					session: await xr.requestSession( 'immersive-ar', normalInit as XRSessionInit ),
+					mode: 'normal'
+				};
+			}
+			throw error;
 		}
 	}
 
 	const depthInit = {
-		requiredFeatures: [ 'hit-test' ],
-		optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
+		requiredFeatures: [ 'hit-test', 'depth-sensing' ],
+		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		depthSensing: {
 			usagePreference: [ 'cpu-optimized' ],
 			dataFormatPreference: [ 'luminance-alpha', 'float32' ],
@@ -532,18 +556,31 @@ async function requestArSession(
 			session: await xr.requestSession( 'immersive-ar', depthInit as XRSessionInit ),
 			mode: 'cpu-depth-debug'
 		};
+	} catch ( error ) {
+		if ( error instanceof DOMException && error.name === 'NotSupportedError' ) {
+			// depth 配置被同步拒绝（不会创建 session），可安全降级重试
+			setCpuDepthEnabled( false );
+			cpuDepthDebugState.supported = false;
+			cpuDepthDebugState.active = false;
+			cpuDepthDebugState.depthSensingSessionEnabled = false;
+			cpuDepthDebugState.errorMessage = '当前设备或浏览器不支持 WebXR CPU Depth。';
+			console.info( '[CpuDepthSessionFallbackWithoutDepth]' );
+			return {
+				session: await xr.requestSession( 'immersive-ar', normalInit as XRSessionInit ),
+				mode: 'normal'
+			};
+		}
+		throw error;
+	}
+
+}
+
+function readXrSessionProperty(session: XRSession, key: string): unknown {
+
+	try {
+		return ( session as unknown as Record<string, unknown> )[ key ];
 	} catch {
-		// depth 配置被同步拒绝（不会创建 session），可安全降级重试
-		setCpuDepthEnabled( false );
-		cpuDepthDebugState.supported = false;
-		cpuDepthDebugState.active = false;
-		cpuDepthDebugState.depthSensingSessionEnabled = false;
-		cpuDepthDebugState.errorMessage = '当前设备或浏览器不支持 WebXR CPU Depth。';
-		console.info( '[CpuDepthSessionFallbackWithoutDepth]' );
-		return {
-			session: await xr.requestSession( 'immersive-ar', plainInitWithoutDepth as XRSessionInit ),
-			mode: 'normal'
-		};
+		return undefined;
 	}
 
 }

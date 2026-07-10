@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 
 export type SetStatus = (message: string) => void;
-export type ArSessionRequestMode = 'normal' | 'cpu-depth-debug';
+export type ArSessionRequestMode = 'normal' | 'normal-with-depth' | 'cpu-depth-debug';
 
 export interface ARSceneBundle {
 	scene: THREE.Scene;
