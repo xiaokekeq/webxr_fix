@@ -11,6 +11,7 @@ import {
 	setCpuDepthEnabled,
 	cpuDepthDebugState
 } from '@/engine/visualization/cpu-depth-visualization.js';
+import { xrFreezeHealthState } from '@/engine/platform/xr-freeze-diagnostics.js';
 
 interface CreateXRHitTestControllerOptions {
 	renderer: THREE.WebGLRenderer;
@@ -144,13 +145,31 @@ export function createXRHitTestController(
 
 		activeSession = session;
 		session.addEventListener( 'select', handleSelect );
+		document.addEventListener( 'visibilitychange', handleVisibilityChange );
+		xrFreezeHealthState.sessionStartedAt = performance.now();
+		xrFreezeHealthState.sessionEndedAt = null;
+		xrFreezeHealthState.sessionVisibilityState = document.visibilityState ?? null;
+		const depthUsage = readXrSessionProperty( session, 'depthUsage' );
+		const depthDataFormat = readXrSessionProperty( session, 'depthDataFormat' );
+		const depthActive = readXrSessionProperty( session, 'depthActive' );
+		xrFreezeHealthState.depthRequested = currentSessionMode !== 'normal';
+		xrFreezeHealthState.depthGranted = depthUsage !== undefined;
+		xrFreezeHealthState.depthUsage = typeof depthUsage === 'string' ? depthUsage : null;
+		xrFreezeHealthState.depthDataFormat = typeof depthDataFormat === 'string' ? depthDataFormat : null;
+		xrFreezeHealthState.depthActive = typeof depthActive === 'boolean' ? depthActive : null;
 		console.info( '[ArSessionStarted]', {
+			diagnosticMode: xrFreezeHealthState.diagnosticMode,
+			rendererProfile: xrFreezeHealthState.rendererProfile,
+			requestedSessionMode: xrFreezeHealthState.requestedSessionMode,
+			effectiveSessionMode: xrFreezeHealthState.effectiveSessionMode,
+			fallbackUsed: xrFreezeHealthState.fallbackUsed,
+			fallbackReason: xrFreezeHealthState.fallbackReason,
 			mode: currentSessionMode,
 			depthRequested: currentSessionMode !== 'normal',
-			depthGranted: readXrSessionProperty( session, 'depthUsage' ) !== undefined,
-			depthUsage: readXrSessionProperty( session, 'depthUsage' ),
-			depthDataFormat: readXrSessionProperty( session, 'depthDataFormat' ),
-			depthActive: readXrSessionProperty( session, 'depthActive' )
+			depthGranted: xrFreezeHealthState.depthGranted,
+			depthUsage: xrFreezeHealthState.depthUsage,
+			depthDataFormat: xrFreezeHealthState.depthDataFormat,
+			depthActive: xrFreezeHealthState.depthActive
 		} );
 
 		// Detect CPU Depth sensing availability on session start
@@ -167,6 +186,13 @@ export function createXRHitTestController(
 			console.info( '[CpuDepthSessionRequested]' );
 		}
 
+		if ( xrFreezeHealthState.diagnosticMode === 'depth-session-only' ) {
+			xrFreezeHealthState.hitTestRequested = false;
+			xrFreezeHealthState.hitTestSourceCreated = false;
+			return;
+		}
+
+		xrFreezeHealthState.hitTestRequested = true;
 		const viewerSpace = await session.requestReferenceSpace( 'viewer' );
 		const requestHitTestSource = session.requestHitTestSource;
 		if ( requestHitTestSource === undefined ) {
@@ -181,6 +207,7 @@ export function createXRHitTestController(
 		}
 
 		hitTestSourceRequested = true;
+		xrFreezeHealthState.hitTestSourceCreated = true;
 
 	}
 
@@ -188,11 +215,22 @@ export function createXRHitTestController(
 
 		sessionRequestPending = false;
 		depthProbePending = false;
+		xrFreezeHealthState.sessionEndedAt = performance.now();
+		xrFreezeHealthState.hitTestRequested = false;
+		xrFreezeHealthState.hitTestSourceCreated = false;
+		console.info( '[ArSessionEnded]', {
+			diagnosticMode: xrFreezeHealthState.diagnosticMode,
+			rendererProfile: xrFreezeHealthState.rendererProfile,
+			requestedSessionMode: xrFreezeHealthState.requestedSessionMode,
+			effectiveSessionMode: xrFreezeHealthState.effectiveSessionMode,
+			visibilityState: document.visibilityState ?? null
+		} );
 		currentSessionMode = 'normal';
 		cpuDepthFallbackWithoutDepth = false;
 		setCpuDepthEnabled( false );
 		resetDepthSensingSessionState();
 		activeSession?.removeEventListener( 'select', handleSelect );
+		document.removeEventListener( 'visibilitychange', handleVisibilityChange );
 		activeSession = null;
 		reticle.visible = false;
 		hitTestSource = null;
@@ -211,6 +249,26 @@ export function createXRHitTestController(
 	function handleSelect(): void {
 
 		onSelect?.();
+
+	}
+
+	function handleVisibilityChange(): void {
+
+		xrFreezeHealthState.sessionVisibilityState = document.visibilityState ?? null;
+		console.info( '[ArSessionVisibilityChanged]', {
+			diagnosticMode: xrFreezeHealthState.diagnosticMode,
+			rendererProfile: xrFreezeHealthState.rendererProfile,
+			requestedSessionMode: xrFreezeHealthState.requestedSessionMode,
+			effectiveSessionMode: xrFreezeHealthState.effectiveSessionMode,
+			visibilityState: xrFreezeHealthState.sessionVisibilityState,
+			depthRequested: xrFreezeHealthState.depthRequested,
+			depthGranted: xrFreezeHealthState.depthGranted,
+			depthUsage: xrFreezeHealthState.depthUsage,
+			depthDataFormat: xrFreezeHealthState.depthDataFormat,
+			depthActive: xrFreezeHealthState.depthActive,
+			hitTestRequested: xrFreezeHealthState.hitTestRequested,
+			hitTestSourceCreated: xrFreezeHealthState.hitTestSourceCreated
+		} );
 
 	}
 
@@ -423,10 +481,19 @@ export function createXRHitTestController(
 
 			sessionRequestPending = true;
 			const requestedMode = options.mode ?? ( options.cpuDepthDebug ? 'cpu-depth-debug' : 'normal' );
-			currentSessionMode = requestedMode === 'normal' && ENABLE_DEPTH_IN_NORMAL_AR
+			currentSessionMode = requestedMode === 'normal' && shouldRequestDepthForCurrentDiagnostic()
 				? 'normal-with-depth'
 				: requestedMode;
+			xrFreezeHealthState.requestedSessionMode = currentSessionMode;
+			xrFreezeHealthState.effectiveSessionMode = currentSessionMode;
+			xrFreezeHealthState.fallbackUsed = false;
+			xrFreezeHealthState.fallbackReason = null;
 			setStatus( '正在请求 AR 会话...' );
+			console.info( '[ArSessionRequested]', {
+				diagnosticMode: xrFreezeHealthState.diagnosticMode,
+				rendererProfile: xrFreezeHealthState.rendererProfile,
+				requestedSessionMode: currentSessionMode
+			} );
 
 			try {
 				const requestedSession = await requestArSession( navigator.xr, {
@@ -436,6 +503,7 @@ export function createXRHitTestController(
 				cpuDepthFallbackWithoutDepth = currentSessionMode === 'cpu-depth-debug'
 					&& requestedSession.mode === 'normal';
 				currentSessionMode = requestedSession.mode;
+				xrFreezeHealthState.effectiveSessionMode = currentSessionMode;
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( requestedSession.session );
 			} catch ( error ) {
@@ -509,6 +577,16 @@ async function requestArSession(
 		},
 		domOverlay: { root: document.body }
 	};
+	const depthSessionOnlyInit = {
+		requiredFeatures: [ 'depth-sensing' ],
+		optionalFeatures: [ 'dom-overlay' ],
+		depthSensing: {
+			usagePreference: [ 'cpu-optimized' ],
+			dataFormatPreference: [ 'luminance-alpha', 'float32' ],
+			matchDepthView: true
+		},
+		domOverlay: { root: document.body }
+	};
 
 	if ( mode === 'normal' ) {
 		console.info( '[ArSessionRequestedNormal]' );
@@ -520,9 +598,12 @@ async function requestArSession(
 
 	if ( mode === 'normal-with-depth' ) {
 		console.info( '[ArSessionRequestedNormalWithDepth]' );
+		const init = xrFreezeHealthState.diagnosticMode === 'depth-session-only'
+			? depthSessionOnlyInit
+			: normalDepthInit;
 		try {
 			return {
-				session: await xr.requestSession( 'immersive-ar', normalDepthInit as XRSessionInit ),
+				session: await xr.requestSession( 'immersive-ar', init as XRSessionInit ),
 				mode: 'normal-with-depth'
 			};
 		} catch ( error ) {
@@ -530,6 +611,8 @@ async function requestArSession(
 				console.warn( '[ArSessionDepthNotSupportedFallbackWithoutDepth]', {
 					reason: error.message
 				} );
+				xrFreezeHealthState.fallbackUsed = true;
+				xrFreezeHealthState.fallbackReason = error.message || error.name;
 				return {
 					session: await xr.requestSession( 'immersive-ar', normalInit as XRSessionInit ),
 					mode: 'normal'
@@ -565,6 +648,8 @@ async function requestArSession(
 			cpuDepthDebugState.depthSensingSessionEnabled = false;
 			cpuDepthDebugState.errorMessage = '当前设备或浏览器不支持 WebXR CPU Depth。';
 			console.info( '[CpuDepthSessionFallbackWithoutDepth]' );
+			xrFreezeHealthState.fallbackUsed = true;
+			xrFreezeHealthState.fallbackReason = error.message || error.name;
 			return {
 				session: await xr.requestSession( 'immersive-ar', normalInit as XRSessionInit ),
 				mode: 'normal'
@@ -572,6 +657,12 @@ async function requestArSession(
 		}
 		throw error;
 	}
+
+}
+
+function shouldRequestDepthForCurrentDiagnostic(): boolean {
+
+	return ENABLE_DEPTH_IN_NORMAL_AR || xrFreezeHealthState.diagnosticMode !== 'baseline';
 
 }
 

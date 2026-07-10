@@ -11,6 +11,7 @@ import {
 } from '@/features/ar/types/display-modes.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 import { arInfo, arWarn, isArDebugEnabled } from '@/engine/debug/ar-logger.js';
+import { xrFreezeHealthState } from '@/engine/platform/xr-freeze-diagnostics.js';
 
 type InspectPanelView = 'display' | 'localization' | 'record';
 
@@ -38,6 +39,8 @@ const debugInfoOpen = ref( false );
 const registrationDiagnosticOpen = ref( false );
 const modelPlacementDiagnosticOpen = ref( false );
 const diagnosticCopyFeedback = ref( '' );
+const xrFreezeDiagnosticOpen = ref( false );
+const xrFreezeCopyFeedback = ref( '' );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
@@ -56,6 +59,38 @@ const hitTestReady = computed(
 		|| engine.value.arSessionPhase === 'placed'
 );
 const canUseMarkerCorners = computed( () => configStatus.value.activeControlTargetHasCornersEnu );
+const showXrFreezeDiagnostics = computed(
+	() => hasArSession.value
+		&& (
+			arDebugMode
+			|| route.query.xrDiag !== undefined
+			|| import.meta.env.VITE_SHOW_XR_FREEZE_DIAGNOSTICS === 'true'
+		)
+);
+
+const xrFreezeDiagnosticCards = computed( () => [
+	{ label: 'mode', value: `${xrFreezeHealthState.diagnosticMode} / renderer ${xrFreezeHealthState.rendererProfile}`, wide: true },
+	{ label: 'session', value: `requested ${xrFreezeHealthState.requestedSessionMode}; effective ${xrFreezeHealthState.effectiveSessionMode}; fallback ${xrFreezeHealthState.fallbackUsed ? 'yes' : 'no'}`, wide: true },
+	{ label: 'depth', value: `requested ${formatBooleanText( xrFreezeHealthState.depthRequested )}; granted ${formatBooleanText( xrFreezeHealthState.depthGranted )}; usage ${xrFreezeHealthState.depthUsage ?? '-'}; format ${xrFreezeHealthState.depthDataFormat ?? '-'}`, wide: true },
+	{ label: 'hit-test', value: `requested ${formatBooleanText( xrFreezeHealthState.hitTestRequested )}; source ${formatBooleanText( xrFreezeHealthState.hitTestSourceCreated )}`, wide: true },
+	{ label: 'callbacks', value: `xr ${xrFreezeHealthState.xrCallbackCount}; render ${xrFreezeHealthState.renderSuccessCount}/${xrFreezeHealthState.renderAttemptCount}; errors ${xrFreezeHealthState.renderErrorCount}`, wide: true },
+	{ label: 'viewer pose', value: `samples ${xrFreezeHealthState.viewerPoseSampleCount}; changed ${xrFreezeHealthState.viewerPoseChangeCount}; alive ${formatBooleanText( xrFreezeHealthState.viewerPoseRecentlyChanged )}`, wide: true },
+	{ label: 'depth read', value: `enabled ${formatBooleanText( xrFreezeHealthState.depthReadEnabled )}; ok ${xrFreezeHealthState.depthReadSuccessCount}; null ${xrFreezeHealthState.depthReadNullCount}; size ${xrFreezeHealthState.depthWidth ?? '-'}x${xrFreezeHealthState.depthHeight ?? '-'}`, wide: true },
+	{ label: 'watchdog', value: `xrAlive ${formatBooleanText( xrFreezeHealthState.xrCallbackAlive )}; renderAlive ${formatBooleanText( xrFreezeHealthState.rendererAlive )}; suspect ${xrFreezeHealthState.suspectedFreezeType}`, wide: true },
+	{ label: 'webgl', value: `lost ${xrFreezeHealthState.webglContextLostCount}; restored ${xrFreezeHealthState.webglContextRestoredCount}; activeLost ${formatBooleanText( xrFreezeHealthState.webglContextLost )}`, wide: true },
+	{ label: 'stage', value: `start ${xrFreezeHealthState.lastStartedStage ?? '-'}; ok ${xrFreezeHealthState.lastSuccessfulStage ?? '-'}; failed ${xrFreezeHealthState.lastFailedStage ?? '-'}`, wide: true },
+	{ label: 'last error', value: `${xrFreezeHealthState.lastErrorName ?? '-'} ${xrFreezeHealthState.lastErrorMessage ?? ''}`, wide: true },
+	{ label: 'visibility', value: xrFreezeHealthState.sessionVisibilityState ?? '-', wide: true }
+] );
+
+const xrFreezeTestUrls = computed( () => [
+	createXrFreezeTestUrl( 'baseline', 'current' ),
+	createXrFreezeTestUrl( 'depth-session-only', 'current' ),
+	createXrFreezeTestUrl( 'depth-hit-test', 'current' ),
+	createXrFreezeTestUrl( 'depth-project-frame', 'current' ),
+	createXrFreezeTestUrl( 'depth-read-count', 'current' ),
+	createXrFreezeTestUrl( 'depth-read-count', 'xr-safe' )
+] );
 
 const sliderVisible = computed(
 	() => hasArSession.value
@@ -749,6 +784,42 @@ async function copyModelPlacementDiagnostics(): Promise<void> {
 	}
 }
 
+async function copyXrFreezeDiagnostics(): Promise<void> {
+	try {
+		await navigator.clipboard.writeText( JSON.stringify( createXrFreezeDiagnosticsPayload(), null, 2 ) );
+		xrFreezeCopyFeedback.value = 'XR diagnostics copied';
+	} catch {
+		xrFreezeCopyFeedback.value = 'Copy failed';
+	}
+}
+
+function createXrFreezeDiagnosticsPayload(): Record<string, unknown> {
+	return {
+		...xrFreezeHealthState,
+		stageTimings: { ...xrFreezeHealthState.stageTimings },
+		url: window.location.href,
+		userAgent: navigator.userAgent,
+		capturedAt: new Date().toISOString()
+	};
+}
+
+function createXrFreezeTestUrl(xrDiag: string, xrRenderer: string): string {
+	const url = new URL( window.location.href );
+	url.searchParams.set( 'xrDiag', xrDiag );
+	url.searchParams.set( 'xrRenderer', xrRenderer );
+	return url.toString();
+}
+
+function formatBooleanText(value: boolean | null | undefined): string {
+	if ( value === true ) {
+		return 'true';
+	}
+	if ( value === false ) {
+		return 'false';
+	}
+	return '-';
+}
+
 function formatBoolean(value: boolean | undefined): string {
 	if ( value === true ) {
 		return '是';
@@ -1201,6 +1272,31 @@ function setArOverlayClass(active: boolean): void {
 							<details v-if="arDebugMode" class="diagnostic-raw">
 								<summary>Raw debug JSON / matrices</summary>
 								<pre>{{ JSON.stringify(engine.modelPlacementDebug, null, 2) }}</pre>
+							</details>
+						</div>
+						<button v-if="showXrFreezeDiagnostics" type="button" class="debug-toggle" @click="xrFreezeDiagnosticOpen = !xrFreezeDiagnosticOpen">
+							{{ xrFreezeDiagnosticOpen ? '收起 XR 冻屏诊断' : 'XR 冻屏诊断' }}
+						</button>
+						<div v-if="showXrFreezeDiagnostics && xrFreezeDiagnosticOpen" class="model-diagnostic-groups">
+							<div class="model-diagnostic-group" :class="{ error: xrFreezeHealthState.suspectedFreezeType !== 'none' }">
+								<div class="section-label">XR Depth Freeze</div>
+								<ArInfoGrid :items="xrFreezeDiagnosticCards" />
+							</div>
+							<div class="model-diagnostic-group">
+								<div class="section-label">Test URLs</div>
+								<div v-for="url in xrFreezeTestUrls" :key="url" class="runtime-banner">
+									{{ url }}
+								</div>
+							</div>
+							<button type="button" class="debug-toggle" @click="copyXrFreezeDiagnostics()">
+								复制 XR 诊断 JSON
+							</button>
+							<div v-if="xrFreezeCopyFeedback" class="runtime-banner">
+								{{ xrFreezeCopyFeedback }}
+							</div>
+							<details class="diagnostic-raw">
+								<summary>Raw XR freeze JSON</summary>
+								<pre>{{ JSON.stringify(createXrFreezeDiagnosticsPayload(), null, 2) }}</pre>
 							</details>
 						</div>
 						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="debugInfoOpen = !debugInfoOpen">

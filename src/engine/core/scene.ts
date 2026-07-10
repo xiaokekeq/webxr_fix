@@ -1,20 +1,32 @@
 ﻿import * as THREE from 'three';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
+import { resolveXrRendererProfile } from '@/engine/platform/xr-freeze-diagnostics.js';
 
 export function createARScene(canvasContainer: HTMLElement): ARSceneBundle {
 
 	const scene = new THREE.Scene();
 	const initialSize = getHostSize( canvasContainer );
 	const camera = new THREE.PerspectiveCamera( 70, initialSize.width / initialSize.height, 0.01, 2000 );
+	const rendererProfile = resolveXrRendererProfile();
 
-	const renderer = new THREE.WebGLRenderer( {
-		antialias: true,
-		alpha: true,
-		stencil: true,
-		// Keep the drawing buffer so snapshot export can read the current frame.
-		preserveDrawingBuffer: true
-	} );
-	renderer.setPixelRatio( Math.min( window.devicePixelRatio, 2 ) );
+	const renderer = new THREE.WebGLRenderer(
+		rendererProfile === 'xr-safe'
+			? {
+				alpha: true,
+				antialias: false,
+				stencil: false,
+				preserveDrawingBuffer: false,
+				powerPreference: 'high-performance'
+			}
+			: {
+				antialias: true,
+				alpha: true,
+				stencil: true,
+				// Keep the drawing buffer so snapshot export can read the current frame.
+				preserveDrawingBuffer: true
+			}
+	);
+	renderer.setPixelRatio( rendererProfile === 'xr-safe' ? 1 : Math.min( window.devicePixelRatio, 2 ) );
 	renderer.setSize( initialSize.width, initialSize.height, false );
 	renderer.setClearColor( 0x000000, 0 );
 	renderer.setClearAlpha( 0 );
@@ -39,6 +51,7 @@ export function createARScene(canvasContainer: HTMLElement): ARSceneBundle {
 	const arModelAnchor = new THREE.Group();
 	arModelAnchor.name = '__ar-model-anchor';
 	scene.add( arModelAnchor );
+	logRendererProfile( renderer, rendererProfile );
 
 	return { scene, camera, renderer, reticle, arPlacementAnchor, arModelAnchor };
 
@@ -51,9 +64,10 @@ export function resizeARScene(
 ): void {
 
 	const size = getHostSize( hostElement );
+	const rendererProfile = resolveXrRendererProfile();
 	camera.aspect = size.width / size.height;
 	camera.updateProjectionMatrix();
-	renderer.setPixelRatio( Math.min( window.devicePixelRatio, 2 ) );
+	renderer.setPixelRatio( rendererProfile === 'xr-safe' ? 1 : Math.min( window.devicePixelRatio, 2 ) );
 	renderer.setSize( size.width, size.height, false );
 
 }
@@ -65,6 +79,23 @@ function getHostSize(hostElement: Element | null): { width: number; height: numb
 	const height = Math.max( 1, Math.round( rect?.height || window.innerHeight ) );
 
 	return { width, height };
+
+}
+
+function logRendererProfile(renderer: THREE.WebGLRenderer, profile: string): void {
+
+	const context = renderer.getContext();
+	const attrs = context.getContextAttributes();
+	console.info( '[XrRendererProfile]', {
+		profile,
+		antialias: attrs?.antialias ?? null,
+		alpha: attrs?.alpha ?? null,
+		stencil: attrs?.stencil ?? null,
+		preserveDrawingBuffer: attrs?.preserveDrawingBuffer ?? null,
+		pixelRatio: renderer.getPixelRatio(),
+		isWebGL2: context instanceof WebGL2RenderingContext,
+		maxTextureSize: context.getParameter( context.MAX_TEXTURE_SIZE )
+	} );
 
 }
 

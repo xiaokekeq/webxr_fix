@@ -119,6 +119,10 @@ import { validateSiteCalibrationBaselineForStorage } from '@/services/repositori
 import { updateCpuDepthFromFrame, setCpuDepthEnabled, cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
 import { readPlaceableTemplateReport } from '@/engine/core/model.js';
 import { arInfo } from '@/engine/debug/ar-logger.js';
+import {
+	updateXrFreezeWatchdog,
+	xrFreezeHealthState
+} from '@/engine/platform/xr-freeze-diagnostics.js';
 
 const MAX_LOG_ITEMS = 24;
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
@@ -338,6 +342,31 @@ export class ThreeEngine {
 	private replacedModelCount = 0;
 	private lastPlacementReason = '-';
 	private lastPlacementTimestamp = 0;
+	private xrFreezeWatchdogId: number | null = null;
+	private readonly handleWebglContextLost = ( event: Event ) => {
+		event.preventDefault();
+		xrFreezeHealthState.webglContextLost = true;
+		xrFreezeHealthState.webglContextLostCount += 1;
+		updateXrFreezeWatchdog();
+		console.warn( '[WebGLContextLostDuringXR]', {
+			diagnosticMode: xrFreezeHealthState.diagnosticMode,
+			rendererProfile: xrFreezeHealthState.rendererProfile,
+			sessionStartedAt: xrFreezeHealthState.sessionStartedAt,
+			sessionEndedAt: xrFreezeHealthState.sessionEndedAt,
+			lastStartedStage: xrFreezeHealthState.lastStartedStage,
+			lastSuccessfulStage: xrFreezeHealthState.lastSuccessfulStage,
+			lastFailedStage: xrFreezeHealthState.lastFailedStage
+		} );
+	};
+	private readonly handleWebglContextRestored = () => {
+		xrFreezeHealthState.webglContextLost = false;
+		xrFreezeHealthState.webglContextRestoredCount += 1;
+		updateXrFreezeWatchdog();
+		console.info( '[WebGLContextRestoredDuringXR]', {
+			diagnosticMode: xrFreezeHealthState.diagnosticMode,
+			rendererProfile: xrFreezeHealthState.rendererProfile
+		} );
+	};
 
 	constructor() {
 
@@ -767,6 +796,11 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.setAnimationLoop( this.xrRuntime.renderFrame );
 		this.sceneBundle.renderer.domElement.addEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
 		this.sceneBundle.renderer.domElement.addEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
+		this.sceneBundle.renderer.domElement.addEventListener( 'webglcontextlost', this.handleWebglContextLost );
+		this.sceneBundle.renderer.domElement.addEventListener( 'webglcontextrestored', this.handleWebglContextRestored );
+		this.xrFreezeWatchdogId = window.setInterval( () => {
+			updateXrFreezeWatchdog();
+		}, 500 );
 		window.addEventListener( 'pointerdown', this.handleGlobalArPointerDown, true );
 		window.addEventListener( 'pointerup', this.handleGlobalArPointerUp, true );
 		window.addEventListener( 'resize', this.handleWindowResize );
@@ -854,8 +888,14 @@ export class ThreeEngine {
 
 		this.disposed = true;
 		this.sceneBundle.renderer.setAnimationLoop( null );
+		if ( this.xrFreezeWatchdogId !== null ) {
+			window.clearInterval( this.xrFreezeWatchdogId );
+			this.xrFreezeWatchdogId = null;
+		}
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
+		this.sceneBundle.renderer.domElement.removeEventListener( 'webglcontextlost', this.handleWebglContextLost );
+		this.sceneBundle.renderer.domElement.removeEventListener( 'webglcontextrestored', this.handleWebglContextRestored );
 		window.removeEventListener( 'pointerdown', this.handleGlobalArPointerDown, true );
 		window.removeEventListener( 'pointerup', this.handleGlobalArPointerUp, true );
 		window.removeEventListener( 'resize', this.handleWindowResize );
