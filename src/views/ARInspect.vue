@@ -303,7 +303,8 @@ const modelPlacementDebugGroups = computed( () => {
 				{ label: 'RTK 地表高程', value: debug.surfaceElevationText ?? '-', wide: true },
 				{ label: '模型底部目标高程', value: debug.undergroundElevationText ?? '-', wide: true },
 				{ label: '模型尺寸 X/Y/Z', value: `${formatMeters( debug.modelSizeX ?? debug.modelHeightX )} / ${formatMeters( debug.modelSizeY ?? debug.modelHeightY )} / ${formatMeters( debug.modelSizeZ ?? debug.modelHeightZ )}`, wide: true },
-				{ label: '高度轴 / 选中高度', value: `${formatDepthAxis( debug.modelHeightAxis )} / ${formatMeters( debug.chosenModelHeight )}`, wide: true }
+				{ label: 'height axis / chosen height', value: `${formatDepthAxis( debug.modelHeightAxis )} / ${formatMeters( debug.chosenModelHeight )}`, wide: true },
+				{ label: 'height - Y diff', value: formatMeters( debug.modelHeightToYDifferenceMeters ), wide: true }
 			]
 		},
 		{
@@ -661,6 +662,10 @@ function formatModelHeightSource(value: string | undefined): string {
 	switch ( value ) {
 		case 'override':
 			return '配置模型高度';
+		case 'normalized-bbox-y':
+			return 'normalized model local bbox-y';
+		case 'placeable-report-y':
+			return 'final model Y size';
 		case 'bbox-y':
 			return '模型 bbox-y';
 		case 'y':

@@ -18,6 +18,10 @@ import {
 import type { PropertySelectionController } from '@/engine/interaction/property-selection.js';
 
 type ArPlacementSource = 'marker' | 'unknown';
+type ModelHeightSource = 'override' | 'normalized-bbox-y' | 'placeable-report-y' | 'bbox-y' | 'y' | 'shortest-edge' | 'none' | 'invalid';
+
+const MODEL_HEIGHT_MISMATCH_LIMIT_METERS = 0.05;
+const loggedModelHeightAuditKeys = new Set<string>();
 
 interface TrackedArPlacementTransform {
 	source: ArPlacementSource;
@@ -582,6 +586,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelHeightY: undergroundPlacement.modelSizeY,
 				modelHeightZ: undergroundPlacement.modelSizeZ,
 				chosenModelHeight: undergroundPlacement.modelHeightMeters,
+				modelHeightToYDifferenceMeters: undergroundPlacement.modelHeightToYDifferenceMeters,
 				coverDepthMeters: undergroundPlacement.coverDepthMeters,
 				totalBottomDepthMeters: undergroundPlacement.totalBottomDepthMeters,
 				depthMeters: undergroundPlacement.totalBottomDepthMeters,
@@ -655,10 +660,11 @@ export function deriveUndergroundRegistrationSolution(args: {
 	enabled: boolean;
 	modelHeightMeters: number;
 	modelHeightAxis: 'y' | 'shortest-edge' | 'bbox-y' | null;
-	modelHeightSource: 'override' | 'bbox-y' | 'y' | 'shortest-edge' | 'none' | 'invalid';
+	modelHeightSource: ModelHeightSource;
 	modelSizeX: number | null;
 	modelSizeY: number | null;
 	modelSizeZ: number | null;
+	modelHeightToYDifferenceMeters: number | null;
 	coverDepthMeters: number;
 	totalBottomDepthMeters: number;
 	warning?: string;
@@ -690,6 +696,7 @@ export function deriveUndergroundRegistrationSolution(args: {
 			modelSizeX: height.modelSizeX,
 			modelSizeY: height.modelSizeY,
 			modelSizeZ: height.modelSizeZ,
+			modelHeightToYDifferenceMeters: height.modelHeightToYDifferenceMeters,
 			coverDepthMeters,
 			totalBottomDepthMeters,
 			warning: height.warning,
@@ -716,6 +723,7 @@ export function deriveUndergroundRegistrationSolution(args: {
 		modelSizeX: height.modelSizeX,
 		modelSizeY: height.modelSizeY,
 		modelSizeZ: height.modelSizeZ,
+		modelHeightToYDifferenceMeters: height.modelHeightToYDifferenceMeters,
 		coverDepthMeters,
 		totalBottomDepthMeters,
 		warning: height.warning,
@@ -730,10 +738,11 @@ function resolveEngineeringModelHeightMeters(args: {
 }): {
 	modelHeightMeters: number;
 	modelHeightAxis: 'y' | 'shortest-edge' | 'bbox-y';
-	modelHeightSource: 'override' | 'bbox-y' | 'y' | 'shortest-edge' | 'none' | 'invalid';
+	modelHeightSource: ModelHeightSource;
 	modelSizeX: number | null;
 	modelSizeY: number | null;
 	modelSizeZ: number | null;
+	modelHeightToYDifferenceMeters: number | null;
 	coverDepthMeters: number;
 	warning?: string;
 } {
@@ -753,11 +762,37 @@ function resolveEngineeringModelHeightMeters(args: {
 			modelSizeX: Number.isFinite( measured.x ) ? measured.x : null,
 			modelSizeY: Number.isFinite( measured.y ) ? measured.y : null,
 			modelSizeZ: Number.isFinite( measured.z ) ? measured.z : null,
+			modelHeightToYDifferenceMeters: Number.isFinite( measured.y )
+				? Number( Math.abs( ( config.modelHeightMetersOverride ?? 0 ) - measured.y ).toFixed( 6 ) )
+				: null,
 			coverDepthMeters
 		};
 	}
 
-	if ( Number.isFinite( measured.chosenModelHeight ) === false || measured.chosenModelHeight < 0 ) {
+	const maxFinalSize = Math.max( measured.x, measured.y, measured.z );
+	const heightToYDifferenceMeters = Number.isFinite( measured.y )
+		? Math.abs( measured.chosenModelHeight - measured.y )
+		: Number.NaN;
+	const invalidReason = Number.isFinite( measured.chosenModelHeight ) === false || measured.chosenModelHeight < 0
+		? 'model bbox height is invalid; underground engineering depth fell back to 0'
+		: measured.chosenModelHeight > maxFinalSize + MODEL_HEIGHT_MISMATCH_LIMIT_METERS
+			? 'chosen model height exceeds final model size; underground engineering depth fell back to 0'
+			: axis === 'bbox-y' && heightToYDifferenceMeters > MODEL_HEIGHT_MISMATCH_LIMIT_METERS
+				? 'bbox-y differs from final model Y size; underground engineering depth fell back to 0'
+				: null;
+
+	if ( invalidReason !== null ) {
+		console.error( '[InvalidEngineeringModelHeight]', {
+			modelHeightAxis: axis,
+			chosenModelHeight: measured.chosenModelHeight,
+			finalSize: {
+				x: measured.x,
+				y: measured.y,
+				z: measured.z
+			},
+			heightToYDifferenceMeters,
+			reason: invalidReason
+		} );
 		return {
 			modelHeightMeters: 0,
 			modelHeightAxis: axis,
@@ -765,18 +800,22 @@ function resolveEngineeringModelHeightMeters(args: {
 			modelSizeX: Number.isFinite( measured.x ) ? measured.x : null,
 			modelSizeY: Number.isFinite( measured.y ) ? measured.y : null,
 			modelSizeZ: Number.isFinite( measured.z ) ? measured.z : null,
+			modelHeightToYDifferenceMeters: Number.isFinite( heightToYDifferenceMeters )
+				? Number( heightToYDifferenceMeters.toFixed( 6 ) )
+				: null,
 			coverDepthMeters,
-			warning: 'model bbox height is invalid; underground engineering depth fell back to 0'
+			warning: invalidReason
 		};
 	}
 
 	return {
 		modelHeightMeters: measured.chosenModelHeight,
 		modelHeightAxis: axis,
-		modelHeightSource: axis,
+		modelHeightSource: measured.source,
 		modelSizeX: measured.x,
 		modelSizeY: measured.y,
 		modelSizeZ: measured.z,
+		modelHeightToYDifferenceMeters: Number( heightToYDifferenceMeters.toFixed( 6 ) ),
 		coverDepthMeters
 	};
 
@@ -806,6 +845,7 @@ function resolveTemplateHeightMeters(
 	y: number;
 	z: number;
 	chosenModelHeight: number;
+	source: ModelHeightSource;
 } {
 
 	const report = readPlaceableTemplateReport( modelTemplate );
@@ -813,16 +853,45 @@ function resolveTemplateHeightMeters(
 		const x = report.finalSize.x;
 		const y = report.finalSize.y;
 		const z = report.finalSize.z;
+		const legacyBounds = new THREE.Box3().setFromObject( modelTemplate );
+		const legacySize = legacyBounds.getSize( new THREE.Vector3() );
+		const chosenModelHeight = axis === 'shortest-edge'
+			? Math.min( x, y, z )
+			: y;
+		const source = axis === 'bbox-y'
+			? 'normalized-bbox-y'
+			: axis === 'y'
+				? 'placeable-report-y'
+				: 'shortest-edge';
+		logModelHeightSpaceAudit( {
+			modelTemplate,
+			report,
+			legacySize,
+			axis,
+			chosenModelHeight,
+			source
+		} );
+		if (
+			axis === 'bbox-y'
+			&& Number.isFinite( legacySize.y )
+			&& Math.abs( legacySize.y - y ) > MODEL_HEIGHT_MISMATCH_LIMIT_METERS
+		) {
+			console.error( '[ModelHeightDimensionMismatch]', {
+				bboxY: Number( legacySize.y.toFixed( 6 ) ),
+				reportFinalSizeY: Number( y.toFixed( 6 ) ),
+				difference: Number( Math.abs( legacySize.y - y ).toFixed( 6 ) ),
+				modelInstanceId: modelTemplate.userData.modelInstanceId ?? modelTemplate.name ?? null,
+				modelContentRootName: modelTemplate.children[ 0 ]?.name ?? modelTemplate.name ?? null,
+				note: 'legacy setFromObject(modelTemplate) is not used for underground depth'
+			} );
+		}
 		return {
 			axis,
 			x,
 			y,
 			z,
-			chosenModelHeight: axis === 'shortest-edge'
-				? Math.min( x, y, z )
-				: axis === 'bbox-y'
-					? new THREE.Box3().setFromObject( modelTemplate ).getSize( new THREE.Vector3() ).y
-					: y
+			chosenModelHeight,
+			source
 		};
 	}
 
@@ -834,7 +903,8 @@ function resolveTemplateHeightMeters(
 			x: Number.NaN,
 			y: Number.NaN,
 			z: Number.NaN,
-			chosenModelHeight: Number.NaN
+			chosenModelHeight: Number.NaN,
+			source: 'invalid'
 		};
 	}
 	return {
@@ -842,8 +912,52 @@ function resolveTemplateHeightMeters(
 		x: size.x,
 		y: size.y,
 		z: size.z,
-		chosenModelHeight: axis === 'shortest-edge' ? Math.min( size.x, size.y, size.z ) : size.y
+		chosenModelHeight: axis === 'shortest-edge' ? Math.min( size.x, size.y, size.z ) : size.y,
+		source: axis
 	};
+
+}
+
+function logModelHeightSpaceAudit(args: {
+	modelTemplate: THREE.Object3D;
+	report: NonNullable<ReturnType<typeof readPlaceableTemplateReport>>;
+	legacySize: THREE.Vector3;
+	axis: 'y' | 'shortest-edge' | 'bbox-y';
+	chosenModelHeight: number;
+	source: ModelHeightSource;
+}): void {
+
+	const key = [
+		args.modelTemplate.uuid,
+		args.axis,
+		args.chosenModelHeight.toFixed( 3 ),
+		args.report.finalSize.y.toFixed( 3 )
+	].join( ':' );
+	if ( loggedModelHeightAuditKeys.has( key ) ) {
+		return;
+	}
+	loggedModelHeightAuditKeys.add( key );
+
+	console.info( '[ModelHeightSpaceAudit]', {
+		rawGeometrySize: vector3ToObject( args.report.originalSize ),
+		normalizedTemplateSize: vector3ToObject( args.report.finalSize ),
+		finalEngineeringSize: vector3ToObject( args.report.finalSize ),
+		bboxTargetObjectName: args.modelTemplate.name || '(unnamed model template)',
+		bboxComputedBeforeNormalization: false,
+		bboxComputedAfterNormalization: true,
+		bboxIncludesDebugObjects: false,
+		bboxIncludesLabels: false,
+		bboxIncludesFootprint: false,
+		bboxIncludesMultipleInstances: false,
+		legacySetFromObjectSize: vector3ToObject( args.legacySize ),
+		chosenHeight: Number( args.chosenModelHeight.toFixed( 6 ) ),
+		expectedHeight: Number( args.report.finalSize.y.toFixed( 6 ) ),
+		modelHeightAxis: args.axis,
+		modelHeightSource: args.source,
+		rootCause: Math.abs( args.legacySize.y - args.report.finalSize.y ) > MODEL_HEIGHT_MISMATCH_LIMIT_METERS
+			? 'legacy setFromObject(modelTemplate) used a contaminated world-space bbox; underground depth now uses normalized finalSize.y'
+			: 'height uses normalized placeable template dimensions'
+	} );
 
 }
 
@@ -900,6 +1014,7 @@ function logUndergroundPlacementDiagnostic(args: {
 		modelSizeX: undergroundPlacement.modelSizeX,
 		modelSizeY: undergroundPlacement.modelSizeY,
 		modelSizeZ: undergroundPlacement.modelSizeZ,
+		modelHeightToYDifferenceMeters: undergroundPlacement.modelHeightToYDifferenceMeters,
 		coverDepthMeters: Number( undergroundPlacement.coverDepthMeters.toFixed( 6 ) ),
 		totalBottomDepthMeters: Number( undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
 		depthMeters: Number( undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),

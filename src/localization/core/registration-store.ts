@@ -126,7 +126,7 @@ export interface ModelPlacementDebugState {
 	diagnosticSampleCount?: number;
 	undergroundPlacementMode?: 'surface' | 'rtk-derived-elevation';
 	undergroundMode?: string;
-	modelHeightSource?: 'override' | 'bbox-y' | 'y' | 'shortest-edge' | 'none' | 'invalid';
+	modelHeightSource?: 'override' | 'normalized-bbox-y' | 'placeable-report-y' | 'bbox-y' | 'y' | 'shortest-edge' | 'none' | 'invalid';
 	modelHeight?: number | null;
 	coverDepthMeters?: number;
 	totalBottomDepthMeters?: number;
@@ -191,6 +191,7 @@ export interface ModelPlacementDebugState {
 	modelHeightY?: number;
 	modelHeightZ?: number;
 	chosenModelHeight?: number;
+	modelHeightToYDifferenceMeters?: number | null;
 	modelHeightAxis?: 'y' | 'shortest-edge' | 'bbox-y';
 	modelSizeX?: number;
 	modelSizeY?: number;

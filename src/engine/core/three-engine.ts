@@ -3497,6 +3497,7 @@ export class ThreeEngine {
 				modelSizeY: undergroundPlacement.modelSizeY ?? undefined,
 				modelSizeZ: undergroundPlacement.modelSizeZ ?? undefined,
 				chosenModelHeight: undergroundPlacement.modelHeightMeters,
+				modelHeightToYDifferenceMeters: undergroundPlacement.modelHeightToYDifferenceMeters,
 				coverDepthMeters: roundMeters( undergroundPlacement.coverDepthMeters ),
 				totalBottomDepthMeters: roundMeters( undergroundPlacement.totalBottomDepthMeters ),
 				engineeringUndergroundOffsetY: roundMeters( - undergroundPlacement.totalBottomDepthMeters ),
