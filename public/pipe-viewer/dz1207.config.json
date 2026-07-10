@@ -250,5 +250,30 @@
     "showSurfaceProjection": true,
     "showDepthGuideLines": true
   },
+  "modelInstances": [
+    {
+      "id": "dz1207",
+      "name": "dz1207",
+      "role": "primary",
+      "verticalPlacement": {
+        "groundRelation": "underground",
+        "surfaceReference": "rtk-surface-control-points",
+        "referencePlane": "bbox-top",
+        "coverDepthMeters": 0,
+        "modelHeightAxis": "bbox-y",
+        "modelHeightMetersOverride": null
+      },
+      "groundClassification": {
+        "mode": "whole-model"
+      },
+      "display": {
+        "aboveGroundMode": "hidden",
+        "belowGroundMode": "top-portal",
+        "realWorldOcclusion": true,
+        "opacity": 0.85,
+        "selectable": true
+      }
+    }
+  ],
   "attachmentsUrl": "/pipe-viewer/dz1207.attachments.json"
 }

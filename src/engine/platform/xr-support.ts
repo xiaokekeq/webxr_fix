@@ -471,9 +471,8 @@ export function createXRHitTestController(
  * 且 WebXR 没有取消 API。因此绝不能用超时 race 去“放弃”一个请求，
  * 否则会产生占用摄像头却无渲染循环驱动的“孤儿 session”，直接导致画面卡死。
  *
- * 默认不带 depth-sensing，避免普通 AR 会话被 CPU Depth 拖卡。
- * 只有显式启用 CPU Depth 时才请求 depth-sensing；若被同步拒绝，
- * 再安全降级为普通 AR 会话。
+ * 普通 AR 把 depth-sensing 放在 optionalFeatures，拿得到就用于真实遮挡诊断，
+ * 拿不到也不阻塞会话。CPU Depth 调试模式仍可显式请求并安全降级。
  */
 async function requestArSession(
 	xr: XRSystem,
@@ -484,16 +483,35 @@ async function requestArSession(
 
 	const plainInit = {
 		requiredFeatures: [ 'hit-test' ],
+		optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
+		depthSensing: {
+			usagePreference: [ 'gpu-optimized', 'cpu-optimized' ],
+			dataFormatPreference: [ 'luminance-alpha', 'float32' ]
+		},
+		domOverlay: { root: document.body }
+	};
+	const plainInitWithoutDepth = {
+		requiredFeatures: [ 'hit-test' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		domOverlay: { root: document.body }
 	};
 
 	if ( mode === 'normal' ) {
 		console.info( '[ArSessionRequestedNormal]' );
-		return {
-			session: await xr.requestSession( 'immersive-ar', plainInit as XRSessionInit ),
-			mode: 'normal'
-		};
+		try {
+			return {
+				session: await xr.requestSession( 'immersive-ar', plainInit as XRSessionInit ),
+				mode: 'normal'
+			};
+		} catch ( error ) {
+			console.warn( '[ArSessionDepthOptionalFallbackWithoutDepth]', {
+				reason: error instanceof Error ? error.message : String( error )
+			} );
+			return {
+				session: await xr.requestSession( 'immersive-ar', plainInitWithoutDepth as XRSessionInit ),
+				mode: 'normal'
+			};
+		}
 	}
 
 	const depthInit = {
@@ -521,7 +539,7 @@ async function requestArSession(
 		cpuDepthDebugState.errorMessage = '当前设备或浏览器不支持 WebXR CPU Depth。';
 		console.info( '[CpuDepthSessionFallbackWithoutDepth]' );
 		return {
-			session: await xr.requestSession( 'immersive-ar', plainInit as XRSessionInit ),
+			session: await xr.requestSession( 'immersive-ar', plainInitWithoutDepth as XRSessionInit ),
 			mode: 'normal'
 		};
 	}

@@ -82,6 +82,47 @@ interface RawMarkerEngineeringConfig extends Omit<MarkerEngineeringConfig, 'enu'
 
 export type DemoModelRegistrationMode = 'rigid-ground-plane';
 export type UndergroundModelHeightAxis = 'y' | 'shortest-edge' | 'bbox-y';
+export type ModelGroundRelation = 'above-ground' | 'underground' | 'mixed' | 'absolute-engineering';
+export type GroundClassificationMode = 'whole-model' | 'node-groups' | 'clip-by-ground-plane';
+export type ModelReferencePlane = 'bbox-bottom' | 'bbox-top' | 'local-ground-plane' | 'control-point-plane' | 'none';
+export type ModelSurfaceReference = 'rtk-surface-control-points' | 'absolute-enu';
+export type AboveGroundDisplayMode = 'normal-ar' | 'hidden';
+export type BelowGroundDisplayMode = 'top-portal' | 'surface-projection' | 'engineering-xray' | 'hidden';
+
+export interface ModelVerticalPlacementConfig {
+	groundRelation: ModelGroundRelation;
+	surfaceReference: ModelSurfaceReference;
+	referencePlane: ModelReferencePlane;
+	localGroundY?: number;
+	coverDepthMeters?: number;
+	modelHeightAxis?: UndergroundModelHeightAxis;
+	modelHeightMetersOverride?: number | null;
+}
+
+export interface ModelGroundClassificationConfig {
+	mode: GroundClassificationMode;
+	aboveGroundNodes?: string[];
+	belowGroundNodes?: string[];
+	localGroundY?: number;
+}
+
+export interface ModelDisplayConfig {
+	aboveGroundMode: AboveGroundDisplayMode;
+	belowGroundMode: BelowGroundDisplayMode;
+	realWorldOcclusion: boolean;
+	opacity?: number;
+	selectable?: boolean;
+}
+
+export interface ModelInstanceConfig {
+	id: string;
+	name: string;
+	role?: string;
+	verticalPlacement: ModelVerticalPlacementConfig;
+	groundClassification?: ModelGroundClassificationConfig;
+	display: ModelDisplayConfig;
+}
+
 export interface UndergroundPlacementConfig {
 	enabled: boolean;
 	reference: 'rtk-surface';
@@ -122,6 +163,10 @@ export interface DemoModelConfig {
 	placementAnchorModelLocal?: [ number, number, number ];
 	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
+	verticalPlacement?: ModelVerticalPlacementConfig;
+	groundClassification?: ModelGroundClassificationConfig;
+	display?: ModelDisplayConfig;
+	modelInstances: ModelInstanceConfig[];
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
@@ -189,6 +234,10 @@ interface LocalDebugModelConfig {
 	placementAnchorModelLocal?: [ number, number, number ];
 	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
+	verticalPlacement?: ModelVerticalPlacementConfig;
+	groundClassification?: ModelGroundClassificationConfig;
+	display?: ModelDisplayConfig;
+	modelInstances?: ModelInstanceConfig[];
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
@@ -197,7 +246,7 @@ interface LocalDebugModelConfig {
 	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundPlacement' | 'undergroundDisplay' | 'annotations' | 'annotationStyleRules'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundPlacement' | 'undergroundDisplay' | 'verticalPlacement' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	controlPoints: Record<string, {
@@ -214,6 +263,10 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	placementAnchorModelLocal?: [ number, number, number ];
 	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
+	verticalPlacement?: ModelVerticalPlacementConfig;
+	groundClassification?: ModelGroundClassificationConfig;
+	display?: ModelDisplayConfig;
+	modelInstances?: ModelInstanceConfig[];
 	undergroundObjects?: unknown[];
 	sensors?: unknown[];
 	riskPoints?: unknown[];
@@ -358,6 +411,10 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		undergroundPlacement: normalizeUndergroundPlacementConfig( config.undergroundPlacement ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
+		verticalPlacement: normalizeVerticalPlacementConfig( config.verticalPlacement, config.undergroundPlacement ),
+		groundClassification: normalizeGroundClassificationConfig( config.groundClassification ),
+		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay, config.undergroundPlacement ),
+		modelInstances: normalizeModelInstances( config.modelInstances, config.modelId, config.undergroundPlacement, config.undergroundDisplay, config.verticalPlacement, config.groundClassification, config.display ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
@@ -407,6 +464,10 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		undergroundPlacement: normalizeUndergroundPlacementConfig( config.undergroundPlacement ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
+		verticalPlacement: normalizeVerticalPlacementConfig( config.verticalPlacement, config.undergroundPlacement ),
+		groundClassification: normalizeGroundClassificationConfig( config.groundClassification ),
+		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay, config.undergroundPlacement ),
+		modelInstances: normalizeModelInstances( config.modelInstances, config.siteId, config.undergroundPlacement, config.undergroundDisplay, config.verticalPlacement, config.groundClassification, config.display ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
@@ -1086,6 +1147,151 @@ function hasControlPointEnu(value: unknown): boolean {
 
 	return hasOwnObjectKey( value, 'enu' );
 
+}
+
+function normalizeModelInstances(
+	value: ModelInstanceConfig[] | undefined,
+	fallbackModelId: string,
+	legacyUndergroundPlacement: UndergroundPlacementConfig | undefined,
+	legacyUndergroundDisplay: UndergroundDisplayConfig | undefined,
+	verticalPlacement: ModelVerticalPlacementConfig | undefined,
+	groundClassification: ModelGroundClassificationConfig | undefined,
+	display: ModelDisplayConfig | undefined
+): ModelInstanceConfig[] {
+
+	if ( Array.isArray( value ) && value.length > 0 ) {
+		return value.flatMap( ( instance ) => {
+			if ( typeof instance?.id !== 'string' || instance.id.trim().length === 0 ) {
+				return [];
+			}
+			return [ {
+				id: instance.id.trim(),
+				name: typeof instance.name === 'string' && instance.name.trim().length > 0 ? instance.name.trim() : instance.id.trim(),
+				role: typeof instance.role === 'string' ? instance.role : 'primary',
+				verticalPlacement: normalizeVerticalPlacementConfig( instance.verticalPlacement, legacyUndergroundPlacement ),
+				groundClassification: normalizeGroundClassificationConfig( instance.groundClassification ),
+				display: normalizeModelDisplayConfig( instance.display, legacyUndergroundDisplay, legacyUndergroundPlacement )
+			} ];
+		} );
+	}
+
+	return [ {
+		id: fallbackModelId,
+		name: fallbackModelId,
+		role: 'primary',
+		verticalPlacement: normalizeVerticalPlacementConfig( verticalPlacement, legacyUndergroundPlacement ),
+		groundClassification: normalizeGroundClassificationConfig( groundClassification ),
+		display: normalizeModelDisplayConfig( display, legacyUndergroundDisplay, legacyUndergroundPlacement )
+	} ];
+
+}
+
+function normalizeVerticalPlacementConfig(
+	value: ModelVerticalPlacementConfig | undefined,
+	legacyUndergroundPlacement: UndergroundPlacementConfig | undefined
+): ModelVerticalPlacementConfig {
+
+	if ( value !== undefined ) {
+		return {
+			groundRelation: normalizeGroundRelation( value.groundRelation ),
+			surfaceReference: value.surfaceReference === 'absolute-enu' ? 'absolute-enu' : 'rtk-surface-control-points',
+			referencePlane: normalizeReferencePlane( value.referencePlane, value.groundRelation ),
+			localGroundY: typeof value.localGroundY === 'number' && Number.isFinite( value.localGroundY ) ? value.localGroundY : undefined,
+			coverDepthMeters: typeof value.coverDepthMeters === 'number' && Number.isFinite( value.coverDepthMeters ) ? Math.max( 0, value.coverDepthMeters ) : 0,
+			modelHeightAxis: value.modelHeightAxis === 'y' || value.modelHeightAxis === 'shortest-edge' ? value.modelHeightAxis : 'bbox-y',
+			modelHeightMetersOverride: typeof value.modelHeightMetersOverride === 'number' && Number.isFinite( value.modelHeightMetersOverride ) && value.modelHeightMetersOverride > 0
+				? value.modelHeightMetersOverride
+				: null
+		};
+	}
+
+	if ( legacyUndergroundPlacement?.enabled === true ) {
+		return {
+			groundRelation: 'underground',
+			surfaceReference: 'rtk-surface-control-points',
+			referencePlane: 'bbox-top',
+			coverDepthMeters: legacyUndergroundPlacement.coverDepthMeters ?? 0,
+			modelHeightAxis: legacyUndergroundPlacement.modelHeightAxis ?? 'bbox-y',
+			modelHeightMetersOverride: legacyUndergroundPlacement.modelHeightMetersOverride ?? null
+		};
+	}
+
+	return {
+		groundRelation: 'above-ground',
+		surfaceReference: 'rtk-surface-control-points',
+		referencePlane: 'bbox-bottom',
+		coverDepthMeters: 0,
+		modelHeightAxis: 'bbox-y',
+		modelHeightMetersOverride: null
+	};
+
+}
+
+function normalizeGroundClassificationConfig(value: ModelGroundClassificationConfig | undefined): ModelGroundClassificationConfig {
+
+	if ( value?.mode === 'node-groups' ) {
+		const above = Array.isArray( value.aboveGroundNodes ) ? value.aboveGroundNodes.filter( isNonEmptyString ) : [];
+		const below = Array.isArray( value.belowGroundNodes ) ? value.belowGroundNodes.filter( isNonEmptyString ) : [];
+		const overlap = above.filter( ( item ) => below.includes( item ) );
+		if ( overlap.length > 0 ) {
+			arError( 'GroundClassificationNodeOverlap', { overlap } );
+		}
+		return {
+			mode: 'node-groups',
+			aboveGroundNodes: above,
+			belowGroundNodes: below
+		};
+	}
+
+	if ( value?.mode === 'clip-by-ground-plane' ) {
+		return {
+			mode: 'clip-by-ground-plane',
+			localGroundY: typeof value.localGroundY === 'number' && Number.isFinite( value.localGroundY ) ? value.localGroundY : 0
+		};
+	}
+
+	return { mode: 'whole-model' };
+
+}
+
+function normalizeModelDisplayConfig(
+	value: ModelDisplayConfig | undefined,
+	legacyUndergroundDisplay: UndergroundDisplayConfig | undefined,
+	legacyUndergroundPlacement: UndergroundPlacementConfig | undefined
+): ModelDisplayConfig {
+
+	const underground = legacyUndergroundPlacement?.enabled === true;
+	return {
+		aboveGroundMode: value?.aboveGroundMode === 'hidden' ? 'hidden' : 'normal-ar',
+		belowGroundMode: value?.belowGroundMode ?? ( underground ? 'top-portal' : 'hidden' ),
+		realWorldOcclusion: value?.realWorldOcclusion ?? underground,
+		opacity: typeof value?.opacity === 'number' && Number.isFinite( value.opacity )
+			? Math.min( 1, Math.max( 0, value.opacity ) )
+			: legacyUndergroundDisplay?.xrayOpacity,
+		selectable: value?.selectable ?? true
+	};
+
+}
+
+function normalizeGroundRelation(value: unknown): ModelGroundRelation {
+	return value === 'underground' || value === 'mixed' || value === 'absolute-engineering' ? value : 'above-ground';
+}
+
+function normalizeReferencePlane(value: unknown, relation: unknown): ModelReferencePlane {
+	if (
+		value === 'bbox-bottom'
+		|| value === 'bbox-top'
+		|| value === 'local-ground-plane'
+		|| value === 'control-point-plane'
+		|| value === 'none'
+	) {
+		return value;
+	}
+	return relation === 'underground' ? 'bbox-top' : relation === 'absolute-engineering' ? 'none' : 'bbox-bottom';
+}
+
+function isNonEmptyString(value: unknown): value is string {
+	return typeof value === 'string' && value.trim().length > 0;
 }
 
 function normalizeUndergroundPlacementConfig(value: UndergroundPlacementConfig | undefined): UndergroundPlacementConfig | undefined {

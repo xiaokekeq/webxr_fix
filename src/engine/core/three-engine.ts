@@ -330,6 +330,7 @@ export class ThreeEngine {
 	private currentModelActualLastUpdateReason = 'none';
 	private purpleDiagnosticsUpdatedInFrameLoop = false;
 	private canvasPropertyPanelAuditLogged = false;
+	private groundAwareArAuditLogged = false;
 	private placementDebugLastWorldLockUpdateAt = 0;
 	private engineeringPlacementCallCount = 0;
 	private replacedModelCount = 0;
@@ -667,6 +668,7 @@ export class ThreeEngine {
 				this.demoModelConfig = bundle.demoModelConfig;
 				this.modelTemplate = bundle.modelTemplate;
 				this.registrationSolution = bundle.registrationSolution;
+				this.logGroundAwareArAudit( bundle.demoModelConfig );
 				this.annotationLayer.setAnnotations(
 					bundle.demoModelConfig.annotations,
 					bundle.demoModelConfig.annotationStyleRules
@@ -4243,6 +4245,47 @@ export class ThreeEngine {
 
 		this.handleEngineeringAnnotationSelection( annotation, hit.object );
 		return true;
+
+	}
+
+	private logGroundAwareArAudit(config: DemoModelConfig): void {
+
+		if ( this.groundAwareArAuditLogged ) {
+			return;
+		}
+		this.groundAwareArAuditLogged = true;
+
+		arInfo( 'GroundAwareArAudit', {
+			currentModelInstanceConfigEntry: config.modelInstances.map( ( instance ) => ( {
+				id: instance.id,
+				groundRelation: instance.verticalPlacement.groundRelation,
+				referencePlane: instance.verticalPlacement.referencePlane,
+				belowGroundMode: instance.display.belowGroundMode
+			} ) ),
+			currentSingleModelCompatibilityEntry: config.undergroundPlacement?.enabled === true ? 'legacy undergroundPlacement mapped to modelInstances[0].verticalPlacement' : 'single model maps to above-ground default',
+			currentModelToEnuResolver: 'solveEngineeringRegistration -> solveGroundPlaneRigidTransform',
+			currentEngineeringMatrixFormula: 'engineeringMatrix = arFromEnu * modelToEnu',
+			currentUndergroundTargetDerivation: 'underground uses RTK surface control point up - coverDepthMeters - normalized model height; above-ground and absolute-engineering do not subtract height',
+			currentNormalizedBoundsResolver: 'readPlaceableTemplateReport(finalSize); bbox-y uses normalized finalSize.y',
+			currentModelInstanceManager: 'single runtime instance with normalized modelInstances config; multi-loader not yet split',
+			currentSceneModelRoots: {
+				modelRoot: '__ar-model-anchor',
+				placementAnchor: '__ar-placement-anchor'
+			},
+			currentCanvasPropertyPanelEntry: 'annotationLabelsController.setDetail(CanvasTexture Sprite)',
+			currentAnnotationLayerEntry: 'AnnotationLayer.setAnnotations',
+			currentDepthAwareOverlayEntry: 'cpu-depth-visualization debug only',
+			currentDepthSessionRequest: 'normal session optional dom-overlay/anchors; cpu-depth-debug requests optional depth-sensing cpu-optimized',
+			currentCpuDepthPath: 'frame.getDepthInformation(view) debug sampler',
+			currentGpuDepthPath: 'not implemented',
+			currentPortalImplementation: 'not implemented; fallback is existing surface footprint/x-ray diagnostics',
+			currentLegacyVisualOffsetReferences: 'visualMatrix remains snapshot/debug name only; no visualOffsetY/buriedDepthMeters positioning path',
+			migrationRisks: [
+				'Portal render target and real-depth occlusion are not present yet',
+				'Current runtime still places one model template',
+				'GPU depth path needs XRWebGLBinding before real foreground occlusion can be production'
+			]
+		} );
 
 	}
 

@@ -671,7 +671,7 @@ export function deriveUndergroundRegistrationSolution(args: {
 	undergroundControlPoints: EngineeringControlPoint[];
 } {
 
-	const config = args.registrationSolution.undergroundPlacement;
+	const config = resolveUndergroundPlacementConfig( args.registrationSolution );
 	const enabled = config?.enabled === true;
 	const height = resolveEngineeringModelHeightMeters( {
 		undergroundPlacement: config,
@@ -728,6 +728,31 @@ export function deriveUndergroundRegistrationSolution(args: {
 		totalBottomDepthMeters,
 		warning: height.warning,
 		undergroundControlPoints
+	};
+
+}
+
+function resolveUndergroundPlacementConfig(
+	registrationSolution: EngineeringRegistrationSolution
+): EngineeringRegistrationSolution['undergroundPlacement'] {
+
+	const verticalPlacement = registrationSolution.verticalPlacement;
+	if ( verticalPlacement === undefined ) {
+		return registrationSolution.undergroundPlacement;
+	}
+
+	if ( verticalPlacement.groundRelation !== 'underground' ) {
+		return undefined;
+	}
+
+	return {
+		enabled: true,
+		reference: 'rtk-surface',
+		modelReference: 'bottom',
+		depthMode: 'model-height',
+		modelHeightAxis: verticalPlacement.modelHeightAxis ?? 'bbox-y',
+		modelHeightMetersOverride: verticalPlacement.modelHeightMetersOverride ?? null,
+		coverDepthMeters: verticalPlacement.coverDepthMeters ?? 0
 	};
 
 }
