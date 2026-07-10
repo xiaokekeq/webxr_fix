@@ -671,7 +671,7 @@ export function deriveUndergroundRegistrationSolution(args: {
 	const undergroundControlPoints = args.registrationSolution.controlPoints.map( ( point ) => ( {
 		...point,
 		modelLocal: point.modelLocal.clone(),
-		worldEnu: point.worldEnu.clone().setY( point.worldEnu.y - totalBottomDepthMeters )
+		worldEnu: point.worldEnu.clone().setZ( point.worldEnu.z - totalBottomDepthMeters )
 	} ) );
 
 	if ( enabled === false ) {
@@ -920,11 +920,11 @@ function logUndergroundPlacementAudit(args: {
 		legacyOffsetConfigFields: [],
 		surfaceElevations: surfacePoints.map( ( point ) => ( {
 			id: point.id,
-			y: Number( point.worldEnu.y.toFixed( 6 ) )
+			up: Number( point.worldEnu.z.toFixed( 6 ) )
 		} ) ),
 		undergroundElevations: undergroundPoints.map( ( point ) => ( {
 			id: point.id,
-			y: Number( point.worldEnu.y.toFixed( 6 ) )
+			up: Number( point.worldEnu.z.toFixed( 6 ) )
 		} ) ),
 		modelHeightMeters: Number( args.undergroundPlacement.modelHeightMeters.toFixed( 6 ) ),
 		coverDepthMeters: Number( args.undergroundPlacement.coverDepthMeters.toFixed( 6 ) ),

@@ -4423,7 +4423,7 @@ function formatControlPointElevations(points: EngineeringControlPoint[]): string
 
 	return points
 		.slice( 0, 4 )
-		.map( ( point ) => `${point.id}:${point.worldEnu.y.toFixed( 3 )}m` )
+		.map( ( point ) => `${point.id}:${point.worldEnu.z.toFixed( 3 )}m` )
 		.join( ' / ' );
 
 }
