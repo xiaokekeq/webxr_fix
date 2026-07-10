@@ -482,11 +482,12 @@ async function requestArSession(
 	const mode = options.mode ?? ( options.cpuDepthDebug ? 'cpu-depth-debug' : 'normal' );
 
 	const plainInit = {
-		requiredFeatures: [ 'hit-test' ],
-		optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
+		requiredFeatures: [ 'hit-test', 'depth-sensing' ],
+		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		depthSensing: {
-			usagePreference: [ 'gpu-optimized', 'cpu-optimized' ],
-			dataFormatPreference: [ 'luminance-alpha', 'float32' ]
+			usagePreference: [ 'cpu-optimized', 'gpu-optimized' ],
+			dataFormatPreference: [ 'luminance-alpha', 'float32' ],
+			matchDepthView: true
 		},
 		domOverlay: { root: document.body }
 	};
@@ -519,7 +520,8 @@ async function requestArSession(
 		optionalFeatures: [ 'dom-overlay', 'anchors', 'depth-sensing' ],
 		depthSensing: {
 			usagePreference: [ 'cpu-optimized' ],
-			dataFormatPreference: [ 'luminance-alpha', 'float32' ]
+			dataFormatPreference: [ 'luminance-alpha', 'float32' ],
+			matchDepthView: true
 		},
 		domOverlay: { root: document.body }
 	};
