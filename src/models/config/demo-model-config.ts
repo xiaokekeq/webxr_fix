@@ -81,24 +81,18 @@ interface RawMarkerEngineeringConfig extends Omit<MarkerEngineeringConfig, 'enu'
 }
 
 export type DemoModelRegistrationMode = 'rigid-ground-plane';
-export type DemoModelVisualPlacementMode = 'surface' | 'underground';
-export type UndergroundBuriedDepth = number | 'model-height';
 export type UndergroundModelHeightAxis = 'y' | 'shortest-edge' | 'bbox-y';
 export interface UndergroundPlacementConfig {
 	enabled: boolean;
-	placementMode: 'visual-offset' | 'rtk-derived-elevation';
-	surfaceReference: 'control-point-world-enu';
+	reference: 'rtk-surface';
 	modelReference: 'bottom';
-	depthMode: 'model-height' | 'fixed-depth';
-	fixedDepthMeters?: number;
+	depthMode: 'model-height';
+	modelHeightAxis: UndergroundModelHeightAxis;
+	modelHeightMetersOverride?: number | null;
 	coverDepthMeters?: number;
-	modelHeightAxis?: UndergroundModelHeightAxis;
-	preserveSurfaceTargets?: boolean;
 }
 export interface UndergroundDisplayConfig {
 	defaultMode?: 'true-depth' | 'x-ray' | 'surface-projection' | 'lifted-preview';
-	buriedDepthMeters?: UndergroundBuriedDepth;
-	modelHeightAxis?: UndergroundModelHeightAxis;
 	liftedPreviewOffsetMeters?: number;
 	xrayOpacity?: number;
 	showSurfaceProjection?: boolean;
@@ -126,8 +120,6 @@ export interface DemoModelConfig {
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
-	visualGroundOffsetMeters: number;
-	visualPlacementMode: DemoModelVisualPlacementMode;
 	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
@@ -195,8 +187,6 @@ interface LocalDebugModelConfig {
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
-	visualGroundOffsetMeters?: number;
-	visualPlacementMode?: DemoModelVisualPlacementMode;
 	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
@@ -207,7 +197,7 @@ interface LocalDebugModelConfig {
 	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'visualGroundOffsetMeters' | 'visualPlacementMode' | 'undergroundPlacement' | 'undergroundDisplay' | 'annotations' | 'annotationStyleRules'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundPlacement' | 'undergroundDisplay' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	controlPoints: Record<string, {
@@ -222,8 +212,6 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
-	visualGroundOffsetMeters?: number;
-	visualPlacementMode?: DemoModelVisualPlacementMode;
 	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
 	undergroundObjects?: unknown[];
@@ -351,6 +339,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.modelId );
 	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints );
+	reportLegacyUndergroundPlacementConfig( config );
 
 	return {
 		modelId: config.modelId,
@@ -367,8 +356,6 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
-		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
-		visualPlacementMode: normalizeVisualPlacementMode( config.visualPlacementMode ),
 		undergroundPlacement: normalizeUndergroundPlacementConfig( config.undergroundPlacement ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
@@ -395,6 +382,7 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.siteId );
 	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints );
+	reportLegacyUndergroundPlacementConfig( config );
 
 	return {
 		modelId: config.siteId,
@@ -417,8 +405,6 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
-		visualGroundOffsetMeters: normalizeVisualGroundOffsetMeters( config.visualGroundOffsetMeters ),
-		visualPlacementMode: normalizeVisualPlacementMode( config.visualPlacementMode ),
 		undergroundPlacement: normalizeUndergroundPlacementConfig( config.undergroundPlacement ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
@@ -1102,18 +1088,6 @@ function hasControlPointEnu(value: unknown): boolean {
 
 }
 
-function normalizeVisualGroundOffsetMeters(value: number | undefined): number {
-
-	return typeof value === 'number' && Number.isFinite( value ) ? value : 0;
-
-}
-
-function normalizeVisualPlacementMode(value: DemoModelVisualPlacementMode | undefined): DemoModelVisualPlacementMode {
-
-	return value === 'underground' ? 'underground' : 'surface';
-
-}
-
 function normalizeUndergroundPlacementConfig(value: UndergroundPlacementConfig | undefined): UndergroundPlacementConfig | undefined {
 
 	if ( typeof value !== 'object' || value === null || value.enabled !== true ) {
@@ -1122,21 +1096,42 @@ function normalizeUndergroundPlacementConfig(value: UndergroundPlacementConfig |
 
 	return {
 		enabled: true,
-		placementMode: value.placementMode === 'rtk-derived-elevation' ? 'rtk-derived-elevation' : 'visual-offset',
-		surfaceReference: 'control-point-world-enu',
+		reference: 'rtk-surface',
 		modelReference: 'bottom',
-		depthMode: value.depthMode === 'fixed-depth' ? 'fixed-depth' : 'model-height',
-		fixedDepthMeters: typeof value.fixedDepthMeters === 'number' && Number.isFinite( value.fixedDepthMeters )
-			? Math.max( 0, value.fixedDepthMeters )
-			: undefined,
-		coverDepthMeters: typeof value.coverDepthMeters === 'number' && Number.isFinite( value.coverDepthMeters )
-			? Math.max( 0, value.coverDepthMeters )
-			: 0,
+		depthMode: 'model-height',
 		modelHeightAxis: value.modelHeightAxis === 'y' || value.modelHeightAxis === 'shortest-edge'
 			? value.modelHeightAxis
 			: 'bbox-y',
-		preserveSurfaceTargets: value.preserveSurfaceTargets !== false
+		modelHeightMetersOverride: typeof value.modelHeightMetersOverride === 'number' && Number.isFinite( value.modelHeightMetersOverride ) && value.modelHeightMetersOverride > 0
+			? value.modelHeightMetersOverride
+			: null,
+		coverDepthMeters: typeof value.coverDepthMeters === 'number' && Number.isFinite( value.coverDepthMeters )
+			? Math.max( 0, value.coverDepthMeters )
+			: 0
 	};
+
+}
+
+function reportLegacyUndergroundPlacementConfig(config: unknown): void {
+
+	if ( typeof config !== 'object' || config === null ) {
+		return;
+	}
+	const record = config as Record<string, unknown>;
+	const undergroundDisplay = record.undergroundDisplay as Record<string, unknown> | undefined;
+	const legacyFields = [
+		'visualGroundOffsetMeters',
+		'visualPlacementMode',
+		...( undergroundDisplay?.buriedDepthMeters !== undefined ? [ 'undergroundDisplay.buriedDepthMeters' ] : [] ),
+		...( undergroundDisplay?.modelHeightAxis !== undefined ? [ 'undergroundDisplay.modelHeightAxis' ] : [] )
+	].filter( ( key ) => key.includes( '.' ) || record[ key ] !== undefined );
+
+	if ( legacyFields.length > 0 ) {
+		arError( 'LegacyUndergroundPlacementConfigDetected', {
+			legacyFields,
+			reason: 'underground depth must be derived through undergroundPlacement only'
+		} );
+	}
 
 }
 
@@ -1154,20 +1149,6 @@ function normalizeUndergroundDisplayConfig(value: UndergroundDisplayConfig | und
 		|| value.defaultMode === 'lifted-preview'
 	) {
 		config.defaultMode = value.defaultMode;
-	}
-
-	if ( value.buriedDepthMeters === 'model-height' ) {
-		config.buriedDepthMeters = 'model-height';
-	} else if ( typeof value.buriedDepthMeters === 'number' && Number.isFinite( value.buriedDepthMeters ) ) {
-		config.buriedDepthMeters = value.buriedDepthMeters;
-	}
-
-	if (
-		value.modelHeightAxis === 'y'
-		|| value.modelHeightAxis === 'shortest-edge'
-		|| value.modelHeightAxis === 'bbox-y'
-	) {
-		config.modelHeightAxis = value.modelHeightAxis;
 	}
 
 	if ( typeof value.liftedPreviewOffsetMeters === 'number' && Number.isFinite( value.liftedPreviewOffsetMeters ) ) {

@@ -3,7 +3,6 @@ import type {
 	DemoModelConfig,
 	DemoModelControlPointCorrespondence,
 	DemoModelRegistrationMode,
-	DemoModelVisualPlacementMode,
 	UndergroundPlacementConfig,
 	UndergroundDisplayConfig
 } from '@/models/config/demo-model-config.js';
@@ -46,8 +45,6 @@ export interface EngineeringRegistrationSolution {
 	modelUnitScale: number;
 	placementAnchorModelLocal?: THREE.Vector3;
 	placementAnchorMeaning?: string;
-	visualGroundOffsetMeters: number;
-	visualPlacementMode: DemoModelVisualPlacementMode;
 	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
 }
@@ -125,8 +122,6 @@ export function solveEngineeringRegistration(
 		modelUnitScale,
 		placementAnchorModelLocal: tupleToVector3( config.placementAnchorModelLocal ),
 		placementAnchorMeaning: config.placementAnchorMeaning,
-		visualGroundOffsetMeters: config.visualGroundOffsetMeters,
-		visualPlacementMode: config.visualPlacementMode,
 		undergroundPlacement: config.undergroundPlacement,
 		undergroundDisplay: config.undergroundDisplay
 	};

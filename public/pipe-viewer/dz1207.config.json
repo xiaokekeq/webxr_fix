@@ -235,17 +235,14 @@
     0
   ],
   "placementAnchorMeaning": "site-origin-ground-reference",
-  "visualGroundOffsetMeters": 0,
-  "visualPlacementMode": "underground",
   "undergroundPlacement": {
     "enabled": true,
-    "placementMode": "rtk-derived-elevation",
-    "surfaceReference": "control-point-world-enu",
+    "reference": "rtk-surface",
     "modelReference": "bottom",
     "depthMode": "model-height",
-    "coverDepthMeters": 0,
     "modelHeightAxis": "bbox-y",
-    "preserveSurfaceTargets": true
+    "modelHeightMetersOverride": null,
+    "coverDepthMeters": 0
   },
   "undergroundDisplay": {
     "defaultMode": "x-ray",

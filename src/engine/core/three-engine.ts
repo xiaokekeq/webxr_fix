@@ -5,8 +5,7 @@ import { createPropertySelectionController } from '@/engine/interaction/property
 import { createModelSession } from '@/engine/model/session.js';
 import {
 	createPlacementSession,
-	deriveUndergroundRegistrationSolution,
-	resolveBuriedDepthMeters
+	deriveUndergroundRegistrationSolution
 } from '@/engine/placement/session.js';
 import { createArSessionStateRuntime } from '@/engine/session/ar-session-state-runtime.js';
 import {
@@ -310,19 +309,19 @@ export class ThreeEngine {
 	private fixedVisualMatrix: THREE.Matrix4 | null = null;
 	private yellowSurfaceInitialCenterWorld: THREE.Vector3 | null = null;
 	private purpleEngineeringInitialCenterWorld: THREE.Vector3 | null = null;
-	private purpleVisualInitialCenterWorld: THREE.Vector3 | null = null;
+	private undergroundExpectedInitialCenterWorld: THREE.Vector3 | null = null;
 	private yellowScreenInitial: DebugScreenPoint | null = null;
 	private purpleEngineeringScreenInitial: DebugScreenPoint | null = null;
-	private purpleVisualScreenInitial: DebugScreenPoint | null = null;
-	private yellowToPurpleVisualScreenDistanceInitialPx: number | null = null;
+	private undergroundExpectedScreenInitial: DebugScreenPoint | null = null;
+	private yellowToUndergroundScreenDistanceInitialPx: number | null = null;
 	private diagnosticSampleCount = 0;
 	private yellowUpdateCount = 0;
 	private purpleEngineeringUpdateCount = 0;
-	private purpleVisualUpdateCount = 0;
+	private undergroundExpectedUpdateCount = 0;
 	private currentModelActualUpdateCount = 0;
 	private yellowLastUpdateReason = 'none';
 	private purpleEngineeringLastUpdateReason = 'none';
-	private purpleVisualLastUpdateReason = 'none';
+	private undergroundExpectedLastUpdateReason = 'none';
 	private currentModelActualLastUpdateReason = 'none';
 	private purpleDiagnosticsUpdatedInFrameLoop = false;
 	private placementDebugLastWorldLockUpdateAt = 0;
@@ -671,7 +670,7 @@ export class ThreeEngine {
 						)
 					}
 				} );
-				if ( bundle.demoModelConfig.visualPlacementMode === 'underground' ) {
+				if ( bundle.demoModelConfig.undergroundPlacement?.enabled === true ) {
 					const opacity = resolveXrayOpacityPercent( bundle.demoModelConfig.undergroundDisplay?.xrayOpacity );
 					this.store.patch( {
 						displayMode: 'transparent-xray',
@@ -2013,24 +2012,30 @@ export class ThreeEngine {
 				arFromEnuSolution,
 				registrationSolution: this.registrationSolution as EngineeringRegistrationSolution
 			} );
-			const visualMatrix = this.fixedVisualMatrix ?? engineeringMatrix;
+			const undergroundPlacement = this.modelTemplate === null
+				? null
+				: deriveUndergroundRegistrationSolution( {
+					registrationSolution: this.registrationSolution as EngineeringRegistrationSolution,
+					modelTemplate: this.modelTemplate
+				} );
 			placedModel.updateMatrixWorld( true );
 			const engineeringPoints = controlPoints
 				.map( ( point ) => point.modelLocal.clone().applyMatrix4( engineeringMatrix ) );
-			const visualPoints = controlPoints
-				.map( ( point ) => point.modelLocal.clone().applyMatrix4( visualMatrix ) );
+			const undergroundExpectedPoints = controlPoints
+				.map( ( _point, index ) => undergroundPlacement?.undergroundControlPoints[ index ]?.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) )
+				.filter( ( point ): point is THREE.Vector3 => point !== undefined );
 			const currentModelActualPoints = controlPoints
 				.map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) );
 			this.purpleEngineeringUpdateCount += 1;
-			this.purpleVisualUpdateCount += 1;
+			this.undergroundExpectedUpdateCount += 1;
 			this.purpleEngineeringLastUpdateReason = updateReason;
-			this.purpleVisualLastUpdateReason = updateReason;
+			this.undergroundExpectedLastUpdateReason = updateReason;
 			this.purpleDiagnosticsUpdatedInFrameLoop = updateReason === 'xr-frame';
 			if ( this.purpleEngineeringInitialCenterWorld === null ) {
 				this.purpleEngineeringInitialCenterWorld = averageVectors( engineeringPoints ).clone();
 			}
-			if ( this.purpleVisualInitialCenterWorld === null ) {
-				this.purpleVisualInitialCenterWorld = averageVectors( visualPoints ).clone();
+			if ( this.undergroundExpectedInitialCenterWorld === null && undergroundExpectedPoints.length > 0 ) {
+				this.undergroundExpectedInitialCenterWorld = averageVectors( undergroundExpectedPoints ).clone();
 			}
 			if ( this.engineeringDebugLayers.showModelActualControlPoints ) {
 				this.addDebugQuad( {
@@ -2041,9 +2046,9 @@ export class ThreeEngine {
 				} );
 				if ( import.meta.env.VITE_AR_DEBUG === 'true' ) {
 					this.addDebugQuad( {
-						name: 'model-cp-actual-visual',
-						points: visualPoints,
-						labels: controlPoints.map( ( point ) => `actual-${point.id}-visual` ),
+						name: 'model-cp-underground-expected',
+						points: undergroundExpectedPoints,
+						labels: controlPoints.map( ( point ) => `underground-${point.id}` ),
 						color: 0x38bdf8
 					} );
 					this.addDebugQuad( {
@@ -3293,19 +3298,19 @@ export class ThreeEngine {
 		this.fixedVisualMatrix = diagnostics.initialSnapshot?.visualMatrix?.clone() ?? null;
 		this.yellowSurfaceInitialCenterWorld = null;
 		this.purpleEngineeringInitialCenterWorld = null;
-		this.purpleVisualInitialCenterWorld = null;
+		this.undergroundExpectedInitialCenterWorld = null;
 		this.yellowScreenInitial = null;
 		this.purpleEngineeringScreenInitial = null;
-		this.purpleVisualScreenInitial = null;
-		this.yellowToPurpleVisualScreenDistanceInitialPx = null;
+		this.undergroundExpectedScreenInitial = null;
+		this.yellowToUndergroundScreenDistanceInitialPx = null;
 		this.diagnosticSampleCount = 0;
 		this.yellowUpdateCount = 0;
 		this.purpleEngineeringUpdateCount = 0;
-		this.purpleVisualUpdateCount = 0;
+		this.undergroundExpectedUpdateCount = 0;
 		this.currentModelActualUpdateCount = 0;
 		this.yellowLastUpdateReason = 'none';
 		this.purpleEngineeringLastUpdateReason = 'none';
-		this.purpleVisualLastUpdateReason = 'none';
+		this.undergroundExpectedLastUpdateReason = 'none';
 		this.currentModelActualLastUpdateReason = 'none';
 		this.purpleDiagnosticsUpdatedInFrameLoop = false;
 		this.placementDebugLastWorldLockUpdateAt = 0;
@@ -3469,40 +3474,25 @@ export class ThreeEngine {
 				registrationSolution,
 				modelTemplate
 			} );
-			const buriedDepth = undergroundPlacement.buriedDepth;
-			const visualOffsetY = registrationSolution.visualPlacementMode === 'underground'
-				? undergroundPlacement.placementMode === 'rtk-derived-elevation'
-					? 0
-					: - undergroundPlacement.totalBottomDepthMeters + registrationSolution.visualGroundOffsetMeters
-				: registrationSolution.visualGroundOffsetMeters;
 			Object.assign( partial, {
-				visualPlacementMode: registrationSolution.visualPlacementMode,
-				undergroundPlacementMode: undergroundPlacement.placementMode,
+				undergroundPlacementMode: undergroundPlacement.enabled ? 'rtk-derived-elevation' : 'surface',
 				undergroundMode: registrationSolution.undergroundDisplay?.defaultMode ?? undefined,
-				buriedDepthRaw: registrationSolution.undergroundPlacement?.enabled === true
-					? registrationSolution.undergroundPlacement.depthMode === 'model-height'
-						? 'model-height'
-						: registrationSolution.undergroundPlacement.fixedDepthMeters ?? null
-					: registrationSolution.undergroundDisplay?.buriedDepthMeters ?? null,
-				buriedDepthSource: buriedDepth.source,
+				modelHeightSource: undergroundPlacement.modelHeightSource,
 				modelHeight: undergroundPlacement.modelHeightMeters,
-				buriedDepthModelHeightAxis: buriedDepth.modelHeightAxis ?? undefined,
-				modelHeightAxis: buriedDepth.modelHeightAxis ?? undefined,
-				modelHeightX: buriedDepth.modelHeightX ?? undefined,
-				modelHeightY: buriedDepth.modelHeightY ?? undefined,
-				modelHeightZ: buriedDepth.modelHeightZ ?? undefined,
-				modelSizeX: buriedDepth.modelHeightX ?? undefined,
-				modelSizeY: buriedDepth.modelHeightY ?? undefined,
-				modelSizeZ: buriedDepth.modelHeightZ ?? undefined,
-				chosenModelHeight: buriedDepth.chosenModelHeight ?? undefined,
+				modelHeightAxis: undergroundPlacement.modelHeightAxis ?? undefined,
+				modelHeightX: undergroundPlacement.modelSizeX ?? undefined,
+				modelHeightY: undergroundPlacement.modelSizeY ?? undefined,
+				modelHeightZ: undergroundPlacement.modelSizeZ ?? undefined,
+				modelSizeX: undergroundPlacement.modelSizeX ?? undefined,
+				modelSizeY: undergroundPlacement.modelSizeY ?? undefined,
+				modelSizeZ: undergroundPlacement.modelSizeZ ?? undefined,
+				chosenModelHeight: undergroundPlacement.modelHeightMeters,
 				coverDepthMeters: roundMeters( undergroundPlacement.coverDepthMeters ),
 				totalBottomDepthMeters: roundMeters( undergroundPlacement.totalBottomDepthMeters ),
 				engineeringUndergroundOffsetY: roundMeters( - undergroundPlacement.totalBottomDepthMeters ),
 				surfaceElevationText: formatControlPointElevations( registrationSolution.controlPoints ),
 				undergroundElevationText: formatControlPointElevations( undergroundPlacement.undergroundControlPoints ),
 				depthMeters: roundMeters( undergroundPlacement.totalBottomDepthMeters ),
-				visualGroundOffsetMeters: roundMeters( registrationSolution.visualGroundOffsetMeters ),
-				visualOffsetY: roundMeters( visualOffsetY ),
 				xrayOpacity: registrationSolution.undergroundDisplay?.xrayOpacity ?? undefined
 			} );
 		}
@@ -3515,27 +3505,19 @@ export class ThreeEngine {
 				arFromEnuSolution,
 				registrationSolution: effectiveRegistrationSolution
 			} );
-			const currentVisualMatrix = this.fixedVisualMatrix ?? currentEngineeringMatrix.clone();
 			const baselineEngineeringMatrix = this.fixedEngineeringMatrix
 				?? initialSnapshot?.engineeringMatrix
 				?? currentEngineeringMatrix;
-			const baselineVisualMatrix = this.fixedVisualMatrix
-				?? initialSnapshot?.visualMatrix
-				?? currentVisualMatrix;
 			const baselineArFromEnuMatrix = initialSnapshot?.arFromEnuMatrix ?? arFromEnuSolution.matrix;
 			Object.assign( partial, computePlacementErrorDebug( {
 				registrationSolution: effectiveRegistrationSolution,
 				arFromEnuSolution,
-				engineeringMatrix: baselineEngineeringMatrix,
-				visualMatrix: baselineVisualMatrix
+				engineeringMatrix: baselineEngineeringMatrix
 			} ), {
 				engineeringMatrixChanged: matrixChanged( initialSnapshot?.engineeringMatrix ?? null, currentEngineeringMatrix ),
-				visualMatrixChanged: matrixChanged( initialSnapshot?.visualMatrix ?? null, currentVisualMatrix ),
 				arFromEnuMatrixChanged: matrixChanged( baselineArFromEnuMatrix, arFromEnuSolution.matrix ),
 				engineeringMatrixTranslationDelta: matrixTranslationDistance( initialSnapshot?.engineeringMatrix, currentEngineeringMatrix ),
-				visualMatrixTranslationDelta: matrixTranslationDistance( initialSnapshot?.visualMatrix, currentVisualMatrix ),
 				engineeringMatrixElements: roundMatrixElements( currentEngineeringMatrix ),
-				visualMatrixElements: roundMatrixElements( currentVisualMatrix ),
 				arFromEnuMatrixElements: roundMatrixElements( arFromEnuSolution.matrix )
 			} );
 
@@ -3545,11 +3527,12 @@ export class ThreeEngine {
 					.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
 				const purpleEngineeringPoints = footprintControlPoints
 					.map( ( point ) => point.modelLocal.clone().applyMatrix4( baselineEngineeringMatrix ) );
-				const purpleVisualPoints = footprintControlPoints
-					.map( ( point ) => point.modelLocal.clone().applyMatrix4( baselineVisualMatrix ) );
+				const undergroundExpectedPoints = footprintControlPoints
+					.map( ( _point, index ) => effectiveRegistrationSolution.controlPoints[ index ]?.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) )
+					.filter( ( point ): point is THREE.Vector3 => point !== undefined );
 				const yellowSurfaceCenter = averageVectors( yellowSurfacePoints );
 				const purpleEngineeringCenter = averageVectors( purpleEngineeringPoints );
-				const purpleVisualCenter = averageVectors( purpleVisualPoints );
+				const undergroundExpectedCenter = averageVectors( undergroundExpectedPoints );
 				const currentModelActualCenter = placedModel === null
 					? null
 					: averageVectors( footprintControlPoints.map( ( point ) => point.modelLocal ) )
@@ -3560,7 +3543,7 @@ export class ThreeEngine {
 						.applyMatrix4( initialSnapshot.placedModelMatrixWorld );
 				const yellowInitialCenter = this.yellowSurfaceInitialCenterWorld ?? yellowSurfaceCenter;
 				const purpleEngineeringInitialCenter = this.purpleEngineeringInitialCenterWorld ?? purpleEngineeringCenter;
-				const purpleVisualInitialCenter = this.purpleVisualInitialCenterWorld ?? purpleVisualCenter;
+				const undergroundExpectedInitialCenter = this.undergroundExpectedInitialCenterWorld ?? undergroundExpectedCenter;
 				const yellowScreenCurrent = projectWorldToScreen(
 					yellowSurfaceCenter,
 					activeCamera,
@@ -3571,21 +3554,21 @@ export class ThreeEngine {
 					activeCamera,
 					this.sceneBundle.renderer.domElement
 				);
-				const purpleVisualScreenCurrent = projectWorldToScreen(
-					purpleVisualCenter,
+				const undergroundExpectedScreenCurrent = projectWorldToScreen(
+					undergroundExpectedCenter,
 					activeCamera,
 					this.sceneBundle.renderer.domElement
 				);
 				this.yellowScreenInitial ??= { ...yellowScreenCurrent };
 				this.purpleEngineeringScreenInitial ??= { ...purpleEngineeringScreenCurrent };
-				this.purpleVisualScreenInitial ??= { ...purpleVisualScreenCurrent };
-				const yellowToPurpleVisualScreenDistanceCurrentPx = screenPointDistance(
+				this.undergroundExpectedScreenInitial ??= { ...undergroundExpectedScreenCurrent };
+				const yellowToUndergroundScreenDistanceCurrentPx = screenPointDistance(
 					yellowScreenCurrent,
-					purpleVisualScreenCurrent
+					undergroundExpectedScreenCurrent
 				);
-				this.yellowToPurpleVisualScreenDistanceInitialPx ??= screenPointDistance(
+				this.yellowToUndergroundScreenDistanceInitialPx ??= screenPointDistance(
 					this.yellowScreenInitial,
-					this.purpleVisualScreenInitial
+					this.undergroundExpectedScreenInitial
 				);
 				if ( currentModelActualCenter !== null && currentModelActualInitialCenter !== null ) {
 					this.currentModelActualUpdateCount += 1;
@@ -3604,11 +3587,11 @@ export class ThreeEngine {
 					purpleEngineeringWorldDeltaXZ: roundMeters( horizontalDistanceXZ( purpleEngineeringInitialCenter, purpleEngineeringCenter ) ),
 					purpleEngineeringWorldDeltaY: roundMeters( Math.abs( purpleEngineeringCenter.y - purpleEngineeringInitialCenter.y ) ),
 					purpleEngineeringScreenDeltaPx: roundPixels( screenPointDistance( this.purpleEngineeringScreenInitial, purpleEngineeringScreenCurrent ) ),
-					purpleVisualCenterInitialWorld: vector3ToRoundedObject( purpleVisualInitialCenter ),
-					purpleVisualCenterCurrentWorld: vector3ToRoundedObject( purpleVisualCenter ),
-					purpleVisualWorldDeltaXZ: roundMeters( horizontalDistanceXZ( purpleVisualInitialCenter, purpleVisualCenter ) ),
-					purpleVisualWorldDeltaY: roundMeters( Math.abs( purpleVisualCenter.y - purpleVisualInitialCenter.y ) ),
-					purpleVisualScreenDeltaPx: roundPixels( screenPointDistance( this.purpleVisualScreenInitial, purpleVisualScreenCurrent ) ),
+					undergroundExpectedCenterInitialWorld: vector3ToRoundedObject( undergroundExpectedInitialCenter ),
+					undergroundExpectedCenterCurrentWorld: vector3ToRoundedObject( undergroundExpectedCenter ),
+					undergroundExpectedWorldDeltaXZ: roundMeters( horizontalDistanceXZ( undergroundExpectedInitialCenter, undergroundExpectedCenter ) ),
+					undergroundExpectedWorldDeltaY: roundMeters( Math.abs( undergroundExpectedCenter.y - undergroundExpectedInitialCenter.y ) ),
+					undergroundExpectedScreenDeltaPx: roundPixels( screenPointDistance( this.undergroundExpectedScreenInitial, undergroundExpectedScreenCurrent ) ),
 					currentModelActualCenterWorld: currentModelActualCenter === null ? undefined : vector3ToRoundedObject( currentModelActualCenter ),
 					currentModelActualWorldDeltaXZ: currentModelActualCenter === null || currentModelActualInitialCenter === null
 						? undefined
@@ -3618,32 +3601,32 @@ export class ThreeEngine {
 						: roundMeters( Math.abs( currentModelActualCenter.y - currentModelActualInitialCenter.y ) ),
 					yellowSurfaceCenterWorld: vector3ToRoundedObject( yellowSurfaceCenter ),
 					purpleEngineeringCenterWorld: vector3ToRoundedObject( purpleEngineeringCenter ),
-					purpleVisualCenterWorld: vector3ToRoundedObject( purpleVisualCenter ),
+					undergroundExpectedCenterWorld: vector3ToRoundedObject( undergroundExpectedCenter ),
 					yellowSurfaceDeltaXZ: roundMeters( horizontalDistanceXZ( yellowInitialCenter, yellowSurfaceCenter ) ),
 					yellowSurfaceDeltaY: roundMeters( Math.abs( yellowSurfaceCenter.y - yellowInitialCenter.y ) ),
 					purpleEngineeringDeltaXZ: roundMeters( horizontalDistanceXZ( purpleEngineeringInitialCenter, purpleEngineeringCenter ) ),
 					purpleEngineeringDeltaY: roundMeters( Math.abs( purpleEngineeringCenter.y - purpleEngineeringInitialCenter.y ) ),
-					purpleVisualDeltaXZ: roundMeters( horizontalDistanceXZ( purpleVisualInitialCenter, purpleVisualCenter ) ),
-					purpleVisualDeltaY: roundMeters( Math.abs( purpleVisualCenter.y - purpleVisualInitialCenter.y ) ),
+					undergroundExpectedDeltaXZ: roundMeters( horizontalDistanceXZ( undergroundExpectedInitialCenter, undergroundExpectedCenter ) ),
+					undergroundExpectedDeltaY: roundMeters( Math.abs( undergroundExpectedCenter.y - undergroundExpectedInitialCenter.y ) ),
 					yellowUpdateCount: this.yellowUpdateCount,
 					purpleEngineeringUpdateCount: this.purpleEngineeringUpdateCount,
-					purpleVisualUpdateCount: this.purpleVisualUpdateCount,
+					undergroundExpectedUpdateCount: this.undergroundExpectedUpdateCount,
 					currentModelActualUpdateCount: this.currentModelActualUpdateCount,
 					yellowLastUpdateReason: this.yellowLastUpdateReason,
 					purpleEngineeringLastUpdateReason: this.purpleEngineeringLastUpdateReason,
-					purpleVisualLastUpdateReason: this.purpleVisualLastUpdateReason,
+					undergroundExpectedLastUpdateReason: this.undergroundExpectedLastUpdateReason,
 					currentModelActualLastUpdateReason: this.currentModelActualLastUpdateReason,
 					purpleDiagnosticsUpdatedInFrameLoop: this.purpleDiagnosticsUpdatedInFrameLoop,
 					engineeringMinusYellowXZ: roundMeters( horizontalDistanceXZ( purpleEngineeringCenter, yellowSurfaceCenter ) ),
 					engineeringMinusYellowY: roundMeters( Math.abs( purpleEngineeringCenter.y - yellowSurfaceCenter.y ) ),
-					visualMinusYellowXZ: roundMeters( horizontalDistanceXZ( purpleVisualCenter, yellowSurfaceCenter ) ),
-					visualMinusYellowY: roundMeters( Math.abs( purpleVisualCenter.y - yellowSurfaceCenter.y ) ),
-					visualMinusEngineeringXZ: roundMeters( horizontalDistanceXZ( purpleVisualCenter, purpleEngineeringCenter ) ),
-					visualMinusEngineeringY: roundMeters( Math.abs( purpleVisualCenter.y - purpleEngineeringCenter.y ) ),
-					yellowToPurpleVisualScreenDistanceInitialPx: roundPixels( this.yellowToPurpleVisualScreenDistanceInitialPx ),
-					yellowToPurpleVisualScreenDistanceCurrentPx: roundPixels( yellowToPurpleVisualScreenDistanceCurrentPx ),
-					yellowToPurpleVisualScreenDistanceDeltaPx: roundPixels(
-						Math.abs( yellowToPurpleVisualScreenDistanceCurrentPx - this.yellowToPurpleVisualScreenDistanceInitialPx )
+					undergroundMinusYellowXZ: roundMeters( horizontalDistanceXZ( undergroundExpectedCenter, yellowSurfaceCenter ) ),
+					undergroundMinusYellowY: roundMeters( Math.abs( undergroundExpectedCenter.y - yellowSurfaceCenter.y ) ),
+					undergroundMinusEngineeringXZ: roundMeters( horizontalDistanceXZ( undergroundExpectedCenter, purpleEngineeringCenter ) ),
+					undergroundMinusEngineeringY: roundMeters( Math.abs( undergroundExpectedCenter.y - purpleEngineeringCenter.y ) ),
+					yellowToUndergroundScreenDistanceInitialPx: roundPixels( this.yellowToUndergroundScreenDistanceInitialPx ),
+					yellowToUndergroundScreenDistanceCurrentPx: roundPixels( yellowToUndergroundScreenDistanceCurrentPx ),
+					yellowToUndergroundScreenDistanceDeltaPx: roundPixels(
+						Math.abs( yellowToUndergroundScreenDistanceCurrentPx - this.yellowToUndergroundScreenDistanceInitialPx )
 					)
 				} );
 			}
@@ -4361,21 +4344,20 @@ function resolveParallaxStatus(
 	state: ModelPlacementDebugState
 ): NonNullable<ModelPlacementDebugState['parallaxStatus']> {
 
-	if ( state.arFromEnuMatrixChanged === true || ( state.visualMinusEngineeringXZ ?? 0 ) > 0.1 ) {
+	if ( state.arFromEnuMatrixChanged === true || ( state.undergroundMinusEngineeringXZ ?? 0 ) > 0.1 ) {
 		return 'matrix-space-error';
 	}
 	if (
 		( state.placedModelDeltaXZ ?? state.modelWorldDeltaXZ ?? 0 ) > 0.1
-		|| ( state.purpleVisualWorldDeltaXZ ?? 0 ) > 0.1
+		|| ( state.undergroundExpectedWorldDeltaXZ ?? 0 ) > 0.1
 	) {
 		return 'real-world-movement';
 	}
 	if (
 		( state.placedModelDeltaXZ ?? state.modelWorldDeltaXZ ?? 0 ) < 0.05
-		&& ( state.purpleVisualWorldDeltaXZ ?? 0 ) < 0.05
-		&& state.visualMatrixChanged !== true
-		&& ( state.visualMinusEngineeringXZ ?? 0 ) < 0.05
-		&& ( state.yellowToPurpleVisualScreenDistanceDeltaPx ?? 0 ) > 5
+		&& ( state.undergroundExpectedWorldDeltaXZ ?? 0 ) < 0.05
+		&& ( state.undergroundMinusEngineeringXZ ?? 0 ) < 0.05
+		&& ( state.yellowToUndergroundScreenDistanceDeltaPx ?? 0 ) > 5
 	) {
 		return 'likely-parallax';
 	}
@@ -4408,33 +4390,31 @@ function computePlacementErrorDebug(args: {
 	registrationSolution: EngineeringRegistrationSolution;
 	arFromEnuSolution: ArFromEnuSolution;
 	engineeringMatrix: THREE.Matrix4;
-	visualMatrix: THREE.Matrix4;
 }): Pick<
 	ModelPlacementDebugState,
 	| 'engineeringHorizontalRms'
 	| 'engineeringVerticalMax'
-	| 'visualHorizontalRms'
-	| 'visualVerticalMax'
+	| 'surfaceProjectionHorizontalRms'
+	| 'bottomDepthErrorMax'
 > {
 
 	const engineeringHorizontalErrors: number[] = [];
 	const engineeringVerticalErrors: number[] = [];
-	const visualHorizontalErrors: number[] = [];
-	const visualVerticalErrors: number[] = [];
+	const surfaceProjectionErrors: number[] = [];
+	const bottomDepthErrors: number[] = [];
 	for ( const point of args.registrationSolution.controlPoints.slice( 0, 4 ) ) {
 		const expectedAr = point.worldEnu.clone().applyMatrix4( args.arFromEnuSolution.matrix );
 		const engineeringActualAr = point.modelLocal.clone().applyMatrix4( args.engineeringMatrix );
-		const visualActualAr = point.modelLocal.clone().applyMatrix4( args.visualMatrix );
 		engineeringHorizontalErrors.push( horizontalDistanceXZ( expectedAr, engineeringActualAr ) );
 		engineeringVerticalErrors.push( Math.abs( expectedAr.y - engineeringActualAr.y ) );
-		visualHorizontalErrors.push( horizontalDistanceXZ( expectedAr, visualActualAr ) );
-		visualVerticalErrors.push( Math.abs( expectedAr.y - visualActualAr.y ) );
+		surfaceProjectionErrors.push( horizontalDistanceXZ( expectedAr, engineeringActualAr ) );
+		bottomDepthErrors.push( Math.abs( expectedAr.y - engineeringActualAr.y ) );
 	}
 	return {
 		engineeringHorizontalRms: roundMeters( computeRms( engineeringHorizontalErrors ) ),
 		engineeringVerticalMax: roundMeters( Math.max( ...engineeringVerticalErrors, 0 ) ),
-		visualHorizontalRms: roundMeters( computeRms( visualHorizontalErrors ) ),
-		visualVerticalMax: roundMeters( Math.max( ...visualVerticalErrors, 0 ) )
+		surfaceProjectionHorizontalRms: roundMeters( computeRms( surfaceProjectionErrors ) ),
+		bottomDepthErrorMax: roundMeters( Math.max( ...bottomDepthErrors, 0 ) )
 	};
 
 }
@@ -4459,9 +4439,6 @@ function createModelPlacementDebugConclusion(state: ModelPlacementDebugState): s
 	if ( state.arFromEnuMatrixChanged === true ) {
 		return 'arFromEnu 在放置后发生变化，可能导致模型重定位。';
 	}
-	if ( ( state.visualMinusEngineeringXZ ?? 0 ) > 0.1 && ( state.visualOffsetY ?? 0 ) !== 0 ) {
-		return '下沉偏移影响了水平位置，请检查 visualMatrix 的乘法顺序或偏移坐标空间。';
-	}
 	if (
 		state.isPlacedModelChildOfPlacementAnchor === true
 		&& ( state.placementAnchorDeltaXZ ?? state.arPlacementAnchorWorldDeltaXZ ?? 0 ) > 0.1
@@ -4480,15 +4457,12 @@ function createModelPlacementDebugConclusion(state: ModelPlacementDebugState): s
 	}
 	if (
 		( state.placedModelDeltaXZ ?? state.modelWorldDeltaXZ ?? 0 ) > 0.1
-		|| ( state.purpleVisualWorldDeltaXZ ?? 0 ) > 0.1
+		|| ( state.undergroundExpectedWorldDeltaXZ ?? 0 ) > 0.1
 	) {
-		return '模型或地下紫色点在 AR 世界中发生真实移动。';
-	}
-	if ( ( state.visualMinusEngineeringXZ ?? 0 ) > 0.05 ) {
-		return 'visualMatrix 相对 engineeringMatrix 产生了水平偏移，请检查地下显示偏移是否只作用于 Y。';
+		return '模型或地下工程点在 AR 世界中发生真实移动。';
 	}
 	if ( state.parallaxStatus === 'likely-parallax' ) {
-		return '模型和地下紫色点的世界坐标固定；当前屏幕相对位移来自不同深度平面的视差。';
+		return '模型和地下工程点的世界坐标固定；当前屏幕相对位移来自不同深度平面的视差。';
 	}
 	if ( state.worldLockStatus === 'error' ) {
 		return '模型疑似跟随相机移动，请检查 anchor parent。';
@@ -4506,13 +4480,13 @@ function createModelPlacementDebugConclusion(state: ModelPlacementDebugState): s
 	) {
 		return '模型没有跟随手机；当前更像地下模型下沉后的视觉投影效果。';
 	}
-	if ( state.buriedDepthSource === 'model-height' ) {
+	if ( state.modelHeightSource === 'bbox-y' || state.modelHeightSource === 'y' || state.modelHeightSource === 'shortest-edge' ) {
 		return '模型已固定，当前使用模型高度作为下沉深度。';
 	}
-	if ( state.buriedDepthSource === 'configured-number' ) {
-		return '模型已固定，当前使用配置 buriedDepthMeters 作为下沉深度。';
+	if ( state.modelHeightSource === 'override' ) {
+		return '模型已固定，当前使用配置模型高度作为下沉深度。';
 	}
-	return '模型已固定，当前偏移主要是显示矩阵效果。';
+	return '模型已固定，当前使用地下工程矩阵。';
 
 }
 
@@ -4567,36 +4541,34 @@ function resolveXrayOpacityPercent(value: number | undefined): number {
 
 function formatUndergroundDisplayText(config: DemoModelConfig, modelTemplate: THREE.Group): string {
 
-	if ( config.visualPlacementMode !== 'underground' ) {
+	if ( config.undergroundPlacement?.enabled !== true ) {
 		return '-';
 	}
 
 	const modeText = config.undergroundDisplay?.defaultMode === 'x-ray'
 		? 'X-Ray'
 		: config.undergroundDisplay?.defaultMode ?? 'underground';
-	if ( config.undergroundPlacement?.enabled === true ) {
-		const depth = config.undergroundPlacement.depthMode === 'fixed-depth'
-			? Math.max( 0, config.undergroundPlacement.fixedDepthMeters ?? 0 )
-			: resolveBuriedDepthMeters( {
-				undergroundDisplay: {
-					buriedDepthMeters: 'model-height',
-					modelHeightAxis: config.undergroundPlacement.modelHeightAxis ?? 'bbox-y'
-				},
-				modelTemplate
-			} ).depthMeters;
-		const totalDepth = depth + ( config.undergroundPlacement.coverDepthMeters ?? 0 );
-		return `地下显示：${modeText}；定位方式：${config.undergroundPlacement.placementMode}；工程下沉：${totalDepth.toFixed( 2 )} m。`;
-	}
+	const axis = config.undergroundPlacement.modelHeightAxis ?? 'bbox-y';
+	const height = typeof config.undergroundPlacement.modelHeightMetersOverride === 'number'
+		? config.undergroundPlacement.modelHeightMetersOverride
+		: resolveDisplayModelHeightMeters( modelTemplate, axis );
+	const coverDepth = config.undergroundPlacement.coverDepthMeters ?? 0;
+	return `地下显示：${modeText}；定位方式：RTK 地表高程；工程下沉：${( height + coverDepth ).toFixed( 2 )} m。`;
 
-	const buriedDepth = resolveBuriedDepthMeters( {
-		undergroundDisplay: config.undergroundDisplay,
-		modelTemplate
-	} );
-	if ( buriedDepth.source === 'configured-number' ) {
-		return `地下显示：${modeText}；下沉深度：${buriedDepth.depthMeters.toFixed( 2 )} m；深度来源：配置数值。`;
-	}
+}
 
-	return `地下显示：${modeText}；下沉深度：0.00 m；深度来源：未配置。`;
+function resolveDisplayModelHeightMeters(
+	modelTemplate: THREE.Group,
+	axis: 'bbox-y' | 'y' | 'shortest-edge'
+): number {
+
+	const report = readPlaceableTemplateReport( modelTemplate );
+	if ( report !== null && axis !== 'bbox-y' ) {
+		const size = report.finalSize;
+		return axis === 'shortest-edge' ? Math.min( size.x, size.y, size.z ) : size.y;
+	}
+	const size = new THREE.Box3().setFromObject( modelTemplate ).getSize( new THREE.Vector3() );
+	return axis === 'shortest-edge' ? Math.min( size.x, size.y, size.z ) : size.y;
 
 }
 
