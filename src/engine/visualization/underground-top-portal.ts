@@ -183,7 +183,8 @@ export class UndergroundTopPortal {
 			this.hide();
 			return this.setState( 'idle' );
 		}
-		if ( this.state === 'idle' || this.state === 'failed' ) {
+		if ( this.state === 'failed' ) return 'failed';
+		if ( this.state === 'idle' ) {
 			this.attemptId += 1;
 			this.setState( 'initializing' );
 		}
@@ -240,6 +241,14 @@ export class UndergroundTopPortal {
 
 	markDirty(): void {
 
+		this.portalDirty = true;
+
+	}
+
+	beginAttempt(): void {
+
+		this.attemptId += 1;
+		this.setState( 'initializing' );
 		this.portalDirty = true;
 
 	}

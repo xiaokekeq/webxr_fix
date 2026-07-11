@@ -306,6 +306,7 @@ export class ThreeEngine {
 	private portalUpdateArgs: Parameters<UndergroundTopPortal['update']>[ 0 ] | null = null;
 	private portalFallbackReported = false;
 	private requestedUndergroundViewMode: UndergroundViewMode = DEFAULT_UNDERGROUND_DISPLAY_STATE.undergroundViewMode;
+	private portalClickPreviousEffectiveMode: UndergroundViewMode | null = null;
 	private readonly footprintCornersAr = [ new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3() ];
 	private readonly emptyFootprintCorners: THREE.Vector3[] = [];
 	private readonly frameTaskErrorCounts = new Map<string, number>();
@@ -970,9 +971,11 @@ export class ThreeEngine {
 
 	setUndergroundViewMode(mode: UndergroundViewMode): void {
 
-		if ( mode === 'portal' && this.getPortalModelScope().undergroundRoot === null ) return;
-		if ( this.requestedUndergroundViewMode === mode && this.store.getState().undergroundViewMode === mode ) return;
-		if ( mode === 'portal' ) this.portalFallbackReported = false;
+		if ( mode === 'portal' ) {
+			this.portalFallbackReported = false;
+			this.portalClickPreviousEffectiveMode = this.store.getState().undergroundViewMode;
+			this.undergroundPortal.beginAttempt();
+		}
 		this.requestedUndergroundViewMode = mode;
 		if ( mode === 'real-space' ) this.store.patch( { undergroundViewMode: mode } );
 		this.undergroundPortal.markDirty();
@@ -3876,15 +3879,32 @@ export class ThreeEngine {
 		if ( portalStatus === 'ready' ) {
 			this.portalFallbackReported = false;
 			if ( this.store.getState().undergroundViewMode !== 'portal' ) this.store.patch( { undergroundViewMode: 'portal' } );
+			this.logPortalClickResult();
 		}
 		if ( portalStatus === 'failed' && this.portalFallbackReported === false ) {
 			this.portalFallbackReported = true;
-			this.requestedUndergroundViewMode = 'real-space';
 			this.store.patch( { undergroundViewMode: 'real-space', undergroundMaterialMode: 'xray' } );
 			const reason = String( this.undergroundPortal.getDiagnostics().portalFailureReason );
 			this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
+			this.logPortalClickResult();
 		}
 		this.logPortalDiagnostics( depthFrame );
+
+	}
+
+	private logPortalClickResult(): void {
+
+		if ( import.meta.env.DEV === false || this.portalClickPreviousEffectiveMode === null ) return;
+		const diagnostics = this.undergroundPortal.getDiagnostics();
+		console.info( '[PortalActivation]', {
+			requestedMode: this.requestedUndergroundViewMode,
+			previousEffectiveMode: this.portalClickPreviousEffectiveMode,
+			nextEffectiveMode: this.store.getState().undergroundViewMode,
+			portalAttemptId: diagnostics.lastPortalAttemptId,
+			portalState: diagnostics.portalState,
+			portalFailureReason: diagnostics.portalFailureReason
+		} );
+		this.portalClickPreviousEffectiveMode = null;
 
 	}
 
