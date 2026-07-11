@@ -163,6 +163,7 @@ export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
 	hasSelection: boolean;
 	currentStatus: string;
+	portalDiagnostics: Record<string, string | number | boolean>;
 }
 
 export interface UndergroundViewChangeResult {
@@ -833,7 +834,8 @@ export class ThreeEngine {
 		return {
 			...state,
 			hasSelection: hasSelectedPipe( state ),
-			currentStatus: this.currentStatus
+			currentStatus: this.currentStatus,
+			portalDiagnostics: this.undergroundPortal.getDiagnostics()
 		};
 
 	}

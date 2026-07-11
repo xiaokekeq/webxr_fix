@@ -35,6 +35,7 @@ const markerApplyFeedback = ref<{
 	createdAt: number;
 } | null>( null );
 const arDebugMode = isArDebugEnabled();
+const portalDebugPanel = typeof window !== 'undefined' && new URLSearchParams( window.location.search ).get( 'arDebug' ) === 'portal';
 const debugInfoOpen = ref( false );
 const registrationDiagnosticOpen = ref( false );
 const modelPlacementDiagnosticOpen = ref( false );
@@ -1157,7 +1158,7 @@ function setArOverlayClass(active: boolean): void {
 				</div>
 
 				<template v-if="activePanelView === 'display'">
-					<UndergroundDisplayControls :view-mode="engine.undergroundViewMode" :material-mode="engine.undergroundMaterialMode" :inspection-tool="engine.undergroundInspectionTool" :section-mode="engine.sectionCutPlaneMode" :error="displaySelectionError" @view="selectUndergroundViewMode" @material="selectMaterialMode" @tool="selectInspectionTool" @section="selectSectionMode" />
+					<UndergroundDisplayControls :view-mode="engine.undergroundViewMode" :material-mode="engine.undergroundMaterialMode" :inspection-tool="engine.undergroundInspectionTool" :section-mode="engine.sectionCutPlaneMode" :error="displaySelectionError" :diagnostics="portalDebugPanel ? engine.portalDiagnostics : undefined" @view="selectUndergroundViewMode" @material="selectMaterialMode" @tool="selectInspectionTool" @section="selectSectionMode" />
 				</template>
 
 				<template v-else-if="activePanelView === 'localization'">
