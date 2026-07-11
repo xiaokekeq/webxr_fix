@@ -3,6 +3,8 @@ import {
 	STATIC_LAYER_NAMES
 } from '@/models/catalog/model-api.js';
 import type { RegistrationStore } from '@/localization/core/registration-store.js';
+import type { SectionCutPlaneMode } from '@/localization/core/registration-store.js';
+import type { UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import type { PlacementSession } from '@/engine/placement/session.js';
 import type { LayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
 import { isArDebugEnabled } from '@/engine/debug/ar-logger.js';
@@ -23,38 +25,53 @@ interface VisualizationStateRuntimeOptions {
 
 export class VisualizationStateRuntime {
 
-	private lastState: { root: THREE.Object3D | null; materialMode: string; opacity: number; layerEnabled: boolean; layerValue: number; sectionEnabled: boolean; sectionValue: number; sectionMode: string; layers: unknown } | null = null;
+	private lastRoot: THREE.Object3D | null | undefined;
+	private lastMaterialMode: UndergroundMaterialMode | undefined;
+	private lastOpacity: number | undefined;
+	private lastSectionEnabled: boolean | undefined;
+	private lastSectionValue: number | undefined;
+	private lastSectionMode: SectionCutPlaneMode | undefined;
+	private lastLayerEnabled: boolean | undefined;
+	private lastLayerValue: number | undefined;
+	private lastLayers: unknown;
 
 	constructor(private readonly options: VisualizationStateRuntimeOptions) {}
 
 	reset(): void {
 
 		this.restoreVisualizationControllers();
-		this.lastState = null;
+		this.lastRoot = undefined;
+		this.lastMaterialMode = undefined;
+		this.lastOpacity = undefined;
+		this.lastSectionEnabled = undefined;
+		this.lastSectionValue = undefined;
+		this.lastSectionMode = undefined;
+		this.lastLayerEnabled = undefined;
+		this.lastLayerValue = undefined;
+		this.lastLayers = undefined;
 
 	}
 
 	syncVisualizationState(): void {
 
 		const state = this.options.store.getState();
-		const modelRoot = state.appMode === 'ar-session'
-			? this.options.placementSession.getArPlacedModel()
-			: null;
 		const undergroundRoot = state.appMode === 'ar-session'
 			? this.options.getUndergroundModelRoot()
 			: null;
-		const previous = this.lastState;
-		if ( previous?.root === undergroundRoot && previous.materialMode === state.undergroundMaterialMode && previous.opacity === state.transparentXrayValue && previous.layerEnabled === state.layerPeelingEnabled && previous.layerValue === state.layerPeelingValue && previous.sectionEnabled === state.sectionCutEnabled && previous.sectionValue === state.sectionCutValue && previous.sectionMode === state.sectionCutPlaneMode && previous.layers === state.modelLayers ) return;
-		this.lastState = { root: undergroundRoot, materialMode: state.undergroundMaterialMode, opacity: state.transparentXrayValue, layerEnabled: state.layerPeelingEnabled, layerValue: state.layerPeelingValue, sectionEnabled: state.sectionCutEnabled, sectionValue: state.sectionCutValue, sectionMode: state.sectionCutPlaneMode, layers: state.modelLayers };
+		const rootDirty = this.lastRoot !== undergroundRoot;
+		const materialDirty = rootDirty || this.lastMaterialMode !== state.undergroundMaterialMode || this.lastOpacity !== state.transparentXrayValue;
+		const sectionDirty = rootDirty || this.lastSectionEnabled !== state.sectionCutEnabled || this.lastSectionValue !== state.sectionCutValue || this.lastSectionMode !== state.sectionCutPlaneMode;
+		const layerDirty = rootDirty || this.lastLayerEnabled !== state.layerPeelingEnabled || this.lastLayerValue !== state.layerPeelingValue || this.lastLayers !== state.modelLayers;
 
-		let clippingPlane: THREE.Plane | null = null;
-		this.options.sectionCutController.restore();
-		if ( state.sectionCutEnabled ) {
+		if ( rootDirty ) this.options.materialStateRuntime.setRoot( undergroundRoot );
+		if ( sectionDirty ) {
+			this.options.sectionCutController.restore();
 			this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
-			clippingPlane = this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue );
+			const plane = state.sectionCutEnabled ? this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ) : null;
+			this.options.materialStateRuntime.applySection( plane );
 		}
-		this.options.materialStateRuntime.apply( undergroundRoot, { mode: state.undergroundMaterialMode, opacity: state.transparentXrayValue, clippingPlane } );
-		if ( state.layerPeelingEnabled ) {
+		if ( materialDirty ) this.options.materialStateRuntime.applyMaterial( state.undergroundMaterialMode, state.transparentXrayValue );
+		if ( layerDirty && state.layerPeelingEnabled ) {
 				const report = this.options.layerPeelingController.apply( state.layerPeelingValue, state.modelLayers );
 				if ( isArDebugEnabled() ) console.info( '[LayerPeeling]', {
 					value: report.value,
@@ -65,6 +82,16 @@ export class VisualizationStateRuntime {
 					visibleLayerIds: report.visibleLayerIds
 				} );
 		}
+
+		this.lastRoot = undergroundRoot;
+		this.lastMaterialMode = state.undergroundMaterialMode;
+		this.lastOpacity = state.transparentXrayValue;
+		this.lastSectionEnabled = state.sectionCutEnabled;
+		this.lastSectionValue = state.sectionCutValue;
+		this.lastSectionMode = state.sectionCutPlaneMode;
+		this.lastLayerEnabled = state.layerPeelingEnabled;
+		this.lastLayerValue = state.layerPeelingValue;
+		this.lastLayers = state.modelLayers;
 
 	}
 
