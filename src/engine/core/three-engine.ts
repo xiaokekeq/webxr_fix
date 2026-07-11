@@ -78,7 +78,7 @@ import {
 	type SavedMarkerLocalizationResult
 } from '@/localization/marker/marker-localization-storage.js';
 import { createLayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
-import { createArXrayVisualizationController } from '@/engine/visualization/ar-xray-visualization.js';
+import { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
 import { createArLayerPeelingController } from '@/engine/visualization/ar-layer-peeling.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { UndergroundTopPortal } from '@/engine/visualization/underground-top-portal.js';
@@ -264,7 +264,7 @@ export class ThreeEngine {
 		showModelActualControlPoints: readDebugLayerFlag( 'VITE_SHOW_MODEL_ACTUAL_CONTROL_POINTS', true ),
 		showModelBoundingBox: readDebugLayerFlag( 'VITE_SHOW_MODEL_BOUNDING_BOX', false )
 	};
-	private readonly structureRevealController = createArXrayVisualizationController();
+	private readonly materialStateRuntime = new MaterialStateRuntime();
 	private readonly layerPeelingController = createArLayerPeelingController();
 	private readonly sectionCutController;
 	private readonly annotationLabelsController;
@@ -404,7 +404,7 @@ export class ThreeEngine {
 			store: this.store,
 			placementSession: this.placementSession,
 			layerVisibility: this.layerVisibility,
-			structureRevealController: this.structureRevealController,
+			materialStateRuntime: this.materialStateRuntime,
 			layerPeelingController: this.layerPeelingController,
 			sectionCutController: this.sectionCutController,
 			getUndergroundModelRoot: () => this.getPortalModelScope().undergroundRoot,
@@ -886,7 +886,7 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
 		this.visualizationStateRuntime.restoreVisualizationControllers();
-		this.structureRevealController.dispose();
+		this.materialStateRuntime.dispose();
 		this.layerPeelingController.dispose();
 		this.sectionCutController.dispose();
 		this.undergroundPortal.dispose();
@@ -975,6 +975,7 @@ export class ThreeEngine {
 
 		if ( mode === 'portal' && this.getPortalModelScope().undergroundRoot === null ) return;
 		if ( this.store.getState().undergroundViewMode === mode ) return;
+		if ( mode === 'portal' ) this.portalFallbackReported = false;
 		this.store.patch( { undergroundViewMode: mode } );
 		this.undergroundPortal.markDirty();
 

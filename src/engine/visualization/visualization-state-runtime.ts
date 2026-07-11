@@ -5,7 +5,8 @@ import {
 import type { RegistrationStore } from '@/localization/core/registration-store.js';
 import type { PlacementSession } from '@/engine/placement/session.js';
 import type { LayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
-import type { ArXrayVisualizationController } from '@/engine/visualization/ar-xray-visualization.js';
+import { isArDebugEnabled } from '@/engine/debug/ar-logger.js';
+import type { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
 import type { ArLayerPeelingController } from '@/engine/visualization/ar-layer-peeling.js';
 import type { ArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 
@@ -13,7 +14,7 @@ interface VisualizationStateRuntimeOptions {
 	store: RegistrationStore;
 	placementSession: PlacementSession;
 	layerVisibility: LayerVisibilityController;
-	structureRevealController: ArXrayVisualizationController;
+	materialStateRuntime: MaterialStateRuntime;
 	layerPeelingController: ArLayerPeelingController;
 	sectionCutController: ArSectionCutController;
 	getUndergroundModelRoot(): THREE.Object3D | null;
@@ -22,14 +23,14 @@ interface VisualizationStateRuntimeOptions {
 
 export class VisualizationStateRuntime {
 
-	private lastVisualizationSignature = '';
+	private lastState: { root: THREE.Object3D | null; materialMode: string; opacity: number; layerEnabled: boolean; layerValue: number; sectionEnabled: boolean; sectionValue: number; sectionMode: string; layers: unknown } | null = null;
 
 	constructor(private readonly options: VisualizationStateRuntimeOptions) {}
 
 	reset(): void {
 
 		this.restoreVisualizationControllers();
-		this.lastVisualizationSignature = '';
+		this.lastState = null;
 
 	}
 
@@ -42,75 +43,26 @@ export class VisualizationStateRuntime {
 		const undergroundRoot = state.appMode === 'ar-session'
 			? this.options.getUndergroundModelRoot()
 			: null;
-		const signature = [
-			state.appMode,
-			state.undergroundMaterialMode,
-			state.transparentXrayValue,
-			state.layerPeelingEnabled,
-			state.layerPeelingValue,
-			state.sectionCutEnabled,
-			state.sectionCutValue,
-			state.sectionCutPlaneMode,
-			modelRoot?.uuid ?? 'none',
-			state.modelLayers.map( ( layer ) => `${layer.id}:${layer.visible ? '1' : '0'}` ).join( '|' )
-		].join( '::' );
-		if ( signature === this.lastVisualizationSignature ) {
-			return;
-		}
+		const previous = this.lastState;
+		if ( previous?.root === undergroundRoot && previous.materialMode === state.undergroundMaterialMode && previous.opacity === state.transparentXrayValue && previous.layerEnabled === state.layerPeelingEnabled && previous.layerValue === state.layerPeelingValue && previous.sectionEnabled === state.sectionCutEnabled && previous.sectionValue === state.sectionCutValue && previous.sectionMode === state.sectionCutPlaneMode && previous.layers === state.modelLayers ) return;
+		this.lastState = { root: undergroundRoot, materialMode: state.undergroundMaterialMode, opacity: state.transparentXrayValue, layerEnabled: state.layerPeelingEnabled, layerValue: state.layerPeelingValue, sectionEnabled: state.sectionCutEnabled, sectionValue: state.sectionCutValue, sectionMode: state.sectionCutPlaneMode, layers: state.modelLayers };
 
-		this.lastVisualizationSignature = signature;
-		this.restoreVisualizationControllers();
-
-		if ( state.undergroundMaterialMode === 'xray' ) {
-				const report = this.options.structureRevealController.apply( {
-					modelRoot: undergroundRoot,
-					value: state.transparentXrayValue,
-					modelLayers: state.modelLayers
-				} );
-				console.info( '[LayerXray]', {
-					value: report.value,
-					opacityMode: report.opacityMode,
-					totalLayerCount: report.totalLayerCount,
-					affectedMeshCount: report.affectedMeshCount,
-					affectedMaterialCount: report.affectedMaterialCount,
-					hasModelRoot: report.hasModelRoot
-				} );
-				if ( report.opacityMode === 'layered' ) {
-					for ( const layerReport of report.layerReports ) {
-						console.info( '[LayerXrayLayer]', {
-							layerId: layerReport.layerId,
-							layerIndex: layerReport.layerIndex,
-							layerName: layerReport.layerName,
-							opacity: layerReport.opacity,
-							visible: layerReport.visible
-						} );
-					}
-				}
+		let clippingPlane: THREE.Plane | null = null;
+		this.options.sectionCutController.restore();
+		if ( state.sectionCutEnabled ) {
+			this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
+			clippingPlane = this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ).plane;
 		}
+		this.options.materialStateRuntime.apply( undergroundRoot, { mode: state.undergroundMaterialMode, opacity: state.transparentXrayValue, clippingPlane } );
 		if ( state.layerPeelingEnabled ) {
 				const report = this.options.layerPeelingController.apply( state.layerPeelingValue, state.modelLayers );
-				console.info( '[LayerPeeling]', {
+				if ( isArDebugEnabled() ) console.info( '[LayerPeeling]', {
 					value: report.value,
 					totalLayerCount: report.totalLayerCount,
 					hiddenLayerCount: report.hiddenLayerCount,
 					visibleLayerCount: report.visibleLayerCount,
 					hiddenLayerIds: report.hiddenLayerIds,
 					visibleLayerIds: report.visibleLayerIds
-				} );
-		}
-		if ( state.sectionCutEnabled ) {
-				this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
-				const report = this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue );
-				console.info( '[SectionCut]', {
-					value: report.value,
-					planeMode: report.planeMode,
-					axis: report.axis,
-					axisMin: report.axisMin,
-					axisMax: report.axisMax,
-					cutPosition: report.cutPosition,
-					meaning: report.meaning,
-					affectedMeshCount: report.affectedMeshCount,
-					affectedMaterialCount: report.affectedMaterialCount
 				} );
 		}
 
@@ -120,7 +72,6 @@ export class VisualizationStateRuntime {
 
 		this.options.layerVisibility.applyToRoot( this.options.placementSession.getArPlacedModel() );
 		this.options.syncAttachmentInfoBoardVisibility();
-		this.options.structureRevealController.captureVisibilityBaseline( this.options.placementSession.getArPlacedModel() );
 		const modelLayers = this.options.layerVisibility.getState();
 		this.options.store.patch( {
 			layerNames: modelLayers.length > 0
@@ -134,7 +85,7 @@ export class VisualizationStateRuntime {
 
 	restoreVisualizationControllers(): void {
 
-		this.options.structureRevealController.restore();
+		this.options.materialStateRuntime.restore();
 		this.options.layerPeelingController.restore();
 		this.options.sectionCutController.restore();
 

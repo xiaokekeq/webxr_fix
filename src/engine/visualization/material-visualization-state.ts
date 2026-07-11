@@ -11,10 +11,6 @@ export interface VisualizationMaterialSnapshot {
 	clipShadows: boolean;
 }
 
-export interface VisualizationMeshSnapshot {
-	visible: boolean;
-}
-
 export function forEachMaterial(
 	material: THREE.Material | THREE.Material[],
 	callback: (material: THREE.Material) => void
@@ -72,36 +68,6 @@ export function restoreMaterialSnapshot(
 	material.clipIntersection = snapshot.clipIntersection;
 	material.clipShadows = snapshot.clipShadows;
 	material.needsUpdate = true;
-	return true;
-
-}
-
-export function rememberMeshSnapshot(
-	meshSnapshots: WeakMap<THREE.Mesh, VisualizationMeshSnapshot>,
-	mesh: THREE.Mesh
-): void {
-
-	if ( meshSnapshots.has( mesh ) ) {
-		return;
-	}
-
-	meshSnapshots.set( mesh, {
-		visible: mesh.visible
-	} );
-
-}
-
-export function restoreMeshSnapshot(
-	meshSnapshots: WeakMap<THREE.Mesh, VisualizationMeshSnapshot>,
-	mesh: THREE.Mesh
-): boolean {
-
-	const snapshot = meshSnapshots.get( mesh );
-	if ( snapshot === undefined ) {
-		return false;
-	}
-
-	mesh.visible = snapshot.visible;
 	return true;
 
 }
