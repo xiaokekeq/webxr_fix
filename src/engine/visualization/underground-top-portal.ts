@@ -15,6 +15,9 @@ const PORTAL_MIN_RESOLUTION = 384;
 const PORTAL_FOREGROUND_THRESHOLD_METERS = readPortalNumber( 'portalThreshold', 0.05 );
 const PORTAL_DEPTH_FEATHER_METERS = readPortalNumber( 'portalFeather', 0.025 );
 const PORTAL_BACKGROUND_ALPHA = THREE.MathUtils.clamp( readPortalNumber( 'portalBackgroundAlpha', 0.9 ), 0.85, 1 );
+const PORTAL_DEBUG_MODE = readPortalDebugMode();
+
+export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
 
 const vertexShader = /* glsl */`
 precision highp float;
@@ -44,9 +47,8 @@ uniform mat4 uNormDepthBufferFromNormView;
 uniform ivec2 uDepthTextureSize;
 uniform float uForegroundThresholdMeters;
 uniform float uDepthFeatherMeters;
-uniform float uViewOpacity;
 uniform float uPortalBackgroundAlpha;
-uniform bool uDiagnosticDirectTexture;
+uniform int uDebugMode;
 
 in vec2 vPortalUv;
 in vec4 vDepthClipPosition;
@@ -97,14 +99,18 @@ float foregroundMask() {
 }
 
 void main() {
-  vec4 portalColor = texture(uPortalColorTexture, vPortalUv);
-  if (uDiagnosticDirectTexture) {
-    outColor = portalColor;
+  if (uDebugMode == 1) {
+    outColor = vec4(1.0, 0.0, 1.0, 0.85);
     return;
   }
+  vec4 portalColor = texture(uPortalColorTexture, vPortalUv);
   vec3 portalBackground = vec3(0.025, 0.055, 0.08);
   vec3 visibleColor = mix(portalBackground, portalColor.rgb, portalColor.a);
-  float baseAlpha = mix(uPortalBackgroundAlpha, 1.0, portalColor.a) * uViewOpacity;
+  float baseAlpha = mix(uPortalBackgroundAlpha, 1.0, portalColor.a);
+  if (uDebugMode == 2) {
+    outColor = vec4(visibleColor, baseAlpha);
+    return;
+  }
   float finalAlpha = baseAlpha * (1.0 - foregroundMask());
   if (finalAlpha < 0.01) discard;
   outColor = vec4(visibleColor, finalAlpha);
@@ -124,7 +130,6 @@ export class UndergroundTopPortal {
 	private readonly axisU = new THREE.Vector3();
 	private readonly axisV = new THREE.Vector3();
 	private readonly center = new THREE.Vector3();
-	private readonly cameraForward = new THREE.Vector3();
 	private readonly previousViewport = new THREE.Vector4();
 	private readonly previousScissor = new THREE.Vector4();
 	private readonly previousClearColor = new THREE.Color();
@@ -145,13 +150,16 @@ export class UndergroundTopPortal {
 		uPortalColorTexture: { value: THREE.Texture | null };
 		uForegroundThresholdMeters: { value: number };
 		uDepthFeatherMeters: { value: number };
-		uViewOpacity: { value: number };
 		uPortalBackgroundAlpha: { value: number };
-		uDiagnosticDirectTexture: { value: boolean };
+		uDebugMode: { value: number };
 	} | null = null;
 	private portalDirty = true;
 	private redrawCount = 0;
+	private lastRedrawTimestamp = 0;
 	private lastFrameError = '';
+	private state: PortalState = 'idle';
+	private failureReason = '';
+	private attemptId = 0;
 
 	constructor(private readonly scene: THREE.Scene) {
 
@@ -169,36 +177,41 @@ export class UndergroundTopPortal {
 		footprintCorners: THREE.Vector3[];
 		depthFrame: CpuDepthFrame;
 		enabled: boolean;
-	}): 'inactive' | 'ready' | 'failed' {
+	}): PortalState {
 
-		if (
-			args.enabled === false
-			|| args.model === null
-			|| args.footprintCorners.length !== 4
-		|| args.footprintCorners.some( ( point ) => Number.isFinite( point.x ) === false || Number.isFinite( point.y ) === false || Number.isFinite( point.z ) === false )
-		) {
+		if ( args.enabled === false ) {
 			this.hide();
-			return args.enabled && args.model !== null ? 'failed' : 'inactive';
+			return this.setState( 'idle' );
 		}
+		if ( this.state === 'idle' || this.state === 'failed' ) {
+			this.attemptId += 1;
+			this.setState( 'initializing' );
+		}
+		if ( args.model === null ) return this.fail( 'missing-model' );
+		const corners = validateAndOrderCorners( args.footprintCorners );
+		if ( corners.ok === false ) return this.fail( corners.reason );
 
 		this.setSourceModel( args.model );
-		this.updateGeometry( args.renderer, args.footprintCorners );
+		this.updateGeometry( args.renderer, corners.value );
 		this.syncModelMatrix();
-		if ( this.ensureSurface() === false ) {
-			this.hide();
-			return 'failed';
+		if ( this.ensureSurface() === false && PORTAL_DEBUG_MODE !== 'surface' ) {
+			return this.fail( this.renderTarget === null ? 'render-target-unavailable' : 'surface-unavailable' );
 		}
+		if ( this.surface === null || this.uniforms === null ) return this.fail( 'surface-unavailable' );
+		this.setState( 'surface-ready' );
 		syncCpuDepthOcclusionUniforms( this.uniforms!, args.depthFrame );
-		if ( isArDebugEnabled() && readPortalFlag( 'portalDisableCpuDepth' ) ) this.uniforms!.uDepthOcclusionEnabled.value = false;
-		this.updateViewOpacity( args.mainCamera );
+		if ( PORTAL_DEBUG_MODE !== 'full' || ( isArDebugEnabled() && readPortalFlag( 'portalDisableCpuDepth' ) ) ) this.uniforms!.uDepthOcclusionEnabled.value = false;
 		this.sourceModel!.visible = false;
-		this.surface!.visible = this.uniforms!.uViewOpacity.value > 0.001;
+		this.surface!.visible = true;
 		if ( this.portalDirty ) {
 			this.syncRenderModelState();
-			this.logDirtyDiagnostics( args.footprintCorners );
-			this.render( args.renderer );
+			if ( PORTAL_DEBUG_MODE !== 'surface' && this.countRenderableMeshes() === 0 ) return this.fail( 'no-renderable-meshes' );
+			this.setState( 'content-ready' );
+			this.logDirtyDiagnostics( corners.value, args.mainCamera );
+			if ( PORTAL_DEBUG_MODE !== 'surface' ) this.render( args.renderer );
+			else this.portalDirty = false;
 		}
-		return 'ready';
+		return this.setState( 'ready' );
 
 	}
 
@@ -248,6 +261,8 @@ export class UndergroundTopPortal {
 		this.cornerValues.fill( Number.NaN );
 		this.modelMatrixValues.fill( Number.NaN );
 		this.portalDirty = true;
+		this.state = 'idle';
+		this.failureReason = '';
 
 	}
 
@@ -261,6 +276,23 @@ export class UndergroundTopPortal {
 
 		this.restoreSourceVisibility();
 		if ( this.surface !== null ) this.surface.visible = false;
+
+	}
+
+	private setState(state: PortalState): PortalState {
+
+		if ( this.state !== state && isArDebugEnabled() ) console.info( '[PortalLifecycle]', { state, failureReason: this.failureReason || 'none', attemptId: this.attemptId } );
+		this.state = state;
+		if ( state !== 'failed' ) this.failureReason = '';
+		return state;
+
+	}
+
+	private fail(reason: string): PortalState {
+
+		this.failureReason = reason;
+		this.hide();
+		return this.setState( 'failed' );
 
 	}
 
@@ -365,9 +397,8 @@ export class UndergroundTopPortal {
 			uPortalColorTexture: { value: this.renderTarget?.texture ?? null },
 			uForegroundThresholdMeters: { value: PORTAL_FOREGROUND_THRESHOLD_METERS },
 			uDepthFeatherMeters: { value: PORTAL_DEPTH_FEATHER_METERS },
-			uViewOpacity: { value: 1 },
 			uPortalBackgroundAlpha: { value: PORTAL_BACKGROUND_ALPHA },
-			uDiagnosticDirectTexture: { value: isArDebugEnabled() && readPortalFlag( 'portalDirectTexture' ) }
+			uDebugMode: { value: PORTAL_DEBUG_MODE === 'surface' ? 1 : PORTAL_DEBUG_MODE === 'texture' ? 2 : 0 }
 		} );
 		return new THREE.ShaderMaterial( {
 			uniforms: this.uniforms,
@@ -471,7 +502,17 @@ export class UndergroundTopPortal {
 
 	}
 
-	private logDirtyDiagnostics(corners: THREE.Vector3[]): void {
+	private countRenderableMeshes(): number {
+
+		let count = 0;
+		this.renderModel?.traverseVisible( ( object ) => {
+			if ( object instanceof THREE.Mesh && object.geometry?.getAttribute( 'position' ) !== undefined && object.material !== undefined ) count += 1;
+		} );
+		return count;
+
+	}
+
+	private logDirtyDiagnostics(corners: THREE.Vector3[], mainCamera: THREE.Camera): void {
 
 		if ( isArDebugEnabled() === false || this.sourceModel === null || this.renderModel === null ) return;
 		this.renderModel.updateMatrixWorld( true );
@@ -488,8 +529,13 @@ export class UndergroundTopPortal {
 			}
 		} );
 		const outside = ndcBounds.right < -1 || ndcBounds.left > 1 || ndcBounds.top < -1 || ndcBounds.bottom > 1;
+		const edgeLengths = corners.map( ( point, index ) => point.distanceTo( corners[ ( index + 1 ) % 4 ] ) );
+		const portalArea = corners.reduce( ( area, point, index ) => area + new THREE.Vector3().subVectors( point, this.center ).cross( new THREE.Vector3().subVectors( corners[ ( index + 1 ) % 4 ], this.center ) ).length() * 0.5, 0 );
+		mainCamera.updateMatrixWorld( true );
+		const frustum = new THREE.Frustum().setFromProjectionMatrix( new THREE.Matrix4().multiplyMatrices( mainCamera.projectionMatrix, mainCamera.matrixWorldInverse ) );
 		console.info( '[PortalDirtyDiagnostic]', {
 			corners: corners.map( vectorToObject ),
+			cornerOrder: [ 0, 1, 2, 3 ], edgeLengths, portalArea,
 			center: vectorToObject( this.center ), normal: vectorToObject( this.normal ),
 			axisU: vectorToObject( this.axisU ), axisV: vectorToObject( this.axisV ),
 			camera: { left: this.camera.left, right: this.camera.right, top: this.camera.top, bottom: this.camera.bottom, near: this.camera.near, far: this.camera.far },
@@ -501,20 +547,12 @@ export class UndergroundTopPortal {
 			visibleMeshCount,
 			renderableVisibleMeshCount,
 			renderTargetHasRenderableModel: renderableVisibleMeshCount > 0,
+			surface: this.surface === null ? null : { visible: this.surface.visible, parent: this.surface.parent?.name || this.surface.parent?.type || 'none', layersMask: this.surface.layers.mask, cameraLayersMask: mainCamera.layers.mask, materialVisible: this.surface.material.visible, materialOpacity: this.surface.material.opacity, materialSide: this.surface.material.side, position: vectorToObject( this.surface.position ), scale: vectorToObject( this.surface.scale ), matrixWorld: this.surface.matrixWorld.toArray(), frustumCulled: this.surface.frustumCulled, inFrustum: frustum.intersectsObject( this.surface ) },
 			cpuDepthOcclusionEnabled: this.uniforms?.uDepthOcclusionEnabled.value ?? false,
 			result: outside ? 'Portal model is outside orthographic footprint.' : 'Portal model intersects orthographic footprint.'
 		} );
 		console.assert( this.renderModel.visible, 'Portal render proxy root must be visible.' );
 		console.assert( renderableVisibleMeshCount > 0, 'Portal render proxy must contain renderable visible meshes.' );
-
-	}
-
-	private updateViewOpacity(camera: THREE.Camera): void {
-
-		camera.updateMatrixWorld( true );
-		camera.getWorldDirection( this.cameraForward );
-		const factor = - this.cameraForward.dot( this.normal );
-		this.uniforms!.uViewOpacity.value = THREE.MathUtils.smoothstep( factor, 0.2, 0.45 );
 
 	}
 
@@ -540,6 +578,7 @@ export class UndergroundTopPortal {
 			renderer.render( this.renderScene, this.camera );
 			this.portalDirty = false;
 			this.redrawCount += 1;
+			this.lastRedrawTimestamp = performance.now();
 		} catch ( error ) {
 			this.lastFrameError = error instanceof Error ? error.message : String( error );
 			throw error;
@@ -558,9 +597,14 @@ export class UndergroundTopPortal {
 	getDiagnostics(): Record<string, string | number | boolean> {
 
 		return {
-			enabled: this.surface?.visible === true,
+			portalState: this.state,
+			portalFailureReason: this.failureReason || 'none',
+			lastPortalAttemptId: this.attemptId,
+			debugMode: PORTAL_DEBUG_MODE,
+			surfaceVisible: this.surface?.visible === true,
 			dirty: this.portalDirty,
 			redrawCount: this.redrawCount,
+			lastRedrawTimestamp: Math.round( this.lastRedrawTimestamp ),
 			renderTarget: this.renderTarget === null ? 'none' : `${this.renderTarget.width}x${this.renderTarget.height}`,
 			msaaSamples: this.renderTarget?.samples ?? 0,
 			foregroundThresholdMeters: PORTAL_FOREGROUND_THRESHOLD_METERS,
@@ -603,6 +647,27 @@ export class UndergroundTopPortal {
 
 }
 
+function validateAndOrderCorners(corners: THREE.Vector3[]): { ok: true; value: THREE.Vector3[] } | { ok: false; reason: string } {
+
+	if ( corners.length !== 4 ) return { ok: false, reason: 'missing-control-points' };
+	if ( corners.some( ( point ) => [ point.x, point.y, point.z ].some( ( value ) => Number.isFinite( value ) === false ) ) ) return { ok: false, reason: 'non-finite-corners' };
+	for ( let first = 0; first < 4; first += 1 ) for ( let second = first + 1; second < 4; second += 1 ) {
+		if ( corners[ first ].distanceToSquared( corners[ second ] ) < 1e-6 ) return { ok: false, reason: 'duplicate-corners' };
+	}
+	const center = corners.reduce( ( sum, point ) => sum.add( point ), new THREE.Vector3() ).multiplyScalar( 0.25 );
+	const normal = new THREE.Vector3().crossVectors( new THREE.Vector3().subVectors( corners[ 1 ], corners[ 0 ] ), new THREE.Vector3().subVectors( corners[ 3 ], corners[ 0 ] ) );
+	if ( normal.lengthSq() < 1e-8 ) return { ok: false, reason: 'invalid-normal' };
+	normal.normalize();
+	const axisU = new THREE.Vector3().subVectors( corners[ 1 ], corners[ 0 ] ).normalize();
+	const axisV = new THREE.Vector3().crossVectors( normal, axisU ).normalize();
+	const ordered = [ ...corners ].sort( ( a, b ) => Math.atan2( new THREE.Vector3().subVectors( a, center ).dot( axisV ), new THREE.Vector3().subVectors( a, center ).dot( axisU ) ) - Math.atan2( new THREE.Vector3().subVectors( b, center ).dot( axisV ), new THREE.Vector3().subVectors( b, center ).dot( axisU ) ) );
+	let area = 0;
+	for ( let index = 0; index < 4; index += 1 ) area += new THREE.Vector3().subVectors( ordered[ index ], center ).cross( new THREE.Vector3().subVectors( ordered[ ( index + 1 ) % 4 ], center ) ).length() * 0.5;
+	if ( area < 1e-4 || ordered.some( ( point, index ) => point.distanceTo( ordered[ ( index + 1 ) % 4 ] ) < 0.01 ) ) return { ok: false, reason: 'degenerate-footprint' };
+	return { ok: true, value: ordered };
+
+}
+
 function projectBoxToNdc(box: THREE.Box3, camera: THREE.Camera): { left: number; right: number; bottom: number; top: number; near: number; far: number } {
 
 	const result = { left: Infinity, right: -Infinity, bottom: Infinity, top: -Infinity, near: Infinity, far: -Infinity };
@@ -636,5 +701,13 @@ function readPortalNumber(name: string, fallback: number): number {
 function readPortalFlag(name: string): boolean {
 
 	return typeof window !== 'undefined' && new URLSearchParams( window.location.search ).get( name ) === '1';
+
+}
+
+function readPortalDebugMode(): 'surface' | 'texture' | 'full' {
+
+	if ( import.meta.env.DEV === false || typeof window === 'undefined' ) return 'full';
+	const mode = new URLSearchParams( window.location.search ).get( 'portalDebug' );
+	return mode === 'surface' || mode === 'texture' ? mode : 'full';
 
 }

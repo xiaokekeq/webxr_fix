@@ -305,6 +305,7 @@ export class ThreeEngine {
 	private readonly undergroundPortal: UndergroundTopPortal;
 	private portalUpdateArgs: Parameters<UndergroundTopPortal['update']>[ 0 ] | null = null;
 	private portalFallbackReported = false;
+	private requestedUndergroundViewMode: UndergroundViewMode = DEFAULT_UNDERGROUND_DISPLAY_STATE.undergroundViewMode;
 	private readonly footprintCornersAr = [ new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3() ];
 	private readonly emptyFootprintCorners: THREE.Vector3[] = [];
 	private readonly frameTaskErrorCounts = new Map<string, number>();
@@ -970,9 +971,10 @@ export class ThreeEngine {
 	setUndergroundViewMode(mode: UndergroundViewMode): void {
 
 		if ( mode === 'portal' && this.getPortalModelScope().undergroundRoot === null ) return;
-		if ( this.store.getState().undergroundViewMode === mode ) return;
+		if ( this.requestedUndergroundViewMode === mode && this.store.getState().undergroundViewMode === mode ) return;
 		if ( mode === 'portal' ) this.portalFallbackReported = false;
-		this.store.patch( { undergroundViewMode: mode } );
+		this.requestedUndergroundViewMode = mode;
+		if ( mode === 'real-space' ) this.store.patch( { undergroundViewMode: mode } );
 		this.undergroundPortal.markDirty();
 
 	}
@@ -3869,13 +3871,18 @@ export class ThreeEngine {
 		args.model = this.getPortalModelScope().undergroundRoot;
 		args.footprintCorners = this.getPortalFootprintCornersAr();
 		args.depthFrame = depthFrame;
-		args.enabled = this.store.getState().undergroundViewMode === 'portal';
+		args.enabled = this.requestedUndergroundViewMode === 'portal';
 		const portalStatus = this.undergroundPortal.update( args );
-		if ( portalStatus === 'ready' ) this.portalFallbackReported = false;
+		if ( portalStatus === 'ready' ) {
+			this.portalFallbackReported = false;
+			if ( this.store.getState().undergroundViewMode !== 'portal' ) this.store.patch( { undergroundViewMode: 'portal' } );
+		}
 		if ( portalStatus === 'failed' && this.portalFallbackReported === false ) {
 			this.portalFallbackReported = true;
+			this.requestedUndergroundViewMode = 'real-space';
 			this.store.patch( { undergroundViewMode: 'real-space', undergroundMaterialMode: 'xray' } );
-			this.setStatus( 'Portal 初始化失败，已回退到真实空间透明显示。' );
+			const reason = String( this.undergroundPortal.getDiagnostics().portalFailureReason );
+			this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
 		}
 		this.logPortalDiagnostics( depthFrame );
 
@@ -3936,6 +3943,8 @@ export class ThreeEngine {
 		if ( now - this.lastPortalDebugAt < 500 ) return;
 		this.lastPortalDebugAt = now;
 		console.info( '[PortalDiagnostics]', {
+			requestedViewMode: this.requestedUndergroundViewMode,
+			effectiveViewMode: this.store.getState().undergroundViewMode,
 			...this.undergroundPortal.getDiagnostics(),
 			cpuDepthValid: depthFrame.available && depthFrame.stale === false,
 			depthSize: `${depthFrame.width}x${depthFrame.height}`,
