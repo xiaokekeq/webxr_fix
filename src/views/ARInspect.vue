@@ -850,7 +850,9 @@ async function selectUndergroundViewMode(mode: 'portal' | 'real-space'): Promise
 	displaySelectionError.value = '';
 	const result = await store.actions.setUndergroundViewMode( mode );
 	if ( result.applied && result.effectiveMode === mode ) store.actions.closeDrawer();
-	else displaySelectionError.value = `Portal 切换失败：${result.failureReason ?? result.portalState}`;
+	else displaySelectionError.value = result.failureReason === 'no-renderable-mesh-structure'
+		? '未检测到可渲染的地下模型，已切换到真实空间。'
+		: '地下顶视暂不可用，已保持真实空间显示。';
 
 }
 

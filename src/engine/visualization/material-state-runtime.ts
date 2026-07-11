@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { forEachMaterial, rememberMaterialSnapshot, restoreMaterialSnapshot, type VisualizationMaterialSnapshot } from './material-visualization-state.js';
+import { mapXrayOpacityValue } from './adjustment-value-mappers.js';
 
 interface MaterialRuntimeRecord {
 	original: VisualizationMaterialSnapshot;
@@ -27,15 +28,16 @@ export class MaterialStateRuntime {
 	applyMaterial(mode: 'solid' | 'xray', opacity: number): void {
 
 		this.forEachUniqueControlledMaterial( ( material, record ) => {
-			const transparent = mode === 'xray' || record.original.transparent;
+			const xrayActive = mode === 'xray' && opacity < 100;
+			const transparent = xrayActive || record.original.transparent;
 			const side = this.clippingPlane === null ? record.original.side : THREE.DoubleSide;
 			const clippingCount = material.clippingPlanes?.length ?? 0;
 			const nextClippingCount = this.clippingPlane === null ? record.original.clippingPlanes?.length ?? 0 : record.combinedClippingPlanes.length;
 			const needsUpdate = material.transparent !== transparent || material.side !== side || clippingCount !== nextClippingCount;
 			material.transparent = transparent;
-			material.opacity = mode === 'xray' ? THREE.MathUtils.clamp( opacity / 100, 0, 1 ) : record.original.opacity;
-			material.depthWrite = mode === 'xray' ? false : record.original.depthWrite;
-			material.depthTest = mode === 'xray' ? true : record.original.depthTest;
+			material.opacity = xrayActive ? mapXrayOpacityValue( opacity ) : record.original.opacity;
+			material.depthWrite = xrayActive ? false : record.original.depthWrite;
+			material.depthTest = xrayActive ? true : record.original.depthTest;
 			material.side = side;
 			if ( needsUpdate ) material.needsUpdate = true;
 		} );

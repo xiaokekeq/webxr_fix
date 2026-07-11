@@ -206,7 +206,7 @@ export class UndergroundTopPortal {
 		this.surface!.visible = true;
 		if ( this.portalDirty ) {
 			this.syncRenderModelState();
-			if ( PORTAL_DEBUG_MODE !== 'surface' && this.countRenderableMeshes() === 0 ) return this.fail( 'no-renderable-meshes' );
+			if ( PORTAL_DEBUG_MODE !== 'surface' && this.countStructuralRenderableMeshes() === 0 ) return this.fail( 'no-renderable-mesh-structure' );
 			this.setState( 'content-ready' );
 			this.logDirtyDiagnostics( corners.value, args.mainCamera );
 			if ( PORTAL_DEBUG_MODE !== 'surface' ) this.render( args.renderer );
@@ -511,11 +511,11 @@ export class UndergroundTopPortal {
 
 	}
 
-	private countRenderableMeshes(): number {
+	private countStructuralRenderableMeshes(): number {
 
 		let count = 0;
-		this.renderModel?.traverseVisible( ( object ) => {
-			if ( object instanceof THREE.Mesh && object.geometry?.getAttribute( 'position' ) !== undefined && object.material !== undefined ) count += 1;
+		this.renderModel?.traverse( ( object ) => {
+			if ( isRenderablePortalMesh( object ) ) count += 1;
 		} );
 		return count;
 
@@ -554,14 +554,14 @@ export class UndergroundTopPortal {
 			portalModelNdcBounds: ndcBounds,
 			renderProxyVisible: this.renderModel.visible,
 			visibleMeshCount,
-			renderableVisibleMeshCount,
+			structuralRenderableMeshCount: this.countStructuralRenderableMeshes(),
+			visibleRenderableMeshCount: renderableVisibleMeshCount,
 			renderTargetHasRenderableModel: renderableVisibleMeshCount > 0,
 			surface: this.surface === null ? null : { visible: this.surface.visible, parent: this.surface.parent?.name || this.surface.parent?.type || 'none', layersMask: this.surface.layers.mask, cameraLayersMask: mainCamera.layers.mask, materialVisible: this.surface.material.visible, materialOpacity: this.surface.material.opacity, materialSide: this.surface.material.side, position: vectorToObject( this.surface.position ), scale: vectorToObject( this.surface.scale ), matrixWorld: this.surface.matrixWorld.toArray(), frustumCulled: this.surface.frustumCulled, inFrustum: frustum.intersectsObject( this.surface ) },
 			cpuDepthOcclusionEnabled: this.uniforms?.uDepthOcclusionEnabled.value ?? false,
 			result: outside ? 'Portal model is outside orthographic footprint.' : 'Portal model intersects orthographic footprint.'
 		} );
 		console.assert( this.renderModel.visible, 'Portal render proxy root must be visible.' );
-		console.assert( renderableVisibleMeshCount > 0, 'Portal render proxy must contain renderable visible meshes.' );
 
 	}
 
@@ -653,6 +653,16 @@ export class UndergroundTopPortal {
 		return changed;
 
 	}
+
+}
+
+function isRenderablePortalMesh(object: THREE.Object3D): object is THREE.Mesh {
+
+	return object instanceof THREE.Mesh
+		&& object.userData.__nonSelectableHelper !== true
+		&& object.userData.__visualizationHelper !== true
+		&& object.geometry?.getAttribute( 'position' ) !== undefined
+		&& object.material !== undefined;
 
 }
 

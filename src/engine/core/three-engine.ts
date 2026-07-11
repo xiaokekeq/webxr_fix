@@ -83,6 +83,7 @@ import { createArSectionCutController } from '@/engine/visualization/ar-section-
 import { UndergroundTopPortal, type PortalState } from '@/engine/visualization/underground-top-portal.js';
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
+import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
 import {
 	createArAnnotationLabelController,
 	type ArAnnotationDetailOverlay,
@@ -187,8 +188,8 @@ function createInitialState(): RegistrationStoreState {
 		workspaceMode: 'browse',
 		...DEFAULT_UNDERGROUND_DISPLAY_STATE,
 		transparentXrayValue: 0,
-		layerPeelingValue: 0,
-		sectionCutValue: 50,
+		layerPeelingValue: 100,
+		sectionCutValue: 100,
 		sectionCutPlaneMode: 'horizontal-section',
 		timelineStages: TIMELINE_STAGES,
 		currentTimelineStageIndex: 2,
@@ -620,6 +621,8 @@ export class ThreeEngine {
 			},
 			onSelectionCleared: () => {
 				this.clearAnnotationDetail();
+				this.visualizationStateRuntime.syncVisualizationState();
+				this.applyModelLayerVisibility();
 				this.undergroundPortal.markDirty();
 			},
 			handlePreSelectionRaycast: ( selection ) => {
@@ -962,7 +965,7 @@ export class ThreeEngine {
 		this.store.patch( { layerPeelingValue: clampedValue } );
 		if ( this.store.getState().undergroundInspectionTool === 'layer-peeling' ) {
 			this.layerVisibility.setHiddenLayerCount(
-				percentToHiddenLayerCount( clampedValue, this.layerVisibility.getState().length )
+				mapLayerPeelingValue( clampedValue, this.layerVisibility.getState().length )
 			);
 			this.applyModelLayerVisibility();
 		}
@@ -1021,7 +1024,7 @@ export class ThreeEngine {
 		const state = this.store.getState();
 		if ( state.undergroundInspectionTool === tool ) return;
 		this.store.patch( { undergroundInspectionTool: tool } );
-		this.layerVisibility.setHiddenLayerCount( tool === 'layer-peeling' ? percentToHiddenLayerCount( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0 );
+		this.layerVisibility.setHiddenLayerCount( tool === 'layer-peeling' ? mapLayerPeelingValue( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0 );
 		this.applyModelLayerVisibility();
 		this.undergroundPortal.markDirty();
 
@@ -3906,6 +3909,7 @@ export class ThreeEngine {
 			const reason = String( this.undergroundPortal.getDiagnostics().portalFailureReason );
 			this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
 			this.logPortalClickResult();
+			if ( import.meta.env.DEV ) console.assert( isEffectivelyVisible( this.getPortalModelScope().undergroundRoot ), 'Portal fallback must restore effective underground model visibility.' );
 			this.pendingPortalResult?.( this.createUndergroundViewResult( false ) );
 			this.pendingPortalResult = null;
 		}
@@ -4393,7 +4397,7 @@ export class ThreeEngine {
 		} );
 		if ( this.store.getState().undergroundInspectionTool === 'layer-peeling' ) {
 			this.layerVisibility.setHiddenLayerCount(
-				percentToHiddenLayerCount(
+				mapLayerPeelingValue(
 					this.store.getState().layerPeelingValue,
 					this.layerVisibility.getState().length
 				)
@@ -5422,26 +5426,14 @@ function countHiddenLayers(layers: Array<{ visible: boolean }>): number {
 
 }
 
-function percentToHiddenLayerCount(value: number, totalLayerCount: number): number {
-
-	const maxHideCount = Math.max( 0, totalLayerCount - 1 );
-	if ( maxHideCount === 0 ) {
-		return 0;
-	}
-
-	return Math.round( THREE.MathUtils.clamp( value, 0, 100 ) / 100 * maxHideCount );
+function hiddenLayerCountToPercent(hiddenLayerCount: number, totalLayerCount: number): number {
+	return mapHiddenLayerCountToValue( hiddenLayerCount, totalLayerCount );
 
 }
 
-function hiddenLayerCountToPercent(hiddenLayerCount: number, totalLayerCount: number): number {
-
-	const maxHideCount = Math.max( 0, totalLayerCount - 1 );
-	if ( maxHideCount === 0 ) {
-		return 0;
-	}
-
-	return Math.round( THREE.MathUtils.clamp( hiddenLayerCount, 0, maxHideCount ) / maxHideCount * 100 );
-
+function isEffectivelyVisible(object: THREE.Object3D | null): boolean {
+	for ( let current = object; current !== null; current = current.parent ) if ( current.visible === false ) return false;
+	return object !== null;
 }
 
 

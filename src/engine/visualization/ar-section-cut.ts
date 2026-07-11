@@ -27,6 +27,7 @@ export function createArSectionCutController(renderer: THREE.WebGLRenderer): ArS
 	const plane = new THREE.Plane();
 	const matrixValues = new Float32Array( 16 );
 	let planeMode: SectionCutPlaneMode = 'horizontal-section';
+	let diagnosticsMode: SectionCutPlaneMode | null = null;
 	let cachedRoot: THREE.Object3D | null = null;
 	let boundsDirty = true;
 
@@ -48,7 +49,19 @@ export function createArSectionCutController(renderer: THREE.WebGLRenderer): ArS
 		worldNormal.set( 0, 0, 0 ).setComponent( axisToIndex( axis ), -1 )
 			.applyQuaternion( modelRoot.getWorldQuaternion( worldQuaternion ) ).normalize();
 		const range = resolveProjectedBoundsRange( worldNormal );
-		worldPoint.copy( worldNormal ).multiplyScalar( THREE.MathUtils.lerp( range.min, range.max, THREE.MathUtils.clamp( value, 0, 100 ) / 100 ) );
+		const extent = Math.max( 0, range.max - range.min );
+		const padding = Math.max( 0.01, extent * 0.01 );
+		const hiddenEndpoint = range.max + padding;
+		const visibleEndpoint = range.min - padding;
+		if ( import.meta.env.DEV && diagnosticsMode !== planeMode ) {
+			diagnosticsMode = planeMode;
+			const hiddenCornerCountAt0 = countCorners( worldNormal, hiddenEndpoint, false );
+			const visibleCornerCountAt100 = countCorners( worldNormal, visibleEndpoint, true );
+			console.info( '[SectionEndpointDiagnostic]', { planeMode, range, padding, hiddenEndpoint, visibleEndpoint, hiddenCornerCountAt0, visibleCornerCountAt100 } );
+			console.assert( hiddenCornerCountAt0 === 8, 'Section value 0 must clip every bounds corner.' );
+			console.assert( visibleCornerCountAt100 === 8, 'Section value 100 must retain every bounds corner.' );
+		}
+		worldPoint.copy( worldNormal ).multiplyScalar( mapSectionRevealValue( value, hiddenEndpoint, visibleEndpoint ) );
 		plane.setFromNormalAndCoplanarPoint( worldNormal, worldPoint );
 		renderer.localClippingEnabled = true;
 		return plane;
@@ -56,7 +69,7 @@ export function createArSectionCutController(renderer: THREE.WebGLRenderer): ArS
 	}
 
 	function restore(): void { renderer.localClippingEnabled = false; }
-	function markBoundsDirty(): void { boundsDirty = true; }
+	function markBoundsDirty(): void { boundsDirty = true; diagnosticsMode = null; }
 
 	return {
 		setPlaneMode(mode) { planeMode = mode; },
@@ -67,10 +80,24 @@ export function createArSectionCutController(renderer: THREE.WebGLRenderer): ArS
 			restore();
 			cachedRoot = null;
 			boundsDirty = true;
+			diagnosticsMode = null;
 			matrixValues.fill( Number.NaN );
 		}
 	};
 
+}
+
+function countCorners(normal: THREE.Vector3, planePosition: number, countVisible: boolean): number {
+	let count = 0;
+	for ( const x of [ worldBounds.min.x, worldBounds.max.x ] ) for ( const y of [ worldBounds.min.y, worldBounds.max.y ] ) for ( const z of [ worldBounds.min.z, worldBounds.max.z ] ) {
+		const visible = normal.dot( boundsCorner.set( x, y, z ) ) - planePosition >= 0;
+		if ( visible === countVisible ) count += 1;
+	}
+	return count;
+}
+
+function mapSectionRevealValue(value: number, hiddenEndpoint: number, visibleEndpoint: number): number {
+	return THREE.MathUtils.lerp( hiddenEndpoint, visibleEndpoint, THREE.MathUtils.clamp( value, 0, 100 ) / 100 );
 }
 
 function copyChangedMatrix(elements: ArrayLike<number>, previous: Float32Array): boolean {
