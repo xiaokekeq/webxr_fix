@@ -311,8 +311,8 @@ async function requestArSession(xr: XRSystem): Promise<ArSessionStartResult> {
 		requiredFeatures: [ 'hit-test', 'depth-sensing' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors' ],
 		depthSensing: {
-			usagePreference: [ 'cpu-optimized', 'gpu-optimized' ],
-			dataFormatPreference: [ 'luminance-alpha', 'float32', 'unsigned-short' ],
+			usagePreference: [ 'cpu-optimized' ],
+			dataFormatPreference: [ 'luminance-alpha' ],
 			matchDepthView: true
 		},
 		domOverlay: { root: document.body }
@@ -353,7 +353,7 @@ function readSessionDepthUsage(session: XRSession): ArSessionStartResult['depthU
 
 	try {
 		const value = ( session as unknown as { depthUsage?: unknown } ).depthUsage;
-		return value === 'cpu-optimized' || value === 'gpu-optimized' ? value : null;
+		return value === 'cpu-optimized' ? value : null;
 	} catch {
 		return null;
 	}
@@ -364,7 +364,7 @@ function readSessionDepthFormat(session: XRSession): ArSessionStartResult['depth
 
 	try {
 		const value = ( session as unknown as { depthDataFormat?: unknown } ).depthDataFormat;
-		return value === 'luminance-alpha' || value === 'float32' || value === 'unsigned-short' ? value : null;
+		return value === 'luminance-alpha' ? value : null;
 	} catch {
 		return null;
 	}

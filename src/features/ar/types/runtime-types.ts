@@ -6,8 +6,8 @@ export interface ArSessionStartResult {
 	session: XRSession;
 	depthRequested: boolean;
 	depthGranted: boolean;
-	depthUsage: 'cpu-optimized' | 'gpu-optimized' | null;
-	depthDataFormat: 'luminance-alpha' | 'float32' | 'unsigned-short' | null;
+	depthUsage: 'cpu-optimized' | null;
+	depthDataFormat: 'luminance-alpha' | null;
 	depthActive: boolean | null;
 	fallbackUsed: boolean;
 	fallbackReason: string | null;

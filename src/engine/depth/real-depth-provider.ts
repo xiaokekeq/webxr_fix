@@ -1,100 +1,133 @@
 import * as THREE from 'three';
 
-export interface RealDepthFrame {
+export type CpuDepthSampleEncoding = 'uint16-raw';
+
+export interface CpuDepthFrame {
+	sessionEnabled: boolean;
 	available: boolean;
-	usage: 'cpu-optimized' | 'gpu-optimized' | 'none';
-	format: 'luminance-alpha' | 'float32' | 'unsigned-short' | null;
+	validThisUpdate: boolean;
+	stale: boolean;
 	width: number;
 	height: number;
-	texture: THREE.Texture | WebGLTexture | null;
+	texture: THREE.DataTexture | null;
+	sampleEncoding: CpuDepthSampleEncoding;
 	rawValueToMeters: number;
-	normDepthBufferFromNormView: XRRigidTransform | null;
-	updatedAt: number;
+	normDepthBufferFromNormView: THREE.Matrix4 | null;
+	lastValidAt: number;
+	ageMs: number;
 }
 
-interface GpuDepthInformation {
-	texture: WebGLTexture;
-	width: number;
-	height: number;
-	rawValueToMeters: number;
-	normDepthBufferFromNormView: XRRigidTransform;
-}
+const CPU_DEPTH_UPLOAD_INTERVAL_MS = 66;
+const CPU_DEPTH_STALE_TIMEOUT_MS = 150;
 
-interface GpuDepthBinding {
-	getDepthInformation(view: XRView): GpuDepthInformation | null;
-}
-
-interface GpuDepthBindingConstructor {
-	new (session: XRSession, context: WebGLRenderingContext | WebGL2RenderingContext): GpuDepthBinding;
-}
-
-const DEPTH_UPLOAD_INTERVAL_MS = 66;
-const EMPTY_DEPTH_FRAME: RealDepthFrame = {
+const EMPTY_CPU_DEPTH_FRAME: CpuDepthFrame = {
+	sessionEnabled: false,
 	available: false,
-	usage: 'none',
-	format: null,
+	validThisUpdate: false,
+	stale: true,
 	width: 0,
 	height: 0,
 	texture: null,
+	sampleEncoding: 'uint16-raw',
 	rawValueToMeters: 0,
 	normDepthBufferFromNormView: null,
-	updatedAt: 0
+	lastValidAt: 0,
+	ageMs: Number.POSITIVE_INFINITY
 };
 
 export class RealDepthProvider {
 	private session: XRSession | null = null;
-	private binding: GpuDepthBinding | null = null;
+	private depthEnabled = false;
+	private width = 0;
+	private height = 0;
+	private cpuBuffer: Uint16Array | null = null;
 	private texture: THREE.DataTexture | null = null;
-	private uint16Buffer: Uint16Array | null = null;
-	private float32Buffer: Float32Array | null = null;
-	private textureWidth = 0;
-	private textureHeight = 0;
-	private textureFormat: RealDepthFrame['format'] = null;
-	private currentFrame: RealDepthFrame = { ...EMPTY_DEPTH_FRAME };
+	private readonly normDepthBufferFromNormView = new THREE.Matrix4();
+	private currentFrame: CpuDepthFrame = createEmptyCpuDepthFrame();
 	private lastUploadAt = 0;
+	private lastValidAt = 0;
+	private lastErrorLogAt = Number.NEGATIVE_INFINITY;
+	private unsupportedConfigurationLogged = false;
 
-	initialize(session: XRSession, renderer: THREE.WebGLRenderer): void {
+	initialize(session: XRSession): void {
 
 		this.dispose();
 		this.session = session;
-		const usage = readDepthUsage( session );
-		if ( usage === 'gpu-optimized' ) {
-			try {
-				const BindingCtor = ( window as unknown as { XRWebGLBinding?: GpuDepthBindingConstructor } ).XRWebGLBinding;
-				this.binding = BindingCtor === undefined ? null : new BindingCtor( session, renderer.getContext() );
-			} catch ( error ) {
-				console.warn( '[RealDepthProviderGpuBindingUnavailable]', error );
-			}
+		const depthUsage = readDepthUsage( session );
+		const depthDataFormat = readDepthDataFormat( session );
+		this.depthEnabled = depthUsage === 'cpu-optimized' && depthDataFormat === 'luminance-alpha';
+		this.currentFrame.sessionEnabled = this.depthEnabled;
+
+		if ( this.depthEnabled === false && this.unsupportedConfigurationLogged === false ) {
+			this.unsupportedConfigurationLogged = true;
+			console.warn( '[UnsupportedDepthConfiguration]', { depthUsage, depthDataFormat } );
 		}
-		this.currentFrame = createEmptyDepthFrame( usage, readDepthFormat( session ) );
 
 	}
 
-	update(frame: XRFrame, view: XRView, time: number): RealDepthFrame {
+	update(frame: XRFrame, view: XRView, time: number): CpuDepthFrame {
 
-		if ( this.session === null || this.currentFrame.usage === 'none' ) {
+		if ( this.depthEnabled === false || this.session === null ) {
 			return this.currentFrame;
 		}
-		if ( time - this.lastUploadAt < DEPTH_UPLOAD_INTERVAL_MS ) {
-			return this.currentFrame;
+		if ( time - this.lastUploadAt < CPU_DEPTH_UPLOAD_INTERVAL_MS ) {
+			return this.refreshStaleState( time );
 		}
+
 		this.lastUploadAt = time;
-		this.currentFrame = this.currentFrame.usage === 'gpu-optimized'
-			? this.readGpuDepth( view, time )
-			: this.readCpuDepth( frame, view, time );
+		try {
+			const depthInfo = frame.getDepthInformation( view );
+			if ( depthInfo === null || depthInfo === undefined ) {
+				return this.refreshStaleState( time );
+			}
+
+			const requiredLength = depthInfo.width * depthInfo.height;
+			const source = new Uint16Array( depthInfo.data );
+			if ( source.length < requiredLength ) {
+				throw new Error( `CPU depth buffer length ${source.length} is smaller than ${requiredLength}` );
+			}
+			this.ensureTexture( depthInfo.width, depthInfo.height, requiredLength );
+			this.cpuBuffer!.set( source.subarray( 0, requiredLength ) );
+			this.texture!.needsUpdate = true;
+			this.normDepthBufferFromNormView.fromArray( depthInfo.normDepthBufferFromNormView.matrix );
+			this.lastValidAt = time;
+			this.currentFrame = {
+				sessionEnabled: true,
+				available: true,
+				validThisUpdate: true,
+				stale: false,
+				width: this.width,
+				height: this.height,
+				texture: this.texture,
+				sampleEncoding: 'uint16-raw',
+				rawValueToMeters: depthInfo.rawValueToMeters,
+				normDepthBufferFromNormView: this.normDepthBufferFromNormView,
+				lastValidAt: time,
+				ageMs: 0
+			};
+			return this.currentFrame;
+		} catch ( error ) {
+			this.logReadFailure( error );
+			return this.refreshStaleState( time );
+		}
+
+	}
+
+	getCurrentFrame(): CpuDepthFrame {
+
 		return this.currentFrame;
 
 	}
 
-	getCurrentFrame(): RealDepthFrame {
+	isSessionEnabled(): boolean {
 
-		return this.currentFrame;
+		return this.depthEnabled;
 
 	}
 
-	isAvailable(): boolean {
+	hasValidFrame(): boolean {
 
-		return this.session !== null && this.currentFrame.usage !== 'none';
+		return this.currentFrame.available && this.currentFrame.stale === false;
 
 	}
 
@@ -102,151 +135,108 @@ export class RealDepthProvider {
 
 		this.texture?.dispose();
 		this.texture = null;
-		this.uint16Buffer = null;
-		this.float32Buffer = null;
-		this.textureWidth = 0;
-		this.textureHeight = 0;
-		this.textureFormat = null;
-		this.binding = null;
+		this.cpuBuffer = null;
 		this.session = null;
-		this.currentFrame = { ...EMPTY_DEPTH_FRAME };
+		this.depthEnabled = false;
+		this.width = 0;
+		this.height = 0;
 		this.lastUploadAt = 0;
+		this.lastValidAt = 0;
+		this.lastErrorLogAt = Number.NEGATIVE_INFINITY;
+		this.currentFrame = createEmptyCpuDepthFrame();
 
 	}
 
-	private readCpuDepth(frame: XRFrame, view: XRView, time: number): RealDepthFrame {
+	private ensureTexture(width: number, height: number, requiredLength: number): void {
 
-		const getDepthInformation = frame.getDepthInformation;
-		if ( getDepthInformation === undefined || this.session === null ) {
-			return createEmptyDepthFrame( 'cpu-optimized', readDepthFormat( this.session ) );
+		if (
+			this.texture !== null
+			&& this.width === width
+			&& this.height === height
+			&& this.cpuBuffer?.length === requiredLength
+		) {
+			return;
 		}
-		try {
-			const info = getDepthInformation.call( frame, view );
-			if ( info === null || info === undefined ) {
-				return createEmptyDepthFrame( 'cpu-optimized', readDepthFormat( this.session ) );
-			}
-			const format = readDepthFormat( this.session );
-			const texture = this.updateCpuTexture( info, format );
-			return {
-				available: texture !== null,
-				usage: 'cpu-optimized',
-				format,
-				width: info.width,
-				height: info.height,
-				texture,
-				rawValueToMeters: info.rawValueToMeters,
-				normDepthBufferFromNormView: info.normDepthBufferFromNormView,
-				updatedAt: time
-			};
-		} catch ( error ) {
-			console.warn( '[RealDepthProviderCpuReadFailed]', error );
-			return createEmptyDepthFrame( 'cpu-optimized', readDepthFormat( this.session ) );
-		}
+
+		this.texture?.dispose();
+		this.width = width;
+		this.height = height;
+		this.cpuBuffer = new Uint16Array( requiredLength );
+		this.texture = new THREE.DataTexture(
+			this.cpuBuffer,
+			width,
+			height,
+			THREE.RedIntegerFormat,
+			THREE.UnsignedShortType
+		);
+		this.texture.minFilter = THREE.NearestFilter;
+		this.texture.magFilter = THREE.NearestFilter;
+		this.texture.generateMipmaps = false;
+		this.texture.flipY = false;
+		this.texture.colorSpace = THREE.NoColorSpace;
+		this.texture.unpackAlignment = 1;
+		this.texture.needsUpdate = true;
 
 	}
 
-	private readGpuDepth(view: XRView, time: number): RealDepthFrame {
+	private refreshStaleState(time: number): CpuDepthFrame {
 
-		if ( this.binding === null || this.session === null ) {
-			return createEmptyDepthFrame( 'gpu-optimized', readDepthFormat( this.session ) );
-		}
-		try {
-			const info = this.binding.getDepthInformation( view );
-			if ( info === null || info === undefined ) {
-				return createEmptyDepthFrame( 'gpu-optimized', readDepthFormat( this.session ) );
-			}
-			return {
-				available: true,
-				usage: 'gpu-optimized',
-				format: readDepthFormat( this.session ),
-				width: info.width,
-				height: info.height,
-				texture: info.texture,
-				rawValueToMeters: info.rawValueToMeters,
-				normDepthBufferFromNormView: info.normDepthBufferFromNormView,
-				updatedAt: time
-			};
-		} catch ( error ) {
-			console.warn( '[RealDepthProviderGpuReadFailed]', error );
-			return createEmptyDepthFrame( 'gpu-optimized', readDepthFormat( this.session ) );
-		}
+		const ageMs = this.lastValidAt === 0 ? Number.POSITIVE_INFINITY : Math.max( 0, time - this.lastValidAt );
+		const stale = ageMs > CPU_DEPTH_STALE_TIMEOUT_MS;
+		this.currentFrame = {
+			...this.currentFrame,
+			sessionEnabled: this.depthEnabled,
+			available: stale === false && this.texture !== null,
+			validThisUpdate: false,
+			stale,
+			ageMs
+		};
+		return this.currentFrame;
 
 	}
 
-	private updateCpuTexture(info: XRCPUDepthInformation, format: RealDepthFrame['format']): THREE.DataTexture | null {
+	private logReadFailure(error: unknown): void {
 
-		if ( format === 'float32' ) {
-			const source = info.data instanceof Float32Array ? info.data : new Float32Array( info.data );
-			if ( this.needsCpuTextureRebuild( source.length, info.width, info.height, format ) ) {
-				this.texture?.dispose();
-				this.float32Buffer = new Float32Array( source.length );
-				this.uint16Buffer = null;
-				this.texture = createDepthTexture( this.float32Buffer, info.width, info.height, THREE.FloatType );
-			}
-			this.float32Buffer!.set( source );
-		} else {
-			const source = info.data instanceof Uint16Array ? info.data : new Uint16Array( info.data );
-			if ( this.needsCpuTextureRebuild( source.length, info.width, info.height, format ) ) {
-				this.texture?.dispose();
-				this.uint16Buffer = new Uint16Array( source.length );
-				this.float32Buffer = null;
-				this.texture = createDepthTexture( this.uint16Buffer, info.width, info.height, THREE.UnsignedShortType );
-			}
-			this.uint16Buffer!.set( source );
+		const now = performance.now();
+		if ( now - this.lastErrorLogAt < 3000 ) {
+			return;
 		}
-		this.textureWidth = info.width;
-		this.textureHeight = info.height;
-		this.textureFormat = format;
-		if ( this.texture !== null ) this.texture.needsUpdate = true;
-		return this.texture;
-
-	}
-
-	private needsCpuTextureRebuild(length: number, width: number, height: number, format: RealDepthFrame['format']): boolean {
-
-		return this.texture === null
-			|| this.textureWidth !== width
-			|| this.textureHeight !== height
-			|| this.textureFormat !== format
-			|| ( this.float32Buffer?.length ?? this.uint16Buffer?.length ?? 0 ) !== length;
+		this.lastErrorLogAt = now;
+		console.error( '[RealDepthProviderReadFailed]', {
+			errorName: error instanceof Error ? error.name : typeof error,
+			errorMessage: error instanceof Error ? error.message : String( error ),
+			width: this.width,
+			height: this.height,
+			depthEnabled: this.depthEnabled
+		} );
 
 	}
 }
 
-function createDepthTexture(data: Uint16Array | Float32Array, width: number, height: number, type: THREE.TextureDataType): THREE.DataTexture {
+function createEmptyCpuDepthFrame(): CpuDepthFrame {
 
-	const texture = new THREE.DataTexture( data, width, height, THREE.RedFormat, type );
-	texture.minFilter = THREE.NearestFilter;
-	texture.magFilter = THREE.NearestFilter;
-	texture.generateMipmaps = false;
-	texture.flipY = false;
-	texture.colorSpace = THREE.NoColorSpace;
-	return texture;
+	return { ...EMPTY_CPU_DEPTH_FRAME };
 
 }
 
-function createEmptyDepthFrame(usage: RealDepthFrame['usage'], format: RealDepthFrame['format']): RealDepthFrame {
-
-	return { ...EMPTY_DEPTH_FRAME, usage, format };
-
-}
-
-function readDepthUsage(session: XRSession | null): RealDepthFrame['usage'] {
+function readDepthUsage(session: XRSession): 'cpu-optimized' | null {
 
 	try {
-		const value = ( session as unknown as { depthUsage?: unknown } | null )?.depthUsage;
-		return value === 'cpu-optimized' || value === 'gpu-optimized' ? value : 'none';
+		return ( session as unknown as { depthUsage?: unknown } ).depthUsage === 'cpu-optimized'
+			? 'cpu-optimized'
+			: null;
 	} catch {
-		return 'none';
+		return null;
 	}
 
 }
 
-function readDepthFormat(session: XRSession | null): RealDepthFrame['format'] {
+function readDepthDataFormat(session: XRSession): 'luminance-alpha' | null {
 
 	try {
-		const value = ( session as unknown as { depthDataFormat?: unknown } | null )?.depthDataFormat;
-		return value === 'luminance-alpha' || value === 'float32' || value === 'unsigned-short' ? value : null;
+		return ( session as unknown as { depthDataFormat?: unknown } ).depthDataFormat === 'luminance-alpha'
+			? 'luminance-alpha'
+			: null;
 	} catch {
 		return null;
 	}

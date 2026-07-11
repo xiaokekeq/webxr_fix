@@ -740,9 +740,6 @@ export class ThreeEngine {
 				this.safeFrameTask( 'real-depth', () => {
 					this.updateRealDepth( frame );
 				} );
-				this.safeFrameTask( 'display-depth-state', () => {
-					this.displayModeController.updateDepthState( frame );
-				} );
 				this.safeFrameTask( 'marker-hints', () => {
 					this.inspectionMarkerWorkflow.syncHints();
 				} );
@@ -3829,7 +3826,7 @@ export class ThreeEngine {
 
 	private updateRealDepth(frame: XRFrame): void {
 
-		if ( this.realDepthProvider.isAvailable() === false ) {
+		if ( this.realDepthProvider.isSessionEnabled() === false ) {
 			return;
 		}
 		const referenceSpace = this.sceneBundle.renderer.xr.getReferenceSpace();
@@ -3843,9 +3840,8 @@ export class ThreeEngine {
 	private handleXRSessionStart(result: ArSessionStartResult): void {
 
 		this.store.clearModelPlacementDebug();
-		if ( result.depthGranted ) {
-			this.realDepthProvider.initialize( result.session, this.sceneBundle.renderer );
-		}
+		if ( result.depthGranted ) this.realDepthProvider.initialize( result.session );
+		else this.realDepthProvider.dispose();
 		this.sessionLifecycleRuntime.handleXRSessionStart();
 
 	}
@@ -4343,9 +4339,9 @@ export class ThreeEngine {
 			currentPortalImplementation: 'not implemented; fallback is existing surface footprint/x-ray diagnostics',
 			currentLegacyVisualOffsetReferences: 'visualMatrix remains snapshot/debug name only; no visualOffsetY/buriedDepthMeters positioning path',
 			migrationRisks: [
-				'Portal render target and real-depth occlusion are not present yet',
+				'Portal render target is not implemented',
 				'Current runtime still places one model template',
-				'GPU depth path needs XRWebGLBinding before real foreground occlusion can be production'
+				'CPU depth is limited to a minimal validation path'
 			]
 		} );
 

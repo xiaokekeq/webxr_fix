@@ -20,7 +20,6 @@ const DISPLAY_MODE_TAGS = {
 
 export interface DisplayModeController {
 	sync(mode: ArDisplayMode): void;
-	updateDepthState(frame?: XRFrame): void;
 	captureMaterialBaseline(): void;
 	reset(): void;
 	dispose(): void;
@@ -57,12 +56,6 @@ export function createDisplayModeController(
 		}
 
 		applyMode( placedModel, mode );
-
-	}
-
-	function updateDepthState(frame?: XRFrame): void {
-
-		void frame;
 
 	}
 
@@ -197,7 +190,6 @@ export function createDisplayModeController(
 
 	return {
 		sync,
-		updateDepthState,
 		captureMaterialBaseline,
 		reset,
 		dispose
