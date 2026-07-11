@@ -82,7 +82,7 @@ import { createArXrayVisualizationController } from '@/engine/visualization/ar-x
 import { createArLayerPeelingController } from '@/engine/visualization/ar-layer-peeling.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { UndergroundTopPortal } from '@/engine/visualization/underground-top-portal.js';
-import type { UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import {
 	createArAnnotationLabelController,
@@ -178,10 +178,7 @@ function createInitialState(): RegistrationStoreState {
 		arSupportMessage: '正在检测当前设备是否支持 WebXR AR。',
 		arSessionPhase: 'scanning',
 		workspaceMode: 'browse',
-		undergroundViewMode: 'portal',
-		undergroundMaterialMode: 'solid',
-		layerPeelingEnabled: false,
-		sectionCutEnabled: false,
+		...DEFAULT_UNDERGROUND_DISPLAY_STATE,
 		transparentXrayValue: 0,
 		layerPeelingValue: 0,
 		sectionCutValue: 50,
@@ -309,6 +306,7 @@ export class ThreeEngine {
 	private readonly realDepthProvider = new RealDepthProvider();
 	private readonly undergroundPortal: UndergroundTopPortal;
 	private portalUpdateArgs: Parameters<UndergroundTopPortal['update']>[ 0 ] | null = null;
+	private portalFallbackReported = false;
 	private readonly footprintCornersAr = [ new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3() ];
 	private readonly emptyFootprintCorners: THREE.Vector3[] = [];
 	private readonly frameTaskErrorCounts = new Map<string, number>();
@@ -944,6 +942,7 @@ export class ThreeEngine {
 	setTransparentXrayValue(value: number): void {
 
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
+		if ( this.store.getState().transparentXrayValue === clampedValue ) return;
 		this.store.patch( { transparentXrayValue: clampedValue } );
 		this.undergroundPortal.markDirty();
 
@@ -952,6 +951,7 @@ export class ThreeEngine {
 	setLayerPeelingValue(value: number): void {
 
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
+		if ( this.store.getState().layerPeelingValue === clampedValue ) return;
 		this.store.patch( { layerPeelingValue: clampedValue } );
 		if ( this.store.getState().layerPeelingEnabled ) {
 			this.layerVisibility.setHiddenLayerCount(
@@ -964,7 +964,9 @@ export class ThreeEngine {
 
 	setSectionCutValue(value: number): void {
 
-		this.store.patch( { sectionCutValue: THREE.MathUtils.clamp( Math.round( value ), 0, 100 ) } );
+		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
+		if ( this.store.getState().sectionCutValue === clampedValue ) return;
+		this.store.patch( { sectionCutValue: clampedValue } );
 		this.undergroundPortal.markDirty();
 
 	}
@@ -3852,7 +3854,13 @@ export class ThreeEngine {
 		args.footprintCorners = this.getCurrentFootprintCornersAr();
 		args.depthFrame = depthFrame;
 		args.enabled = this.store.getState().undergroundViewMode === 'portal';
-		this.undergroundPortal.update( args );
+		const portalStatus = this.undergroundPortal.update( args );
+		if ( portalStatus === 'ready' ) this.portalFallbackReported = false;
+		if ( portalStatus === 'failed' && this.portalFallbackReported === false ) {
+			this.portalFallbackReported = true;
+			this.store.patch( { undergroundViewMode: 'real-space', undergroundMaterialMode: 'xray' } );
+			this.setStatus( 'Portal 初始化失败，已回退到真实空间透明显示。' );
+		}
 		this.logPortalDiagnostics( depthFrame );
 
 	}

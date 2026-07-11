@@ -5,6 +5,13 @@ export type LegacyArDisplayMode = 'solid-overlay' | 'transparent-xray' | 'underg
 export type UndergroundViewMode = 'portal' | 'real-space';
 export type UndergroundMaterialMode = 'solid' | 'xray';
 
+export const DEFAULT_UNDERGROUND_DISPLAY_STATE = {
+	undergroundViewMode: 'portal',
+	undergroundMaterialMode: 'solid',
+	layerPeelingEnabled: false,
+	sectionCutEnabled: false
+} as const;
+
 export function mapLegacyDisplayMode(mode: LegacyArDisplayMode): Partial<{
 	undergroundViewMode: UndergroundViewMode;
 	undergroundMaterialMode: UndergroundMaterialMode;

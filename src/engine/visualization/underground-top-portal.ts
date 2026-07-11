@@ -14,6 +14,7 @@ const PORTAL_MAX_RESOLUTION = 1024;
 const PORTAL_MIN_RESOLUTION = 384;
 const PORTAL_FOREGROUND_THRESHOLD_METERS = readPortalNumber( 'portalThreshold', 0.05 );
 const PORTAL_DEPTH_FEATHER_METERS = readPortalNumber( 'portalFeather', 0.025 );
+const PORTAL_BACKGROUND_ALPHA = THREE.MathUtils.clamp( readPortalNumber( 'portalBackgroundAlpha', 0.9 ), 0.85, 1 );
 
 const vertexShader = /* glsl */`
 precision highp float;
@@ -44,6 +45,7 @@ uniform ivec2 uDepthTextureSize;
 uniform float uForegroundThresholdMeters;
 uniform float uDepthFeatherMeters;
 uniform float uViewOpacity;
+uniform float uPortalBackgroundAlpha;
 uniform bool uDiagnosticDirectTexture;
 
 in vec2 vPortalUv;
@@ -102,7 +104,7 @@ void main() {
   }
   vec3 portalBackground = vec3(0.025, 0.055, 0.08);
   vec3 visibleColor = mix(portalBackground, portalColor.rgb, portalColor.a);
-  float baseAlpha = mix(0.68, 1.0, portalColor.a) * uViewOpacity;
+  float baseAlpha = mix(uPortalBackgroundAlpha, 1.0, portalColor.a) * uViewOpacity;
   float finalAlpha = baseAlpha * (1.0 - foregroundMask());
   if (finalAlpha < 0.01) discard;
   outColor = vec4(visibleColor, finalAlpha);
@@ -144,6 +146,7 @@ export class UndergroundTopPortal {
 		uForegroundThresholdMeters: { value: number };
 		uDepthFeatherMeters: { value: number };
 		uViewOpacity: { value: number };
+		uPortalBackgroundAlpha: { value: number };
 		uDiagnosticDirectTexture: { value: boolean };
 	} | null = null;
 	private portalDirty = true;
@@ -166,7 +169,7 @@ export class UndergroundTopPortal {
 		footprintCorners: THREE.Vector3[];
 		depthFrame: CpuDepthFrame;
 		enabled: boolean;
-	}): void {
+	}): 'inactive' | 'ready' | 'failed' {
 
 		if (
 			args.enabled === false
@@ -175,7 +178,7 @@ export class UndergroundTopPortal {
 		|| args.footprintCorners.some( ( point ) => Number.isFinite( point.x ) === false || Number.isFinite( point.y ) === false || Number.isFinite( point.z ) === false )
 		) {
 			this.hide();
-			return;
+			return args.enabled && args.model !== null ? 'failed' : 'inactive';
 		}
 
 		this.setSourceModel( args.model );
@@ -183,10 +186,10 @@ export class UndergroundTopPortal {
 		this.syncModelMatrix();
 		if ( this.ensureSurface() === false ) {
 			this.hide();
-			return;
+			return 'failed';
 		}
 		syncCpuDepthOcclusionUniforms( this.uniforms!, args.depthFrame );
-		if ( isArDebugEnabled() ) this.uniforms!.uDepthOcclusionEnabled.value = false;
+		if ( isArDebugEnabled() && readPortalFlag( 'portalDisableCpuDepth' ) ) this.uniforms!.uDepthOcclusionEnabled.value = false;
 		this.updateViewOpacity( args.mainCamera );
 		this.sourceModel!.visible = false;
 		this.surface!.visible = this.uniforms!.uViewOpacity.value > 0.001;
@@ -195,6 +198,7 @@ export class UndergroundTopPortal {
 			this.logDirtyDiagnostics( args.footprintCorners );
 			this.render( args.renderer );
 		}
+		return 'ready';
 
 	}
 
@@ -362,7 +366,8 @@ export class UndergroundTopPortal {
 			uForegroundThresholdMeters: { value: PORTAL_FOREGROUND_THRESHOLD_METERS },
 			uDepthFeatherMeters: { value: PORTAL_DEPTH_FEATHER_METERS },
 			uViewOpacity: { value: 1 },
-			uDiagnosticDirectTexture: { value: isArDebugEnabled() }
+			uPortalBackgroundAlpha: { value: PORTAL_BACKGROUND_ALPHA },
+			uDiagnosticDirectTexture: { value: isArDebugEnabled() && readPortalFlag( 'portalDirectTexture' ) }
 		} );
 		return new THREE.ShaderMaterial( {
 			uniforms: this.uniforms,
@@ -496,7 +501,7 @@ export class UndergroundTopPortal {
 			visibleMeshCount,
 			renderableVisibleMeshCount,
 			renderTargetHasRenderableModel: renderableVisibleMeshCount > 0,
-			cpuDepthOcclusionEnabled: false,
+			cpuDepthOcclusionEnabled: this.uniforms?.uDepthOcclusionEnabled.value ?? false,
 			result: outside ? 'Portal model is outside orthographic footprint.' : 'Portal model intersects orthographic footprint.'
 		} );
 		console.assert( this.renderModel.visible, 'Portal render proxy root must be visible.' );
@@ -560,6 +565,7 @@ export class UndergroundTopPortal {
 			msaaSamples: this.renderTarget?.samples ?? 0,
 			foregroundThresholdMeters: PORTAL_FOREGROUND_THRESHOLD_METERS,
 			depthFeatherMeters: PORTAL_DEPTH_FEATHER_METERS,
+			portalBackgroundAlpha: PORTAL_BACKGROUND_ALPHA,
 			lastFrameError: this.lastFrameError || 'none'
 		};
 
@@ -624,5 +630,11 @@ function readPortalNumber(name: string, fallback: number): number {
 	if ( import.meta.env.DEV === false ) return fallback;
 	const value = Number( new URLSearchParams( window.location.search ).get( name ) );
 	return Number.isFinite( value ) && value >= 0 ? value : fallback;
+
+}
+
+function readPortalFlag(name: string): boolean {
+
+	return typeof window !== 'undefined' && new URLSearchParams( window.location.search ).get( name ) === '1';
 
 }
