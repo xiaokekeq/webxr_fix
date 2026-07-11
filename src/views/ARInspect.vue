@@ -118,42 +118,6 @@ const debugCards = computed( () => [
 	{ label: 'mock note', value: configStatus.value.mockWarningText || '-', wide: true }
 ] );
 
-const cpuDepthOcclusionCards = computed( () => {
-	const depth = engine.value.cpuDepthOcclusion;
-	return [
-		{ label: 'CPU Depth Session', value: depth.sessionEnabled ? '可用' : '不可用' },
-		{ label: 'Frame', value: depth.valid ? '有效' : depth.stale ? '过期' : '等待' },
-		{ label: 'Size', value: `${depth.width} x ${depth.height}` },
-		{ label: 'Age', value: depth.ageMs === null ? '-' : `${depth.ageMs}ms` },
-		{ label: 'rawValueToMeters', value: depth.rawValueToMeters.toFixed( 6 ), wide: true },
-		{ label: 'Validation Cube', value: depth.validationCubeVisible ? '显示' : '隐藏' },
-		{ label: 'Occlusion', value: depth.occlusionEnabled ? '启用' : '禁用' }
-	];
-} );
-
-const cpuDepthValidationButtonLabel = computed( () => (
-	engine.value.cpuDepthOcclusion.validationCubeEnabled
-		? '\u79fb\u9664 Depth \u9a8c\u8bc1\u65b9\u5757'
-		: '\u653e\u7f6e Depth \u9a8c\u8bc1\u65b9\u5757'
-) );
-const cpuDepthValidationBlockedReason = computed( () => {
-	const depth = engine.value.cpuDepthOcclusion;
-	if ( hasArSession.value === false ) {
-		return '\u8bf7\u5148\u8fdb\u5165 AR';
-	}
-	if ( depth.validationCubeEnabled ) {
-		return '';
-	}
-	if ( depth.sessionEnabled === false ) {
-		return '\u5f53\u524d Session \u65e0 CPU Depth';
-	}
-	if ( depth.valid === false ) {
-		return '\u6b63\u5728\u7b49\u5f85\u6709\u6548 Depth \u5e27';
-	}
-	return '';
-} );
-const canToggleCpuDepthValidation = computed( () => cpuDepthValidationBlockedReason.value.length === 0 );
-
 const activeControlTargetSummary = computed( () => {
 	const activeId = configStatus.value.activeControlTargetId;
 	if ( activeId !== undefined ) {
@@ -1029,16 +993,6 @@ async function handlePlaceEngineeringModel(): Promise<void> {
 	await store.actions.placeModel();
 }
 
-function handleToggleCpuDepthValidation(): void {
-	store.actions.handleArUiInteraction();
-	if ( canToggleCpuDepthValidation.value === false ) {
-		return;
-	}
-	store.actions.setCpuDepthOcclusionValidationEnabled(
-		engine.value.cpuDepthOcclusion.validationCubeEnabled === false
-	);
-}
-
 async function handleExitMarkerCalibration(): Promise<void> {
 	markerApplyFeedback.value = null;
 	if ( engine.value.markerCalibration.active ) {
@@ -1252,23 +1206,6 @@ function setArOverlayClass(active: boolean): void {
 							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
 						</button>
 						<ArInfoGrid v-if="arDebugMode && debugInfoOpen" :items="debugCards" />
-							<button v-if="false && arDebugMode" type="button" class="debug-toggle" @click="store.actions.toggleCpuDepthOcclusionValidation()">
-							{{ engine.cpuDepthOcclusion.validationCubeEnabled ? '关闭 CPU Depth 遮挡验证方块' : 'CPU Depth 遮挡验证方块' }}
-						</button>
-								<ArInfoGrid v-if="hasArSession" :items="cpuDepthOcclusionCards" />
-							<button
-									v-if="hasArSession"
-								type="button"
-								class="debug-toggle"
-								:disabled="canToggleCpuDepthValidation === false"
-								@pointerdown.stop="store.actions.handleArUiInteraction()"
-								@click="handleToggleCpuDepthValidation()"
-							>
-								{{ cpuDepthValidationButtonLabel }}
-							</button>
-								<div v-if="hasArSession && canToggleCpuDepthValidation === false" class="runtime-banner warning">
-								{{ cpuDepthValidationBlockedReason }}
-							</div>
 							<button v-if="arDebugMode" type="button" class="debug-toggle" @click="registrationDiagnosticOpen = !registrationDiagnosticOpen">
 							{{ registrationDiagnosticOpen ? '收起配准诊断' : '配准诊断' }}
 						</button>

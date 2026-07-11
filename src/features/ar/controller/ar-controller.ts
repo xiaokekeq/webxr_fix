@@ -26,8 +26,6 @@ export interface LoadModelArController {
 	subscribe(listener: () => void): () => void;
 	actions: {
 		handleArUiInteraction(): void;
-		toggleCpuDepthOcclusionValidation(): void;
-		setCpuDepthOcclusionValidationEnabled(enabled: boolean): void;
 		closePropertyPanel(): void;
 		selectModel(modelId: string): void;
 		setDisplayMode(mode: ArDisplayMode): void;
@@ -116,18 +114,6 @@ export function createLoadModelArController(): LoadModelArController {
 			handleArUiInteraction() {
 
 				engine.handleArUiInteraction();
-
-			},
-
-			toggleCpuDepthOcclusionValidation() {
-
-				engine.toggleCpuDepthOcclusionValidation();
-
-			},
-
-			setCpuDepthOcclusionValidationEnabled(enabled) {
-
-				engine.setCpuDepthOcclusionValidationEnabled( enabled );
 
 			},
 
