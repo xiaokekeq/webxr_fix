@@ -126,9 +126,9 @@ export class UndergroundTopPortal {
 	private readonly boundsCenter = new THREE.Vector3();
 	private readonly cornerValues = new Float32Array( 12 );
 	private readonly modelMatrixValues = new Float32Array( 16 );
-	private sourceModel: THREE.Group | null = null;
+	private sourceModel: THREE.Object3D | null = null;
 	private sourceModelWasVisible = true;
-	private renderModel: THREE.Group | null = null;
+	private renderModel: THREE.Object3D | null = null;
 	private surface: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> | null = null;
 	private renderTarget: THREE.WebGLRenderTarget | null = null;
 	private uniforms: CpuDepthOcclusionUniforms & {
@@ -153,7 +153,7 @@ export class UndergroundTopPortal {
 	update(args: {
 		renderer: THREE.WebGLRenderer;
 		mainCamera: THREE.Camera;
-		model: THREE.Group | null;
+		model: THREE.Object3D | null;
 		footprintCorners: THREE.Vector3[];
 		depthFrame: CpuDepthFrame;
 		enabled: boolean;
@@ -249,7 +249,7 @@ export class UndergroundTopPortal {
 
 	}
 
-	private setSourceModel(model: THREE.Group): void {
+	private setSourceModel(model: THREE.Object3D): void {
 
 		if ( this.sourceModel === model ) return;
 		this.restoreSourceVisibility();

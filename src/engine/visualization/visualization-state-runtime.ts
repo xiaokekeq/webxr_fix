@@ -22,6 +22,7 @@ interface VisualizationStateRuntimeOptions {
 	structureRevealController: ArXrayVisualizationController;
 	layerPeelingController: ArLayerPeelingController;
 	sectionCutController: ArSectionCutController;
+	getUndergroundModelRoot(): THREE.Object3D | null;
 	syncAttachmentInfoBoardVisibility(): void;
 }
 
@@ -69,6 +70,9 @@ export class VisualizationStateRuntime {
 		const modelRoot = state.appMode === 'ar-session'
 			? this.options.placementSession.getArPlacedModel()
 			: null;
+		const undergroundRoot = state.appMode === 'ar-session'
+			? this.options.getUndergroundModelRoot()
+			: null;
 		const currentValue = getDisplayModeSliderValue( state );
 		const signature = [
 			state.appMode,
@@ -88,7 +92,7 @@ export class VisualizationStateRuntime {
 		switch ( state.displayMode ) {
 			case 'transparent-xray': {
 				const report = this.options.structureRevealController.apply( {
-					modelRoot,
+					modelRoot: undergroundRoot,
 					value: state.transparentXrayValue,
 					modelLayers: state.modelLayers
 				} );

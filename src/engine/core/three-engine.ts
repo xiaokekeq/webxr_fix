@@ -157,6 +157,11 @@ interface EngineeringPlacementGuardResult {
 	controlTarget?: VisualControlTarget | null;
 }
 
+interface PortalModelScope {
+	undergroundRoot: THREE.Object3D | null;
+	surfaceRoot: THREE.Object3D | null;
+}
+
 export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
@@ -411,6 +416,7 @@ export class ThreeEngine {
 			structureRevealController: this.structureRevealController,
 			layerPeelingController: this.layerPeelingController,
 			sectionCutController: this.sectionCutController,
+			getUndergroundModelRoot: () => this.getPortalModelScope().undergroundRoot,
 			syncAttachmentInfoBoardVisibility: () => {
 				this.syncAttachmentInfoBoardVisibility();
 			}
@@ -717,9 +723,7 @@ export class ThreeEngine {
 				if ( bundle.demoModelConfig.undergroundPlacement?.enabled === true ) {
 					const opacity = resolveXrayOpacityPercent( bundle.demoModelConfig.undergroundDisplay?.xrayOpacity );
 					this.store.patch( {
-						displayMode: bundle.demoModelConfig.modelInstances[ 0 ]?.display.belowGroundMode === 'top-portal'
-							? 'underground-portal'
-							: 'transparent-xray',
+						displayMode: 'underground-portal',
 						structureRevealValue: opacity,
 						transparentXrayValue: opacity
 					} );
@@ -938,6 +942,9 @@ export class ThreeEngine {
 			&& mode !== 'layer-peeling'
 			&& mode !== 'section-cut'
 		) {
+			return;
+		}
+		if ( mode === 'underground-portal' && this.getPortalModelScope().undergroundRoot === null ) {
 			return;
 		}
 
@@ -1357,7 +1364,6 @@ export class ThreeEngine {
 			this.setStatus( this.store.getState().arSupportMessage );
 			return;
 		}
-
 		void this.ensureArSessionContextReady().then( () => {
 			this.pointerSelection.suppressSelectionFor( 1200 );
 			this.xrRuntime.requestSession();
@@ -3868,7 +3874,7 @@ export class ThreeEngine {
 		const depthFrame = this.realDepthProvider.getCurrentFrame();
 		const args = this.portalUpdateArgs!;
 		args.mainCamera = this.sceneBundle.renderer.xr.getCamera();
-		args.model = this.placementSession.getArPlacedModel();
+		args.model = this.getPortalModelScope().undergroundRoot;
 		args.footprintCorners = this.getCurrentFootprintCornersAr();
 		args.depthFrame = depthFrame;
 		args.enabled = this.store.getState().displayMode === 'underground-portal';
@@ -3885,6 +3891,22 @@ export class ThreeEngine {
 			this.footprintCornersAr[ index ].copy( this.registrationSolution.controlPoints[ index ].worldEnu ).applyMatrix4( arFromEnuSolution.matrix );
 		}
 		return this.footprintCornersAr;
+
+	}
+
+	private getPortalModelScope(): PortalModelScope {
+
+		const placedModel = this.placementSession.getArPlacedModel();
+		const instance = this.demoModelConfig?.modelInstances[ 0 ];
+		if ( placedModel === null || instance === undefined ) return { undergroundRoot: null, surfaceRoot: placedModel };
+		if ( instance.verticalPlacement.groundRelation === 'underground' ) return { undergroundRoot: placedModel, surfaceRoot: null };
+		if ( instance.verticalPlacement.groundRelation !== 'mixed' ) return { undergroundRoot: null, surfaceRoot: placedModel };
+		const names = instance.groundClassification?.mode === 'node-groups'
+			? instance.groundClassification.belowGroundNodes ?? []
+			: [];
+		if ( names.length !== 1 ) return { undergroundRoot: null, surfaceRoot: placedModel };
+		const undergroundRoot = placedModel.getObjectByName( names[ 0 ] ) ?? null;
+		return { undergroundRoot, surfaceRoot: placedModel };
 
 	}
 
