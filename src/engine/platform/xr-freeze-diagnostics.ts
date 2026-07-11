@@ -3,6 +3,7 @@ import type { ArSessionRequestMode } from '@/features/ar/types/runtime-types.js'
 
 export type XrFreezeDiagnosticMode =
 	| 'baseline'
+	| 'depth-bare-session'
 	| 'depth-session-only'
 	| 'depth-hit-test'
 	| 'depth-project-frame'
@@ -196,6 +197,7 @@ export function recordXrStageTiming(stage: string, durationMs: number): void {
 function isXrFreezeDiagnosticMode(value: string): value is XrFreezeDiagnosticMode {
 
 	return value === 'baseline'
+		|| value === 'depth-bare-session'
 		|| value === 'depth-session-only'
 		|| value === 'depth-hit-test'
 		|| value === 'depth-project-frame'

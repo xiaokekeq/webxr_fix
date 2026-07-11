@@ -186,7 +186,10 @@ export function createXRHitTestController(
 			console.info( '[CpuDepthSessionRequested]' );
 		}
 
-		if ( xrFreezeHealthState.diagnosticMode === 'depth-session-only' ) {
+		if (
+			xrFreezeHealthState.diagnosticMode === 'depth-bare-session'
+			|| xrFreezeHealthState.diagnosticMode === 'depth-session-only'
+		) {
 			xrFreezeHealthState.hitTestRequested = false;
 			xrFreezeHealthState.hitTestSourceCreated = false;
 			return;
@@ -587,6 +590,15 @@ async function requestArSession(
 		},
 		domOverlay: { root: document.body }
 	};
+	const depthBareSessionInit = {
+		requiredFeatures: [ 'depth-sensing' ],
+		optionalFeatures: [],
+		depthSensing: {
+			usagePreference: [ 'cpu-optimized' ],
+			dataFormatPreference: [ 'luminance-alpha', 'float32' ],
+			matchDepthView: true
+		}
+	};
 
 	if ( mode === 'normal' ) {
 		console.info( '[ArSessionRequestedNormal]' );
@@ -598,9 +610,11 @@ async function requestArSession(
 
 	if ( mode === 'normal-with-depth' ) {
 		console.info( '[ArSessionRequestedNormalWithDepth]' );
-		const init = xrFreezeHealthState.diagnosticMode === 'depth-session-only'
-			? depthSessionOnlyInit
-			: normalDepthInit;
+		const init = xrFreezeHealthState.diagnosticMode === 'depth-bare-session'
+			? depthBareSessionInit
+			: xrFreezeHealthState.diagnosticMode === 'depth-session-only'
+				? depthSessionOnlyInit
+				: normalDepthInit;
 		try {
 			return {
 				session: await xr.requestSession( 'immersive-ar', init as XRSessionInit ),

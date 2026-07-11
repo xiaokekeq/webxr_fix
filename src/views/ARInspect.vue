@@ -85,6 +85,7 @@ const xrFreezeDiagnosticCards = computed( () => [
 
 const xrFreezeTestUrls = computed( () => [
 	createXrFreezeTestUrl( 'baseline', 'current' ),
+	createXrFreezeTestUrl( 'depth-bare-session', 'current' ),
 	createXrFreezeTestUrl( 'depth-session-only', 'current' ),
 	createXrFreezeTestUrl( 'depth-hit-test', 'current' ),
 	createXrFreezeTestUrl( 'depth-project-frame', 'current' ),

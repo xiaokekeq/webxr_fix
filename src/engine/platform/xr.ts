@@ -247,13 +247,17 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 				runFrameStage( 'viewer-pose-read', () => {
 					viewerPose = sampleViewerPose( frame, frameStartedAt );
 				} );
-				if ( xrFreezeHealthState.diagnosticMode !== 'depth-session-only' ) {
+				if (
+					xrFreezeHealthState.diagnosticMode !== 'depth-bare-session'
+					&& xrFreezeHealthState.diagnosticMode !== 'depth-session-only'
+				) {
 					runFrameStage( 'hit-test', () => {
 						xrHitTest.update( frame );
 					} );
 				}
 				if (
-					xrFreezeHealthState.diagnosticMode !== 'depth-session-only'
+					xrFreezeHealthState.diagnosticMode !== 'depth-bare-session'
+					&& xrFreezeHealthState.diagnosticMode !== 'depth-session-only'
 					&& xrFreezeHealthState.diagnosticMode !== 'depth-hit-test'
 				) {
 					runFrameStage( 'auto-placement', () => {
