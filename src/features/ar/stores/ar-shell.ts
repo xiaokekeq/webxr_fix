@@ -12,7 +12,7 @@ import type {
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
-import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
+import type { ThreeEngineHosts, ThreeEngineSnapshot, UndergroundViewChangeResult } from '@/engine/core/three-engine.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import type { UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 import type { LegacyArDisplayMode } from '@/engine/visualization/underground-display-state.js';
@@ -260,7 +260,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		setUndergroundViewMode(mode: UndergroundViewMode): void { ensureController().actions.setUndergroundViewMode( mode ); },
+		setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult> { return ensureController().actions.setUndergroundViewMode( mode ); },
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void { ensureController().actions.setUndergroundMaterialMode( mode ); },
 		setLayerPeelingEnabled(enabled: boolean): void { ensureController().actions.setLayerPeelingEnabled( enabled ); },
 		setSectionCutEnabled(enabled: boolean): void { ensureController().actions.setSectionCutEnabled( enabled ); },
@@ -277,6 +277,12 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		toggleDrawer(): void {
 
 			patchUiState( { drawerOpen: !uiStateRef.value.drawerOpen } );
+
+		},
+
+		closeDrawer(): void {
+
+			if ( uiStateRef.value.drawerOpen ) patchUiState( { drawerOpen: false } );
 
 		},
 

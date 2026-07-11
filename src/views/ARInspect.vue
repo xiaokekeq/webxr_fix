@@ -29,6 +29,7 @@ const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<InspectPanelView>( 'localization' );
 const activeFloatingAdjustment = ref<FloatingAdjustment | null>( null );
+const displaySelectionError = ref( '' );
 const markerCalibrationOverlayOpen = ref( false );
 const markerApplyFeedback = ref<{
 	type: 'success' | 'warning' | 'error';
@@ -851,6 +852,15 @@ function activatePanelView(view: InspectPanelView): void {
 	activePanelView.value = view;
 }
 
+async function selectUndergroundViewMode(mode: 'portal' | 'real-space'): Promise<void> {
+
+	displaySelectionError.value = '';
+	const result = await store.actions.setUndergroundViewMode( mode );
+	if ( result.applied && result.effectiveMode === mode ) store.actions.closeDrawer();
+	else displaySelectionError.value = `Portal 切换失败：${result.failureReason ?? result.portalState}`;
+
+}
+
 function selectMaterialMode(mode: 'solid' | 'xray'): void {
 	store.actions.setUndergroundMaterialMode( mode );
 	activeFloatingAdjustment.value = mode === 'xray' ? 'xray-opacity' : nextEnabledAdjustment();
@@ -1174,11 +1184,14 @@ function setArOverlayClass(active: boolean): void {
 								type="button"
 								class="chip-button"
 								:class="{ active: engine.undergroundViewMode === item.value }"
-								@click="store.actions.setUndergroundViewMode(item.value as 'portal' | 'real-space')"
+								@pointerdown.stop
+								@pointerup.stop
+								@click.stop="selectUndergroundViewMode(item.value as 'portal' | 'real-space')"
 							>
 								{{ item.label }}
 							</button>
 						</div>
+						<div v-if="displaySelectionError" class="runtime-banner warning">{{ displaySelectionError }}</div>
 					</div>
 
 					<div class="sheet-section">

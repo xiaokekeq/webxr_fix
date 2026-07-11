@@ -80,7 +80,7 @@ import {
 import { createLayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
 import { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
-import { UndergroundTopPortal } from '@/engine/visualization/underground-top-portal.js';
+import { UndergroundTopPortal, type PortalState } from '@/engine/visualization/underground-top-portal.js';
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import {
@@ -162,6 +162,14 @@ export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
 	hasSelection: boolean;
 	currentStatus: string;
+}
+
+export interface UndergroundViewChangeResult {
+	requestedMode: UndergroundViewMode;
+	effectiveMode: UndergroundViewMode;
+	applied: boolean;
+	portalState: PortalState;
+	failureReason: string | null;
 }
 
 function createInitialState(): RegistrationStoreState {
@@ -307,6 +315,7 @@ export class ThreeEngine {
 	private portalFallbackReported = false;
 	private requestedUndergroundViewMode: UndergroundViewMode = DEFAULT_UNDERGROUND_DISPLAY_STATE.undergroundViewMode;
 	private portalClickPreviousEffectiveMode: UndergroundViewMode | null = null;
+	private pendingPortalResult: ((result: UndergroundViewChangeResult) => void) | null = null;
 	private readonly footprintCornersAr = [ new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3() ];
 	private readonly emptyFootprintCorners: THREE.Vector3[] = [];
 	private readonly frameTaskErrorCounts = new Map<string, number>();
@@ -969,8 +978,10 @@ export class ThreeEngine {
 
 	}
 
-	setUndergroundViewMode(mode: UndergroundViewMode): void {
+	setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult> {
 
+		this.pendingPortalResult?.( this.createUndergroundViewResult( false, 'superseded' ) );
+		this.pendingPortalResult = null;
 		if ( mode === 'portal' ) {
 			this.portalFallbackReported = false;
 			this.portalClickPreviousEffectiveMode = this.store.getState().undergroundViewMode;
@@ -979,6 +990,21 @@ export class ThreeEngine {
 		this.requestedUndergroundViewMode = mode;
 		if ( mode === 'real-space' ) this.store.patch( { undergroundViewMode: mode } );
 		this.undergroundPortal.markDirty();
+		if ( mode === 'real-space' ) return Promise.resolve( this.createUndergroundViewResult( true ) );
+		return new Promise( ( resolve ) => { this.pendingPortalResult = resolve; } );
+
+	}
+
+	private createUndergroundViewResult(applied: boolean, failureReason?: string): UndergroundViewChangeResult {
+
+		const diagnostics = this.undergroundPortal.getDiagnostics();
+		return {
+			requestedMode: this.requestedUndergroundViewMode,
+			effectiveMode: this.store.getState().undergroundViewMode,
+			applied,
+			portalState: diagnostics.portalState as PortalState,
+			failureReason: failureReason ?? ( diagnostics.portalFailureReason === 'none' ? null : String( diagnostics.portalFailureReason ) )
+		};
 
 	}
 
@@ -3880,6 +3906,8 @@ export class ThreeEngine {
 			this.portalFallbackReported = false;
 			if ( this.store.getState().undergroundViewMode !== 'portal' ) this.store.patch( { undergroundViewMode: 'portal' } );
 			this.logPortalClickResult();
+			this.pendingPortalResult?.( this.createUndergroundViewResult( true ) );
+			this.pendingPortalResult = null;
 		}
 		if ( portalStatus === 'failed' && this.portalFallbackReported === false ) {
 			this.portalFallbackReported = true;
@@ -3887,6 +3915,8 @@ export class ThreeEngine {
 			const reason = String( this.undergroundPortal.getDiagnostics().portalFailureReason );
 			this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
 			this.logPortalClickResult();
+			this.pendingPortalResult?.( this.createUndergroundViewResult( false ) );
+			this.pendingPortalResult = null;
 		}
 		this.logPortalDiagnostics( depthFrame );
 

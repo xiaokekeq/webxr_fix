@@ -3,7 +3,7 @@
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
-import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
+import type { ThreeEngineHosts, ThreeEngineSnapshot, UndergroundViewChangeResult } from '@/engine/core/three-engine.js';
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
@@ -29,7 +29,7 @@ export interface LoadModelArController {
 		closePropertyPanel(): void;
 		selectModel(modelId: string): void;
 		setDisplayMode(mode: LegacyArDisplayMode): void;
-		setUndergroundViewMode(mode: UndergroundViewMode): void;
+		setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult>;
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void;
 		setLayerPeelingEnabled(enabled: boolean): void;
 		setSectionCutEnabled(enabled: boolean): void;
@@ -151,7 +151,7 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			setUndergroundViewMode(mode) { engine.setUndergroundViewMode( mode ); },
+			setUndergroundViewMode(mode) { return engine.setUndergroundViewMode( mode ); },
 			setUndergroundMaterialMode(mode) { engine.setUndergroundMaterialMode( mode ); },
 			setLayerPeelingEnabled(enabled) { engine.setLayerPeelingEnabled( enabled ); },
 			setSectionCutEnabled(enabled) { engine.setSectionCutEnabled( enabled ); },
