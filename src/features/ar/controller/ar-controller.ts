@@ -1,5 +1,4 @@
 ﻿import type {
-	ArDisplayMode,
 	InspectionPlacementSource,
 	SectionCutPlaneMode,
 	WorkspaceMode
@@ -8,7 +7,7 @@ import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
-import type { UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import { mapLegacyDisplayMode, type LegacyArDisplayMode, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 
 export interface InspectionDraft {
 	result: string;
@@ -29,7 +28,7 @@ export interface LoadModelArController {
 		handleArUiInteraction(): void;
 		closePropertyPanel(): void;
 		selectModel(modelId: string): void;
-		setDisplayMode(mode: ArDisplayMode): void;
+		setDisplayMode(mode: LegacyArDisplayMode): void;
 		setUndergroundViewMode(mode: UndergroundViewMode): void;
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void;
 		setLayerPeelingEnabled(enabled: boolean): void;
@@ -37,7 +36,6 @@ export interface LoadModelArController {
 		setTransparentXrayValue(value: number): void;
 		setLayerPeelingValue(value: number): void;
 		setSectionCutValue(value: number): void;
-		setStructureRevealValue(value: number): void;
 		setSectionCutPlaneMode(mode: SectionCutPlaneMode): void;
 		activatePanel(mode: WorkspaceMode): void;
 		toggleDrawer(): void;
@@ -139,13 +137,11 @@ export function createLoadModelArController(): LoadModelArController {
 
 			setDisplayMode(mode) {
 
-				engine.setDisplayMode( mode );
-
-			},
-
-			setStructureRevealValue(value) {
-
-				engine.setStructureRevealValue( value );
+				const state = mapLegacyDisplayMode( mode );
+				if ( state.undergroundViewMode !== undefined ) engine.setUndergroundViewMode( state.undergroundViewMode );
+				if ( state.undergroundMaterialMode !== undefined ) engine.setUndergroundMaterialMode( state.undergroundMaterialMode );
+				if ( state.layerPeelingEnabled !== undefined ) engine.setLayerPeelingEnabled( state.layerPeelingEnabled );
+				if ( state.sectionCutEnabled !== undefined ) engine.setSectionCutEnabled( state.sectionCutEnabled );
 
 			},
 

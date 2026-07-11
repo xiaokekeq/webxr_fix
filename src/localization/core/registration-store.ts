@@ -7,12 +7,6 @@ export type AppMode = 'pre-ar' | 'ar-session';
 export type ArSupportState = 'checking' | 'supported' | 'unsupported';
 export type ArSessionPhase = 'scanning' | 'ready-to-place' | 'placing' | 'placed';
 export type InspectionPlacementSource = 'manual-marker';
-export type ArDisplayMode =
-	| 'solid-overlay'
-	| 'transparent-xray'
-	| 'underground-portal'
-	| 'layer-peeling'
-	| 'section-cut';
 export type SectionCutPlaneMode = 'cross-section' | 'longitudinal-section' | 'horizontal-section';
 
 export interface ManualMarker {
@@ -422,12 +416,10 @@ export interface RegistrationStoreState {
 	arSupportMessage: string;
 	arSessionPhase: ArSessionPhase;
 	workspaceMode: WorkspaceMode;
-	displayMode: ArDisplayMode;
 	undergroundViewMode: 'portal' | 'real-space';
 	undergroundMaterialMode: 'solid' | 'xray';
 	layerPeelingEnabled: boolean;
 	sectionCutEnabled: boolean;
-	structureRevealValue: number;
 	transparentXrayValue: number;
 	layerPeelingValue: number;
 	sectionCutValue: number;

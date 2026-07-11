@@ -1,9 +1,11 @@
-import type { ArDisplayMode, SectionCutPlaneMode } from '@/localization/core/registration-store.js';
+import type { SectionCutPlaneMode } from '@/localization/core/registration-store.js';
+
+export type LegacyArDisplayMode = 'solid-overlay' | 'transparent-xray' | 'underground-portal' | 'layer-peeling' | 'section-cut';
 
 export type UndergroundViewMode = 'portal' | 'real-space';
 export type UndergroundMaterialMode = 'solid' | 'xray';
 
-export function mapLegacyDisplayMode(mode: ArDisplayMode): Partial<{
+export function mapLegacyDisplayMode(mode: LegacyArDisplayMode): Partial<{
 	undergroundViewMode: UndergroundViewMode;
 	undergroundMaterialMode: UndergroundMaterialMode;
 	layerPeelingEnabled: boolean;

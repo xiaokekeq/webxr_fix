@@ -872,7 +872,7 @@ function shouldIncludeInBusinessBounds(mesh: THREE.Mesh): boolean {
 	if (
 		mesh.userData.__nonSelectableHelper === true
 		|| mesh.userData.__excludeFromLayerIndex === true
-		|| mesh.userData.__displayModeHelper === true
+		|| mesh.userData.__visualizationHelper === true
 	) {
 		return false;
 	}

@@ -422,7 +422,7 @@ function axisToIndex(axis: 'x' | 'y' | 'z'): 0 | 1 | 2 {
 function shouldProcessSectionCutMesh(mesh: THREE.Mesh): boolean {
 
 	return mesh.userData[ SECTION_CUT_TAGS.stencilHelper ] !== true
-		&& mesh.userData.__displayModeHelper !== true
+		&& mesh.userData.__visualizationHelper !== true
 		&& mesh.userData.__nonSelectableHelper !== true
 		&& mesh.userData.__excludeFromLayerIndex !== true;
 

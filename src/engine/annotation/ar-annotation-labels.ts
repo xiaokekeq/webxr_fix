@@ -47,7 +47,7 @@ interface AnnotationDetailEntry {
 }
 
 const ANNOTATION_LABEL_TAG = '__annotationLabel';
-const DISPLAY_MODE_HELPER_TAG = '__displayModeHelper';
+const DISPLAY_MODE_HELPER_TAG = '__visualizationHelper';
 const MAX_DETAIL_PANEL_WORLD_WIDTH = 0.8;
 const MIN_DETAIL_PANEL_WORLD_WIDTH = 0.24;
 const tempBounds = new THREE.Box3();

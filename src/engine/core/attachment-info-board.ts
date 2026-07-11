@@ -2,7 +2,7 @@
 import type { DemoModelAttachmentInfo } from '@/models/config/demo-model-config.js';
 
 const ATTACHMENT_INFO_BOARD_TAG = '__attachmentInfoBoard';
-const DISPLAY_MODE_HELPER_TAG = '__displayModeHelper';
+const DISPLAY_MODE_HELPER_TAG = '__visualizationHelper';
 const tempBounds = new THREE.Box3();
 const tempSize = new THREE.Vector3();
 const tempCenter = new THREE.Vector3();

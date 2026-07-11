@@ -48,7 +48,6 @@ import {
 	createDefaultTargetGuidanceState,
 	createRegistrationStore,
 	type AnnotationDetailState,
-	type ArDisplayMode,
 	type InspectionPlacementSource,
 	type DebugScreenPoint,
 	type ModelPlacementDebugState,
@@ -78,13 +77,12 @@ import {
 	clearLastStableMarkerLocalizationResult,
 	type SavedMarkerLocalizationResult
 } from '@/localization/marker/marker-localization-storage.js';
-import { createDisplayModeController } from './display-mode.js';
 import { createLayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
 import { createArXrayVisualizationController } from '@/engine/visualization/ar-xray-visualization.js';
 import { createArLayerPeelingController } from '@/engine/visualization/ar-layer-peeling.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { UndergroundTopPortal } from '@/engine/visualization/underground-top-portal.js';
-import { mapLegacyDisplayMode, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import type { UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import {
 	createArAnnotationLabelController,
@@ -100,10 +98,7 @@ import {
 import { computeTargetGuidanceState } from '@/engine/placement/target-guidance.js';
 import { createARScene, resizeARScene } from './scene.js';
 import { createXRSessionRuntime } from '@/engine/platform/xr.js';
-import {
-	getDisplayModeLabel,
-	getSectionCutPlaneModeLabel
-} from '@/features/ar/types/display-modes.js';
+import { getSectionCutPlaneModeLabel } from '@/features/ar/types/display-modes.js';
 import { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-workflow.js';
 import { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
 import { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
@@ -183,12 +178,10 @@ function createInitialState(): RegistrationStoreState {
 		arSupportMessage: '正在检测当前设备是否支持 WebXR AR。',
 		arSessionPhase: 'scanning',
 		workspaceMode: 'browse',
-		displayMode: 'solid-overlay',
 		undergroundViewMode: 'portal',
 		undergroundMaterialMode: 'solid',
 		layerPeelingEnabled: false,
 		sectionCutEnabled: false,
-		structureRevealValue: 0,
 		transparentXrayValue: 0,
 		layerPeelingValue: 0,
 		sectionCutValue: 50,
@@ -274,7 +267,6 @@ export class ThreeEngine {
 		showModelActualControlPoints: readDebugLayerFlag( 'VITE_SHOW_MODEL_ACTUAL_CONTROL_POINTS', true ),
 		showModelBoundingBox: readDebugLayerFlag( 'VITE_SHOW_MODEL_BOUNDING_BOX', false )
 	};
-	private readonly displayModeController;
 	private readonly structureRevealController = createArXrayVisualizationController();
 	private readonly layerPeelingController = createArLayerPeelingController();
 	private readonly sectionCutController;
@@ -406,9 +398,6 @@ export class ThreeEngine {
 			}
 		} );
 
-		this.displayModeController = createDisplayModeController( {
-			getPlacedModel: () => this.placementSession.getPlacedModel()
-		} );
 		this.sectionCutController = createArSectionCutController( this.sceneBundle.renderer );
 		this.annotationLabelsController = createArAnnotationLabelController( {
 			canvas: this.sceneBundle.renderer.domElement
@@ -417,7 +406,6 @@ export class ThreeEngine {
 			store: this.store,
 			placementSession: this.placementSession,
 			layerVisibility: this.layerVisibility,
-			displayModeController: this.displayModeController,
 			structureRevealController: this.structureRevealController,
 			layerPeelingController: this.layerPeelingController,
 			sectionCutController: this.sectionCutController,
@@ -728,8 +716,6 @@ export class ThreeEngine {
 				if ( bundle.demoModelConfig.undergroundPlacement?.enabled === true ) {
 					const opacity = resolveXrayOpacityPercent( bundle.demoModelConfig.undergroundDisplay?.xrayOpacity );
 					this.store.patch( {
-						displayMode: 'underground-portal',
-						structureRevealValue: opacity,
 						transparentXrayValue: opacity
 					} );
 				}
@@ -813,13 +799,11 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionend', this.unbindArSelectionSession );
 
 		this.store.subscribe( () => {
-			this.syncDisplayModeState();
 			this.syncVisualizationState();
 			this.syncAnnotationLabels();
 			this.emit();
 		} );
 
-		this.syncDisplayModeState();
 		this.syncVisualizationState();
 		this.syncAnnotationLabels();
 
@@ -903,7 +887,6 @@ export class ThreeEngine {
 		window.removeEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
-		this.displayModeController.dispose();
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.structureRevealController.dispose();
 		this.layerPeelingController.dispose();
@@ -935,86 +918,6 @@ export class ThreeEngine {
 	selectModel(modelId: string): void {
 
 		this.modelSession.handleModelSelection( modelId );
-
-	}
-
-	setDisplayMode(mode: ArDisplayMode): void {
-
-		if (
-			mode !== 'solid-overlay'
-			&& mode !== 'transparent-xray'
-			&& mode !== 'underground-portal'
-			&& mode !== 'layer-peeling'
-			&& mode !== 'section-cut'
-		) {
-			return;
-		}
-		if ( mode === 'underground-portal' && this.getPortalModelScope().undergroundRoot === null ) {
-			return;
-		}
-
-		const state = this.store.getState();
-		if ( state.displayMode === mode ) {
-			return;
-		}
-
-		const next = mapLegacyDisplayMode( mode );
-		this.store.patch( {
-			displayMode: mode,
-			...next,
-			structureRevealValue: getDisplayModeSliderValue( state, mode )
-		} );
-		this.undergroundPortal.markDirty();
-
-		if ( state.displayMode === 'layer-peeling' && mode !== 'layer-peeling' ) {
-			this.layerVisibility.reset();
-			this.applyModelLayerVisibility();
-		} else if ( mode === 'layer-peeling' ) {
-			this.layerVisibility.setHiddenLayerCount(
-				percentToHiddenLayerCount( state.layerPeelingValue, this.layerVisibility.getState().length )
-			);
-			this.applyModelLayerVisibility();
-		}
-
-		this.setStatus( `显示模式已切换为：${getDisplayModeLabel( mode )}` );
-
-	}
-
-	setStructureRevealValue(value: number): void {
-
-		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
-		const state = this.store.getState();
-		if ( state.structureRevealValue === clampedValue && state.displayMode !== 'layer-peeling' ) {
-			return;
-		}
-
-		switch ( state.displayMode ) {
-			case 'transparent-xray':
-				this.store.patch( {
-					structureRevealValue: clampedValue,
-					transparentXrayValue: clampedValue
-				} );
-				break;
-			case 'layer-peeling':
-				this.store.patch( {
-					structureRevealValue: clampedValue,
-					layerPeelingValue: clampedValue
-				} );
-				this.layerVisibility.setHiddenLayerCount(
-					percentToHiddenLayerCount( clampedValue, this.layerVisibility.getState().length )
-				);
-				this.applyModelLayerVisibility();
-				break;
-			case 'section-cut':
-				this.store.patch( {
-					structureRevealValue: clampedValue,
-					sectionCutValue: clampedValue
-				} );
-				break;
-			default:
-				this.store.patch( { structureRevealValue: clampedValue } );
-				break;
-		}
 
 	}
 
@@ -4038,12 +3941,6 @@ export class ThreeEngine {
 
 	}
 
-	private syncDisplayModeState(): void {
-
-		this.visualizationStateRuntime.syncDisplayModeState();
-
-	}
-
 	private syncVisualizationState(): void {
 
 		this.visualizationStateRuntime.syncVisualizationState();
@@ -4433,9 +4330,6 @@ export class ThreeEngine {
 		const patch: Partial<RegistrationStoreState> = {
 			layerPeelingValue: nextValue
 		};
-		if ( this.store.getState().layerPeelingEnabled ) {
-			patch.structureRevealValue = nextValue;
-		}
 		this.store.patch( patch );
 
 	}
@@ -5292,7 +5186,7 @@ function markSiteOriginReferenceObject(object: THREE.Object3D): void {
 
 	object.userData.__siteOriginReference = true;
 	object.userData.__excludeFromLayerIndex = true;
-	object.userData.__displayModeHelper = true;
+	object.userData.__visualizationHelper = true;
 
 }
 
@@ -5457,23 +5351,6 @@ function hiddenLayerCountToPercent(hiddenLayerCount: number, totalLayerCount: nu
 
 }
 
-function getDisplayModeSliderValue(
-	state: RegistrationStoreState,
-	mode: ArDisplayMode = state.displayMode
-): number {
-
-	switch ( mode ) {
-		case 'transparent-xray':
-			return state.transparentXrayValue;
-		case 'layer-peeling':
-			return state.layerPeelingValue;
-		case 'section-cut':
-			return state.sectionCutValue;
-		default:
-			return 0;
-	}
-
-}
 
 
 

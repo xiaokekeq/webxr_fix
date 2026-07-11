@@ -1049,19 +1049,6 @@ function setArOverlayClass(active: boolean): void {
 				</div>
 			</section>
 
-			<div v-if="false" class="side-slider">
-				<input
-					:value="0"
-					class="side-slider-range"
-					type="range"
-					min="0"
-					max="100"
-					step="1"
-					aria-label="模型显示强度"
-					@pointerdown.stop="store.actions.handleArUiInteraction()"
-					@click.stop
-				>
-			</div>
 		</div>
 
 		<nav
@@ -1799,28 +1786,6 @@ function setArOverlayClass(active: boolean): void {
 
 .field.full {
 	grid-column: 1 / -1;
-}
-
-.side-slider {
-	position: fixed;
-	z-index: 7;
-	right: 12px;
-	top: 50%;
-	transform: translateY(-50%);
-	padding: 16px 8px;
-	border-radius: 999px;
-	background: rgba(15, 23, 42, 0.46);
-	border: 1px solid rgba(255, 255, 255, 0.18);
-	box-shadow: 0 18px 54px rgba(0, 0, 0, 0.32);
-	backdrop-filter: blur(20px);
-}
-
-.side-slider-range {
-	writing-mode: vertical-lr;
-	direction: rtl;
-	width: 24px;
-	height: 160px;
-	accent-color: #00d4ff;
 }
 
 .sheet-fade-enter-active,

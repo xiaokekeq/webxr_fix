@@ -2,11 +2,7 @@ import * as THREE from 'three';
 import {
 	STATIC_LAYER_NAMES
 } from '@/models/catalog/model-api.js';
-import type {
-	ArDisplayMode,
-	RegistrationStore
-} from '@/localization/core/registration-store.js';
-import { preserveRootTransform, type DisplayModeController } from '@/engine/core/display-mode.js';
+import type { RegistrationStore } from '@/localization/core/registration-store.js';
 import type { PlacementSession } from '@/engine/placement/session.js';
 import type { LayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
 import type { ArXrayVisualizationController } from '@/engine/visualization/ar-xray-visualization.js';
@@ -17,7 +13,6 @@ interface VisualizationStateRuntimeOptions {
 	store: RegistrationStore;
 	placementSession: PlacementSession;
 	layerVisibility: LayerVisibilityController;
-	displayModeController: DisplayModeController;
 	structureRevealController: ArXrayVisualizationController;
 	layerPeelingController: ArLayerPeelingController;
 	sectionCutController: ArSectionCutController;
@@ -27,8 +22,6 @@ interface VisualizationStateRuntimeOptions {
 
 export class VisualizationStateRuntime {
 
-	private lastSyncedDisplayMode: ArDisplayMode | null = null;
-	private lastSyncedDisplayModeRoot: THREE.Group | null = null;
 	private lastVisualizationSignature = '';
 
 	constructor(private readonly options: VisualizationStateRuntimeOptions) {}
@@ -36,30 +29,7 @@ export class VisualizationStateRuntime {
 	reset(): void {
 
 		this.restoreVisualizationControllers();
-		this.lastSyncedDisplayMode = null;
-		this.lastSyncedDisplayModeRoot = null;
 		this.lastVisualizationSignature = '';
-
-	}
-
-	syncDisplayModeState(): void {
-
-		const currentMode: ArDisplayMode = 'solid-overlay';
-		const placedModel = this.options.placementSession.getPlacedModel();
-		if ( this.lastSyncedDisplayMode === currentMode && this.lastSyncedDisplayModeRoot === placedModel ) {
-			return;
-		}
-
-		this.lastSyncedDisplayMode = currentMode;
-		this.lastSyncedDisplayModeRoot = placedModel;
-		if ( placedModel === null ) {
-			this.options.displayModeController.sync( currentMode );
-			return;
-		}
-
-		preserveRootTransform( placedModel, () => {
-			this.options.displayModeController.sync( currentMode );
-		} );
 
 	}
 
@@ -150,10 +120,7 @@ export class VisualizationStateRuntime {
 
 		this.options.layerVisibility.applyToRoot( this.options.placementSession.getArPlacedModel() );
 		this.options.syncAttachmentInfoBoardVisibility();
-		this.options.displayModeController.captureMaterialBaseline();
 		this.options.structureRevealController.captureVisibilityBaseline( this.options.placementSession.getArPlacedModel() );
-		this.lastSyncedDisplayMode = null;
-		this.lastSyncedDisplayModeRoot = null;
 		const modelLayers = this.options.layerVisibility.getState();
 		this.options.store.patch( {
 			layerNames: modelLayers.length > 0
@@ -161,22 +128,15 @@ export class VisualizationStateRuntime {
 				: STATIC_LAYER_NAMES,
 			modelLayers
 		} );
-		this.syncDisplayModeState();
 		this.syncVisualizationState();
 
 	}
 
-	restoreVisualizationControllers(activeMode?: ArDisplayMode): void {
+	restoreVisualizationControllers(): void {
 
-		if ( activeMode !== 'transparent-xray' ) {
-			this.options.structureRevealController.restore();
-		}
-		if ( activeMode !== 'layer-peeling' ) {
-			this.options.layerPeelingController.restore();
-		}
-		if ( activeMode !== 'section-cut' ) {
-			this.options.sectionCutController.restore();
-		}
+		this.options.structureRevealController.restore();
+		this.options.layerPeelingController.restore();
+		this.options.sectionCutController.restore();
 
 	}
 

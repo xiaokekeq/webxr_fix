@@ -8,7 +8,6 @@ import {
 } from '@/features/ar/controller/ar-controller.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type {
-	ArDisplayMode,
 	InspectionPlacementSource,
 	SectionCutPlaneMode,
 	WorkspaceMode
@@ -16,6 +15,7 @@ import type {
 import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import type { UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import type { LegacyArDisplayMode } from '@/engine/visualization/underground-display-state.js';
 
 interface ControllerUiState {
 	drawerOpen: boolean;
@@ -248,15 +248,9 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		setDisplayMode(mode: ArDisplayMode): void {
+		setDisplayMode(mode: LegacyArDisplayMode): void {
 
 			ensureController().actions.setDisplayMode( mode );
-
-		},
-
-		setStructureRevealValue(value: number): void {
-
-			ensureController().actions.setStructureRevealValue( value );
 
 		},
 
