@@ -1028,9 +1028,14 @@ export class ThreeEngine {
 	toggleCpuDepthOcclusionValidation(): void {
 
 		const current = this.cpuDepthOcclusionValidation.getState();
-		this.cpuDepthOcclusionValidation.setEnabled( current.enabled === false );
+		this.setCpuDepthOcclusionValidationEnabled( current.enabled === false );
+
+	}
+
+	setCpuDepthOcclusionValidationEnabled(enabled: boolean): void {
+
+		this.cpuDepthOcclusionValidation.setEnabled( enabled );
 		this.syncCpuDepthOcclusionDebug( true );
-		this.emit();
 
 	}
 

@@ -234,6 +234,12 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
+		setCpuDepthOcclusionValidationEnabled(enabled: boolean): void {
+
+			ensureController().actions.setCpuDepthOcclusionValidationEnabled( enabled );
+
+		},
+
 		toggleCpuDepthOcclusionValidation(): void {
 
 			ensureController().actions.toggleCpuDepthOcclusionValidation();
