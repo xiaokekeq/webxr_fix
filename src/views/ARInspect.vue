@@ -6,7 +6,6 @@ import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
 import {
-	DISPLAY_MODE_OPTIONS,
 	SECTION_CUT_PLANE_MODE_OPTIONS
 } from '@/features/ar/types/display-modes.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
@@ -56,31 +55,6 @@ const hitTestReady = computed(
 		|| engine.value.arSessionPhase === 'placed'
 );
 const canUseMarkerCorners = computed( () => configStatus.value.activeControlTargetHasCornersEnu );
-const sliderVisible = computed(
-	() => hasArSession.value
-		&& (
-			engine.value.displayMode === 'transparent-xray'
-			|| engine.value.displayMode === 'layer-peeling'
-			|| engine.value.displayMode === 'section-cut'
-		)
-);
-const sliderValue = computed<number>( {
-	get() {
-		switch ( engine.value.displayMode ) {
-			case 'transparent-xray':
-				return engine.value.transparentXrayValue;
-			case 'layer-peeling':
-				return engine.value.layerPeelingValue;
-			case 'section-cut':
-				return engine.value.sectionCutValue;
-			default:
-				return 0;
-		}
-	},
-	set(value: number) {
-		store.actions.setStructureRevealValue( value );
-	}
-} );
 
 const sessionStatusText = computed( () => {
 	if ( hasArSession.value === false ) {
@@ -1075,9 +1049,9 @@ function setArOverlayClass(active: boolean): void {
 				</div>
 			</section>
 
-			<div v-if="sliderVisible" class="side-slider">
+			<div v-if="false" class="side-slider">
 				<input
-					v-model="sliderValue"
+					:value="0"
 					class="side-slider-range"
 					type="range"
 					min="0"
@@ -1142,19 +1116,29 @@ function setArOverlayClass(active: boolean): void {
 						<div class="section-label">模型显示</div>
 						<div class="chip-grid">
 							<button
-								v-for="item in DISPLAY_MODE_OPTIONS"
+								v-for="item in [{ value: 'portal', label: '地下顶视' }, { value: 'real-space', label: '真实空间' }]"
 								:key="item.value"
 								type="button"
 								class="chip-button"
-								:class="{ active: engine.displayMode === item.value }"
-								@click="store.actions.setDisplayMode(item.value)"
+								:class="{ active: engine.undergroundViewMode === item.value }"
+								@click="store.actions.setUndergroundViewMode(item.value as 'portal' | 'real-space')"
 							>
 								{{ item.label }}
 							</button>
 						</div>
 					</div>
 
-					<div v-if="engine.displayMode === 'section-cut'" class="sheet-section">
+					<div class="sheet-section">
+						<div class="section-label">显示样式</div>
+						<div class="chip-grid"><button type="button" class="chip-button" :class="{ active: engine.undergroundMaterialMode === 'solid' }" @click="store.actions.setUndergroundMaterialMode('solid')">实体显示</button><button type="button" class="chip-button" :class="{ active: engine.undergroundMaterialMode === 'xray' }" @click="store.actions.setUndergroundMaterialMode('xray')">透明显示</button></div>
+						<input v-if="engine.undergroundMaterialMode === 'xray'" :value="engine.transparentXrayValue" type="range" min="0" max="100" @input="store.actions.setTransparentXrayValue(Number(($event.target as HTMLInputElement).value))">
+					</div>
+
+					<div class="sheet-section"><div class="section-label">分层显示</div><button type="button" class="chip-button" :class="{ active: engine.layerPeelingEnabled }" @click="store.actions.setLayerPeelingEnabled(!engine.layerPeelingEnabled)">{{ engine.layerPeelingEnabled ? '开启' : '关闭' }}</button><input v-if="engine.layerPeelingEnabled" :value="engine.layerPeelingValue" type="range" min="0" max="100" @input="store.actions.setLayerPeelingValue(Number(($event.target as HTMLInputElement).value))"></div>
+
+					<div class="sheet-section">
+						<button type="button" class="chip-button" :class="{ active: engine.sectionCutEnabled }" @click="store.actions.setSectionCutEnabled(!engine.sectionCutEnabled)">{{ engine.sectionCutEnabled ? '剖切查看：开启' : '剖切查看：关闭' }}</button>
+						<div v-if="engine.sectionCutEnabled" class="chip-grid">
 						<div class="section-label">剖切方向</div>
 						<div class="chip-grid">
 							<button
@@ -1168,6 +1152,8 @@ function setArOverlayClass(active: boolean): void {
 								{{ item.label }}
 							</button>
 						</div>
+						</div>
+						<input v-if="engine.sectionCutEnabled" :value="engine.sectionCutValue" type="range" min="0" max="100" @input="store.actions.setSectionCutValue(Number(($event.target as HTMLInputElement).value))">
 					</div>
 
 				</template>

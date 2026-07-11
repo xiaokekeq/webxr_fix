@@ -8,6 +8,7 @@ import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
+import type { UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 
 export interface InspectionDraft {
 	result: string;
@@ -29,6 +30,13 @@ export interface LoadModelArController {
 		closePropertyPanel(): void;
 		selectModel(modelId: string): void;
 		setDisplayMode(mode: ArDisplayMode): void;
+		setUndergroundViewMode(mode: UndergroundViewMode): void;
+		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void;
+		setLayerPeelingEnabled(enabled: boolean): void;
+		setSectionCutEnabled(enabled: boolean): void;
+		setTransparentXrayValue(value: number): void;
+		setLayerPeelingValue(value: number): void;
+		setSectionCutValue(value: number): void;
 		setStructureRevealValue(value: number): void;
 		setSectionCutPlaneMode(mode: SectionCutPlaneMode): void;
 		activatePanel(mode: WorkspaceMode): void;
@@ -146,6 +154,14 @@ export function createLoadModelArController(): LoadModelArController {
 				engine.setSectionCutPlaneMode( mode );
 
 			},
+
+			setUndergroundViewMode(mode) { engine.setUndergroundViewMode( mode ); },
+			setUndergroundMaterialMode(mode) { engine.setUndergroundMaterialMode( mode ); },
+			setLayerPeelingEnabled(enabled) { engine.setLayerPeelingEnabled( enabled ); },
+			setSectionCutEnabled(enabled) { engine.setSectionCutEnabled( enabled ); },
+			setTransparentXrayValue(value) { engine.setTransparentXrayValue( value ); },
+			setLayerPeelingValue(value) { engine.setLayerPeelingValue( value ); },
+			setSectionCutValue(value) { engine.setSectionCutValue( value ); },
 
 			activatePanel(mode) {
 

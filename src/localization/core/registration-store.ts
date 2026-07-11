@@ -423,6 +423,10 @@ export interface RegistrationStoreState {
 	arSessionPhase: ArSessionPhase;
 	workspaceMode: WorkspaceMode;
 	displayMode: ArDisplayMode;
+	undergroundViewMode: 'portal' | 'real-space';
+	undergroundMaterialMode: 'solid' | 'xray';
+	layerPeelingEnabled: boolean;
+	sectionCutEnabled: boolean;
 	structureRevealValue: number;
 	transparentXrayValue: number;
 	layerPeelingValue: number;

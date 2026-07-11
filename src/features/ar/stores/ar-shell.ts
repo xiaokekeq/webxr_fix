@@ -15,6 +15,7 @@ import type {
 } from '@/localization/core/registration-store.js';
 import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
+import type { UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 
 interface ControllerUiState {
 	drawerOpen: boolean;
@@ -264,6 +265,14 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 			ensureController().actions.setSectionCutPlaneMode( mode );
 
 		},
+
+		setUndergroundViewMode(mode: UndergroundViewMode): void { ensureController().actions.setUndergroundViewMode( mode ); },
+		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void { ensureController().actions.setUndergroundMaterialMode( mode ); },
+		setLayerPeelingEnabled(enabled: boolean): void { ensureController().actions.setLayerPeelingEnabled( enabled ); },
+		setSectionCutEnabled(enabled: boolean): void { ensureController().actions.setSectionCutEnabled( enabled ); },
+		setTransparentXrayValue(value: number): void { ensureController().actions.setTransparentXrayValue( value ); },
+		setLayerPeelingValue(value: number): void { ensureController().actions.setLayerPeelingValue( value ); },
+		setSectionCutValue(value: number): void { ensureController().actions.setSectionCutValue( value ); },
 
 		activatePanel(mode: WorkspaceMode): void {
 

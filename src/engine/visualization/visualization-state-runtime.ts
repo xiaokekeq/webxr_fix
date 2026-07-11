@@ -4,8 +4,7 @@ import {
 } from '@/models/catalog/model-api.js';
 import type {
 	ArDisplayMode,
-	RegistrationStore,
-	RegistrationStoreState
+	RegistrationStore
 } from '@/localization/core/registration-store.js';
 import { preserveRootTransform, type DisplayModeController } from '@/engine/core/display-mode.js';
 import type { PlacementSession } from '@/engine/placement/session.js';
@@ -45,7 +44,7 @@ export class VisualizationStateRuntime {
 
 	syncDisplayModeState(): void {
 
-		const currentMode = this.options.store.getState().displayMode;
+		const currentMode: ArDisplayMode = 'solid-overlay';
 		const placedModel = this.options.placementSession.getPlacedModel();
 		if ( this.lastSyncedDisplayMode === currentMode && this.lastSyncedDisplayModeRoot === placedModel ) {
 			return;
@@ -73,11 +72,14 @@ export class VisualizationStateRuntime {
 		const undergroundRoot = state.appMode === 'ar-session'
 			? this.options.getUndergroundModelRoot()
 			: null;
-		const currentValue = getDisplayModeSliderValue( state );
 		const signature = [
 			state.appMode,
-			state.displayMode,
-			currentValue,
+			state.undergroundMaterialMode,
+			state.transparentXrayValue,
+			state.layerPeelingEnabled,
+			state.layerPeelingValue,
+			state.sectionCutEnabled,
+			state.sectionCutValue,
 			state.sectionCutPlaneMode,
 			modelRoot?.uuid ?? 'none',
 			state.modelLayers.map( ( layer ) => `${layer.id}:${layer.visible ? '1' : '0'}` ).join( '|' )
@@ -87,10 +89,9 @@ export class VisualizationStateRuntime {
 		}
 
 		this.lastVisualizationSignature = signature;
-		this.restoreVisualizationControllers( state.displayMode );
+		this.restoreVisualizationControllers();
 
-		switch ( state.displayMode ) {
-			case 'transparent-xray': {
+		if ( state.undergroundMaterialMode === 'xray' ) {
 				const report = this.options.structureRevealController.apply( {
 					modelRoot: undergroundRoot,
 					value: state.transparentXrayValue,
@@ -115,9 +116,8 @@ export class VisualizationStateRuntime {
 						} );
 					}
 				}
-				break;
-			}
-			case 'layer-peeling': {
+		}
+		if ( state.layerPeelingEnabled ) {
 				const report = this.options.layerPeelingController.apply( state.layerPeelingValue, state.modelLayers );
 				console.info( '[LayerPeeling]', {
 					value: report.value,
@@ -127,11 +127,10 @@ export class VisualizationStateRuntime {
 					hiddenLayerIds: report.hiddenLayerIds,
 					visibleLayerIds: report.visibleLayerIds
 				} );
-				break;
-			}
-			case 'section-cut': {
+		}
+		if ( state.sectionCutEnabled ) {
 				this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
-				const report = this.options.sectionCutController.apply( modelRoot, state.sectionCutValue );
+				const report = this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue );
 				console.info( '[SectionCut]', {
 					value: report.value,
 					planeMode: report.planeMode,
@@ -143,10 +142,6 @@ export class VisualizationStateRuntime {
 					affectedMeshCount: report.affectedMeshCount,
 					affectedMaterialCount: report.affectedMaterialCount
 				} );
-				break;
-			}
-			default:
-				break;
 		}
 
 	}
@@ -183,24 +178,6 @@ export class VisualizationStateRuntime {
 			this.options.sectionCutController.restore();
 		}
 
-	}
-
-}
-
-function getDisplayModeSliderValue(
-	state: RegistrationStoreState,
-	mode: ArDisplayMode = state.displayMode
-): number {
-
-	switch ( mode ) {
-		case 'transparent-xray':
-			return state.transparentXrayValue;
-		case 'layer-peeling':
-			return state.layerPeelingValue;
-		case 'section-cut':
-			return state.sectionCutValue;
-		default:
-			return 0;
 	}
 
 }

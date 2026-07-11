@@ -84,6 +84,7 @@ import { createArXrayVisualizationController } from '@/engine/visualization/ar-x
 import { createArLayerPeelingController } from '@/engine/visualization/ar-layer-peeling.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { UndergroundTopPortal } from '@/engine/visualization/underground-top-portal.js';
+import { mapLegacyDisplayMode, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import {
 	createArAnnotationLabelController,
@@ -183,6 +184,10 @@ function createInitialState(): RegistrationStoreState {
 		arSessionPhase: 'scanning',
 		workspaceMode: 'browse',
 		displayMode: 'solid-overlay',
+		undergroundViewMode: 'portal',
+		undergroundMaterialMode: 'solid',
+		layerPeelingEnabled: false,
+		sectionCutEnabled: false,
 		structureRevealValue: 0,
 		transparentXrayValue: 0,
 		layerPeelingValue: 0,
@@ -953,14 +958,15 @@ export class ThreeEngine {
 			return;
 		}
 
-		const previousMode = state.displayMode;
+		const next = mapLegacyDisplayMode( mode );
 		this.store.patch( {
 			displayMode: mode,
+			...next,
 			structureRevealValue: getDisplayModeSliderValue( state, mode )
 		} );
 		this.undergroundPortal.markDirty();
 
-		if ( previousMode === 'layer-peeling' && mode !== 'layer-peeling' ) {
+		if ( state.displayMode === 'layer-peeling' && mode !== 'layer-peeling' ) {
 			this.layerVisibility.reset();
 			this.applyModelLayerVisibility();
 		} else if ( mode === 'layer-peeling' ) {
@@ -1029,6 +1035,71 @@ export class ThreeEngine {
 
 		this.store.patch( { sectionCutPlaneMode: mode } );
 		this.setStatus( `剖切方向已切换为：${getSectionCutPlaneModeLabel( mode )}` );
+
+	}
+
+	setTransparentXrayValue(value: number): void {
+
+		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
+		this.store.patch( { transparentXrayValue: clampedValue } );
+		this.undergroundPortal.markDirty();
+
+	}
+
+	setLayerPeelingValue(value: number): void {
+
+		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
+		this.store.patch( { layerPeelingValue: clampedValue } );
+		if ( this.store.getState().layerPeelingEnabled ) {
+			this.layerVisibility.setHiddenLayerCount(
+				percentToHiddenLayerCount( clampedValue, this.layerVisibility.getState().length )
+			);
+			this.applyModelLayerVisibility();
+		}
+
+	}
+
+	setSectionCutValue(value: number): void {
+
+		this.store.patch( { sectionCutValue: THREE.MathUtils.clamp( Math.round( value ), 0, 100 ) } );
+		this.undergroundPortal.markDirty();
+
+	}
+
+	setUndergroundViewMode(mode: UndergroundViewMode): void {
+
+		if ( mode === 'portal' && this.getPortalModelScope().undergroundRoot === null ) return;
+		if ( this.store.getState().undergroundViewMode === mode ) return;
+		this.store.patch( { undergroundViewMode: mode } );
+		this.undergroundPortal.markDirty();
+
+	}
+
+	setUndergroundMaterialMode(mode: UndergroundMaterialMode): void {
+
+		if ( this.store.getState().undergroundMaterialMode === mode ) return;
+		this.store.patch( { undergroundMaterialMode: mode } );
+		this.undergroundPortal.markDirty();
+
+	}
+
+	setLayerPeelingEnabled(enabled: boolean): void {
+
+		const state = this.store.getState();
+		if ( state.layerPeelingEnabled === enabled ) return;
+		this.store.patch( { layerPeelingEnabled: enabled } );
+		this.layerVisibility.setHiddenLayerCount(
+			enabled ? percentToHiddenLayerCount( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0
+		);
+		this.applyModelLayerVisibility();
+
+	}
+
+	setSectionCutEnabled(enabled: boolean): void {
+
+		if ( this.store.getState().sectionCutEnabled === enabled ) return;
+		this.store.patch( { sectionCutEnabled: enabled } );
+		this.undergroundPortal.markDirty();
 
 	}
 
@@ -3877,7 +3948,7 @@ export class ThreeEngine {
 		args.model = this.getPortalModelScope().undergroundRoot;
 		args.footprintCorners = this.getCurrentFootprintCornersAr();
 		args.depthFrame = depthFrame;
-		args.enabled = this.store.getState().displayMode === 'underground-portal';
+		args.enabled = this.store.getState().undergroundViewMode === 'portal';
 		this.undergroundPortal.update( args );
 		this.logPortalDiagnostics( depthFrame );
 
@@ -4327,7 +4398,7 @@ export class ThreeEngine {
 			modelRoot: this.modelTemplate,
 			pipesByName: this.pipesByName
 		} );
-		if ( this.store.getState().displayMode === 'layer-peeling' ) {
+		if ( this.store.getState().layerPeelingEnabled ) {
 			this.layerVisibility.setHiddenLayerCount(
 				percentToHiddenLayerCount(
 					this.store.getState().layerPeelingValue,
@@ -4359,7 +4430,7 @@ export class ThreeEngine {
 		const patch: Partial<RegistrationStoreState> = {
 			layerPeelingValue: nextValue
 		};
-		if ( this.store.getState().displayMode === 'layer-peeling' ) {
+		if ( this.store.getState().layerPeelingEnabled ) {
 			patch.structureRevealValue = nextValue;
 		}
 		this.store.patch( patch );
