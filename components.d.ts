@@ -15,6 +15,7 @@ declare module 'vue' {
     PatrolCard: typeof import('./src/components/PatrolCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    UndergroundDisplayControls: typeof import('./src/components/ar/UndergroundDisplayControls.vue')['default']
     VanEmpty: typeof import('vant/es')['Empty']
     VanField: typeof import('vant/es')['Field']
     VanIcon: typeof import('vant/es')['Icon']

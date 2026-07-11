@@ -7,7 +7,7 @@ import type { ThreeEngineHosts, ThreeEngineSnapshot, UndergroundViewChangeResult
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
-import { mapLegacyDisplayMode, type LegacyArDisplayMode, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import { mapLegacyDisplayMode, type LegacyArDisplayMode, type UndergroundInspectionTool, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 
 export interface InspectionDraft {
 	result: string;
@@ -31,8 +31,7 @@ export interface LoadModelArController {
 		setDisplayMode(mode: LegacyArDisplayMode): void;
 		setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult>;
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void;
-		setLayerPeelingEnabled(enabled: boolean): void;
-		setSectionCutEnabled(enabled: boolean): void;
+		setUndergroundInspectionTool(tool: UndergroundInspectionTool): void;
 		setTransparentXrayValue(value: number): void;
 		setLayerPeelingValue(value: number): void;
 		setSectionCutValue(value: number): void;
@@ -140,8 +139,7 @@ export function createLoadModelArController(): LoadModelArController {
 				const state = mapLegacyDisplayMode( mode );
 				if ( state.undergroundViewMode !== undefined ) engine.setUndergroundViewMode( state.undergroundViewMode );
 				if ( state.undergroundMaterialMode !== undefined ) engine.setUndergroundMaterialMode( state.undergroundMaterialMode );
-				if ( state.layerPeelingEnabled !== undefined ) engine.setLayerPeelingEnabled( state.layerPeelingEnabled );
-				if ( state.sectionCutEnabled !== undefined ) engine.setSectionCutEnabled( state.sectionCutEnabled );
+				if ( state.undergroundInspectionTool !== undefined ) engine.setUndergroundInspectionTool( state.undergroundInspectionTool );
 
 			},
 
@@ -153,8 +151,7 @@ export function createLoadModelArController(): LoadModelArController {
 
 			setUndergroundViewMode(mode) { return engine.setUndergroundViewMode( mode ); },
 			setUndergroundMaterialMode(mode) { engine.setUndergroundMaterialMode( mode ); },
-			setLayerPeelingEnabled(enabled) { engine.setLayerPeelingEnabled( enabled ); },
-			setSectionCutEnabled(enabled) { engine.setSectionCutEnabled( enabled ); },
+			setUndergroundInspectionTool(tool) { engine.setUndergroundInspectionTool( tool ); },
 			setTransparentXrayValue(value) { engine.setTransparentXrayValue( value ); },
 			setLayerPeelingValue(value) { engine.setLayerPeelingValue( value ); },
 			setSectionCutValue(value) { engine.setSectionCutValue( value ); },

@@ -14,7 +14,7 @@ import type {
 } from '@/localization/core/registration-store.js';
 import type { ThreeEngineHosts, ThreeEngineSnapshot, UndergroundViewChangeResult } from '@/engine/core/three-engine.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
-import type { UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import type { UndergroundInspectionTool, UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 import type { LegacyArDisplayMode } from '@/engine/visualization/underground-display-state.js';
 
 interface ControllerUiState {
@@ -262,8 +262,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult> { return ensureController().actions.setUndergroundViewMode( mode ); },
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void { ensureController().actions.setUndergroundMaterialMode( mode ); },
-		setLayerPeelingEnabled(enabled: boolean): void { ensureController().actions.setLayerPeelingEnabled( enabled ); },
-		setSectionCutEnabled(enabled: boolean): void { ensureController().actions.setSectionCutEnabled( enabled ); },
+		setUndergroundInspectionTool(tool: UndergroundInspectionTool): void { ensureController().actions.setUndergroundInspectionTool( tool ); },
 		setTransparentXrayValue(value: number): void { ensureController().actions.setTransparentXrayValue( value ); },
 		setLayerPeelingValue(value: number): void { ensureController().actions.setLayerPeelingValue( value ); },
 		setSectionCutValue(value: number): void { ensureController().actions.setSectionCutValue( value ); },

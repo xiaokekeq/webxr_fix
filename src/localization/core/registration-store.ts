@@ -418,8 +418,7 @@ export interface RegistrationStoreState {
 	workspaceMode: WorkspaceMode;
 	undergroundViewMode: 'portal' | 'real-space';
 	undergroundMaterialMode: 'solid' | 'xray';
-	layerPeelingEnabled: boolean;
-	sectionCutEnabled: boolean;
+	undergroundInspectionTool: 'complete' | 'layer-peeling' | 'section-cut';
 	transparentXrayValue: number;
 	layerPeelingValue: number;
 	sectionCutValue: number;

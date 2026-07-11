@@ -3,17 +3,16 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArFloatingValueRail from '@/components/ar/ArFloatingValueRail.vue';
+import UndergroundDisplayControls from '@/components/ar/UndergroundDisplayControls.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
-import {
-	SECTION_CUT_PLANE_MODE_OPTIONS
-} from '@/features/ar/types/display-modes.js';
+import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
+import { useUndergroundDisplayControls } from '@/features/ar/composables/use-underground-display-controls.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 import { arInfo, arWarn, isArDebugEnabled } from '@/engine/debug/ar-logger.js';
 
 type InspectPanelView = 'display' | 'localization' | 'record';
-type FloatingAdjustment = 'xray-opacity' | 'layer-peeling' | 'section-cut';
 
 const PANEL_OPTIONS: Array<{ value: InspectPanelView; label: string }> = [
 	{ value: 'display', label: '显示' },
@@ -28,7 +27,6 @@ const store = useArShellStore();
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<InspectPanelView>( 'localization' );
-const activeFloatingAdjustment = ref<FloatingAdjustment | null>( null );
 const displaySelectionError = ref( '' );
 const markerCalibrationOverlayOpen = ref( false );
 const markerApplyFeedback = ref<{
@@ -43,12 +41,7 @@ const modelPlacementDiagnosticOpen = ref( false );
 const diagnosticCopyFeedback = ref( '' );
 
 const engine = computed( () => store.engine );
-const floatingAdjustment = computed( () => {
-	if ( activeFloatingAdjustment.value === 'xray-opacity' && engine.value.undergroundMaterialMode === 'xray' ) return { value: engine.value.transparentXrayValue, label: '透明度' };
-	if ( activeFloatingAdjustment.value === 'layer-peeling' && engine.value.layerPeelingEnabled ) return { value: engine.value.layerPeelingValue, label: '分层进度' };
-	if ( activeFloatingAdjustment.value === 'section-cut' && engine.value.sectionCutEnabled ) return { value: engine.value.sectionCutValue, label: '剖切位置' };
-	return null;
-} );
+const { activeAdjustment, floatingAdjustment, selectMaterial, selectTool } = useUndergroundDisplayControls( engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
 const currentModel = computed(
@@ -861,36 +854,22 @@ async function selectUndergroundViewMode(mode: 'portal' | 'real-space'): Promise
 
 }
 
-function selectMaterialMode(mode: 'solid' | 'xray'): void {
+function selectMaterialMode(mode: UndergroundMaterialMode): void {
 	store.actions.setUndergroundMaterialMode( mode );
-	activeFloatingAdjustment.value = mode === 'xray' ? 'xray-opacity' : nextEnabledAdjustment();
+	selectMaterial( mode );
+	store.actions.closeDrawer();
 }
 
-function toggleLayerPeeling(): void {
-	if ( engine.value.layerPeelingEnabled && activeFloatingAdjustment.value === 'layer-peeling' ) {
-		store.actions.setLayerPeelingEnabled( false );
-		activeFloatingAdjustment.value = nextEnabledAdjustment( 'layer-peeling' );
-		return;
-	}
-	if ( engine.value.layerPeelingEnabled === false ) store.actions.setLayerPeelingEnabled( true );
-	activeFloatingAdjustment.value = 'layer-peeling';
+function selectInspectionTool(tool: UndergroundInspectionTool): void {
+	store.actions.setUndergroundInspectionTool( tool );
+	selectTool( tool );
+	if ( tool !== 'section-cut' ) store.actions.closeDrawer();
 }
 
-function toggleSectionCut(): void {
-	if ( engine.value.sectionCutEnabled && activeFloatingAdjustment.value === 'section-cut' ) {
-		store.actions.setSectionCutEnabled( false );
-		activeFloatingAdjustment.value = nextEnabledAdjustment( 'section-cut' );
-		return;
-	}
-	if ( engine.value.sectionCutEnabled === false ) store.actions.setSectionCutEnabled( true );
-	activeFloatingAdjustment.value = 'section-cut';
-}
-
-function nextEnabledAdjustment(exclude?: FloatingAdjustment): FloatingAdjustment | null {
-	if ( exclude !== 'xray-opacity' && engine.value.undergroundMaterialMode === 'xray' ) return 'xray-opacity';
-	if ( exclude !== 'layer-peeling' && engine.value.layerPeelingEnabled ) return 'layer-peeling';
-	if ( exclude !== 'section-cut' && engine.value.sectionCutEnabled ) return 'section-cut';
-	return null;
+function selectSectionMode(mode: 'horizontal-section' | 'cross-section' | 'longitudinal-section'): void {
+	store.actions.setSectionCutPlaneMode( mode );
+	activeAdjustment.value = 'section-cut';
+	store.actions.closeDrawer();
 }
 
 let pendingFloatingValue = 0;
@@ -900,9 +879,9 @@ function updateFloatingValue(value: number): void {
 	if ( floatingInputFrame !== 0 ) return;
 	floatingInputFrame = requestAnimationFrame( () => {
 		floatingInputFrame = 0;
-		if ( activeFloatingAdjustment.value === 'xray-opacity' ) store.actions.setTransparentXrayValue( pendingFloatingValue );
-		if ( activeFloatingAdjustment.value === 'layer-peeling' ) store.actions.setLayerPeelingValue( pendingFloatingValue );
-		if ( activeFloatingAdjustment.value === 'section-cut' ) store.actions.setSectionCutValue( pendingFloatingValue );
+		if ( activeAdjustment.value === 'xray-opacity' ) store.actions.setTransparentXrayValue( pendingFloatingValue );
+		if ( activeAdjustment.value === 'layer-peeling' ) store.actions.setLayerPeelingValue( pendingFloatingValue );
+		if ( activeAdjustment.value === 'section-cut' ) store.actions.setSectionCutValue( pendingFloatingValue );
 	} );
 }
 
@@ -1138,10 +1117,11 @@ function setArOverlayClass(active: boolean): void {
 		</nav>
 
 		<ArFloatingValueRail
-			v-if="hasArSession && floatingAdjustment !== null && showMarkerCalibrationOverlay === false"
-			:value="floatingAdjustment.value"
+			v-if="hasArSession && ui.drawerOpen === false && floatingAdjustment !== null && showMarkerCalibrationOverlay === false"
+			:model-value="floatingAdjustment.value"
 			:ariaLabel="floatingAdjustment.label"
-			@input="updateFloatingValue"
+			@update:model-value="updateFloatingValue"
+			@change-start="store.actions.handleArUiInteraction()"
 		/>
 
 		<transition name="sheet-fade">
@@ -1175,48 +1155,7 @@ function setArOverlayClass(active: boolean): void {
 				</div>
 
 				<template v-if="activePanelView === 'display'">
-					<div class="sheet-section">
-						<div class="section-label">查看方式</div>
-						<div class="chip-grid">
-							<button
-								v-for="item in [{ value: 'portal', label: '地下顶视' }, { value: 'real-space', label: '真实空间' }]"
-								:key="item.value"
-								type="button"
-								class="chip-button"
-								:class="{ active: engine.undergroundViewMode === item.value }"
-								@pointerdown.stop
-								@pointerup.stop
-								@click.stop="selectUndergroundViewMode(item.value as 'portal' | 'real-space')"
-							>
-								{{ item.label }}
-							</button>
-						</div>
-						<div v-if="displaySelectionError" class="runtime-banner warning">{{ displaySelectionError }}</div>
-					</div>
-
-					<div class="sheet-section">
-						<div class="section-label">显示样式</div>
-						<div class="chip-grid"><button type="button" class="chip-button" :class="{ active: engine.undergroundMaterialMode === 'solid' }" @click="selectMaterialMode('solid')">实体显示</button><button type="button" class="chip-button" :class="{ active: engine.undergroundMaterialMode === 'xray' }" @click="selectMaterialMode('xray')">透明显示</button></div>
-					</div>
-
-					<div class="sheet-section"><div class="section-label">功能</div><div class="chip-grid"><button type="button" class="chip-button" :class="{ active: engine.layerPeelingEnabled }" @click="toggleLayerPeeling">分层显示 {{ engine.layerPeelingEnabled ? '开' : '关' }}</button><button type="button" class="chip-button" :class="{ active: engine.sectionCutEnabled }" @click="toggleSectionCut">剖切查看 {{ engine.sectionCutEnabled ? '开' : '关' }}</button></div></div>
-
-					<div v-if="engine.sectionCutEnabled" class="sheet-section">
-						<div class="section-label">剖切方向</div>
-						<div class="chip-grid">
-							<button
-								v-for="item in SECTION_CUT_PLANE_MODE_OPTIONS"
-								:key="item.value"
-								type="button"
-								class="chip-button"
-								:class="{ active: engine.sectionCutPlaneMode === item.value }"
-								@click="store.actions.setSectionCutPlaneMode(item.value)"
-							>
-								{{ item.label }}
-							</button>
-						</div>
-					</div>
-
+					<UndergroundDisplayControls :view-mode="engine.undergroundViewMode" :material-mode="engine.undergroundMaterialMode" :inspection-tool="engine.undergroundInspectionTool" :section-mode="engine.sectionCutPlaneMode" :error="displaySelectionError" @view="selectUndergroundViewMode" @material="selectMaterialMode" @tool="selectInspectionTool" @section="selectSectionMode" />
 				</template>
 
 				<template v-else-if="activePanelView === 'localization'">
@@ -1624,12 +1563,12 @@ function setArOverlayClass(active: boolean): void {
 .bottom-sheet {
 	position: fixed;
 	z-index: 8;
-	left: max(12px, calc((100vw - 500px) / 2));
-	right: max(64px, env(safe-area-inset-right));
+	left: 50%;
+	transform: translateX(-50%);
 	bottom: calc(82px + env(safe-area-inset-bottom));
-	max-width: 420px;
-	max-height: 56vh;
-	overflow: auto;
+	width: min(calc(100vw - 24px), 520px);
+	max-height: min(48vh, 520px);
+	overflow-y: auto;
 	overscroll-behavior: contain;
 	padding: 12px;
 	border-radius: 20px;
@@ -1871,7 +1810,7 @@ function setArOverlayClass(active: boolean): void {
 .sheet-fade-enter-from,
 .sheet-fade-leave-to {
 	opacity: 0;
-	transform: translateY(12px);
+	transform: translate(-50%, 12px);
 }
 
 @media (max-width: 720px) {

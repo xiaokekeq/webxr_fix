@@ -81,7 +81,7 @@ import { createLayerVisibilityController } from '@/engine/visualization/layer-vi
 import { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { UndergroundTopPortal, type PortalState } from '@/engine/visualization/underground-top-portal.js';
-import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import {
 	createArAnnotationLabelController,
@@ -960,7 +960,7 @@ export class ThreeEngine {
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().layerPeelingValue === clampedValue ) return;
 		this.store.patch( { layerPeelingValue: clampedValue } );
-		if ( this.store.getState().layerPeelingEnabled ) {
+		if ( this.store.getState().undergroundInspectionTool === 'layer-peeling' ) {
 			this.layerVisibility.setHiddenLayerCount(
 				percentToHiddenLayerCount( clampedValue, this.layerVisibility.getState().length )
 			);
@@ -1016,22 +1016,13 @@ export class ThreeEngine {
 
 	}
 
-	setLayerPeelingEnabled(enabled: boolean): void {
+	setUndergroundInspectionTool(tool: UndergroundInspectionTool): void {
 
 		const state = this.store.getState();
-		if ( state.layerPeelingEnabled === enabled ) return;
-		this.store.patch( { layerPeelingEnabled: enabled } );
-		this.layerVisibility.setHiddenLayerCount(
-			enabled ? percentToHiddenLayerCount( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0
-		);
+		if ( state.undergroundInspectionTool === tool ) return;
+		this.store.patch( { undergroundInspectionTool: tool } );
+		this.layerVisibility.setHiddenLayerCount( tool === 'layer-peeling' ? percentToHiddenLayerCount( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0 );
 		this.applyModelLayerVisibility();
-
-	}
-
-	setSectionCutEnabled(enabled: boolean): void {
-
-		if ( this.store.getState().sectionCutEnabled === enabled ) return;
-		this.store.patch( { sectionCutEnabled: enabled } );
 		this.undergroundPortal.markDirty();
 
 	}
@@ -4400,7 +4391,7 @@ export class ThreeEngine {
 			modelRoot: this.modelTemplate,
 			pipesByName: this.pipesByName
 		} );
-		if ( this.store.getState().layerPeelingEnabled ) {
+		if ( this.store.getState().undergroundInspectionTool === 'layer-peeling' ) {
 			this.layerVisibility.setHiddenLayerCount(
 				percentToHiddenLayerCount(
 					this.store.getState().layerPeelingValue,

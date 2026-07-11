@@ -51,13 +51,14 @@ export class VisualizationStateRuntime {
 			: null;
 		const rootDirty = this.lastRoot !== undergroundRoot;
 		const materialDirty = rootDirty || this.lastMaterialMode !== state.undergroundMaterialMode || this.lastOpacity !== state.transparentXrayValue;
-		const sectionDirty = rootDirty || this.lastSectionEnabled !== state.sectionCutEnabled || this.lastSectionValue !== state.sectionCutValue || this.lastSectionMode !== state.sectionCutPlaneMode;
+		const sectionEnabled = state.undergroundInspectionTool === 'section-cut';
+		const sectionDirty = rootDirty || this.lastSectionEnabled !== sectionEnabled || this.lastSectionValue !== state.sectionCutValue || this.lastSectionMode !== state.sectionCutPlaneMode;
 
 		if ( rootDirty ) this.options.materialStateRuntime.setRoot( undergroundRoot );
 		if ( sectionDirty ) {
 			this.options.sectionCutController.restore();
 			this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
-			const plane = state.sectionCutEnabled ? this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ) : null;
+			const plane = sectionEnabled ? this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ) : null;
 			this.options.materialStateRuntime.applySection( plane );
 		}
 		if ( materialDirty ) this.options.materialStateRuntime.applyMaterial( state.undergroundMaterialMode, state.transparentXrayValue );
@@ -65,7 +66,7 @@ export class VisualizationStateRuntime {
 		this.lastRoot = undergroundRoot;
 		this.lastMaterialMode = state.undergroundMaterialMode;
 		this.lastOpacity = state.transparentXrayValue;
-		this.lastSectionEnabled = state.sectionCutEnabled;
+		this.lastSectionEnabled = sectionEnabled;
 		this.lastSectionValue = state.sectionCutValue;
 		this.lastSectionMode = state.sectionCutPlaneMode;
 
