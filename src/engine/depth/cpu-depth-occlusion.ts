@@ -7,6 +7,7 @@ export interface CpuDepthOcclusionUniforms {
 	uRealDepthTexture: { value: THREE.DataTexture | null };
 	uRawValueToMeters: { value: number };
 	uNormDepthBufferFromNormView: { value: THREE.Matrix4 };
+	uDepthTextureSize: { value: THREE.Vector2 };
 	uDepthBiasMeters: { value: number };
 }
 
@@ -17,6 +18,7 @@ export function createCpuDepthOcclusionUniforms(): CpuDepthOcclusionUniforms {
 		uRealDepthTexture: { value: null },
 		uRawValueToMeters: { value: 0 },
 		uNormDepthBufferFromNormView: { value: new THREE.Matrix4() },
+		uDepthTextureSize: { value: new THREE.Vector2() },
 		uDepthBiasMeters: { value: 0.04 }
 	};
 
@@ -33,6 +35,7 @@ export function syncCpuDepthOcclusionUniforms(
 		&& frame.normDepthBufferFromNormView !== null;
 	uniforms.uRealDepthTexture.value = frame.texture;
 	uniforms.uRawValueToMeters.value = frame.rawValueToMeters;
+	uniforms.uDepthTextureSize.value.set( frame.width, frame.height );
 	if ( frame.normDepthBufferFromNormView !== null ) {
 		uniforms.uNormDepthBufferFromNormView.value.copy( frame.normDepthBufferFromNormView );
 	}

@@ -10,6 +10,7 @@ export const DISPLAY_MODE_OPTIONS: Array<{
 }> = [
 	{ value: 'solid-overlay', label: '普通叠加' },
 	{ value: 'transparent-xray', label: '透明透视' },
+	{ value: 'underground-portal', label: '地下顶视' },
 	{ value: 'layer-peeling', label: '层级剥离' },
 	{ value: 'section-cut', label: '剖切查看' }
 ];

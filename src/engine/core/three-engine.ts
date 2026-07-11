@@ -83,6 +83,7 @@ import { createLayerVisibilityController } from '@/engine/visualization/layer-vi
 import { createArXrayVisualizationController } from '@/engine/visualization/ar-xray-visualization.js';
 import { createArLayerPeelingController } from '@/engine/visualization/ar-layer-peeling.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
+import { UndergroundTopPortal } from '@/engine/visualization/underground-top-portal.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import {
 	createArAnnotationLabelController,
@@ -304,6 +305,7 @@ export class ThreeEngine {
 	private currentArSessionId: string | null = null;
 	private siteOriginReferencePanelOpen = false;
 	private readonly realDepthProvider = new RealDepthProvider();
+	private readonly undergroundPortal: UndergroundTopPortal;
 	private readonly frameTaskErrorCounts = new Map<string, number>();
 	private readonly frameTaskLastErrorLogAt = new Map<string, number>();
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
@@ -352,6 +354,7 @@ export class ThreeEngine {
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
+		this.undergroundPortal = new UndergroundTopPortal( this.sceneBundle.scene );
 		this.engineeringCornerDebugGroup.name = '__engineering-corner-debug';
 		this.sceneBundle.scene.add( this.engineeringCornerDebugGroup );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
@@ -513,9 +516,10 @@ export class ThreeEngine {
 			getRegistrationSolution: () => this.registrationSolution,
 			getHitTestController: () => this.xrRuntime.getHitTestController(),
 			getModelOrientationTarget: () => this.modelOrientation,
-			onBeforePlacementRequest: () => {
-				this.propertySelection.clearSelection();
-				this.pointerSelection.suppressSelectionFor( 1200 );
+				onBeforePlacementRequest: () => {
+					this.propertySelection.clearSelection();
+					this.undergroundPortal.markDirty();
+					this.pointerSelection.suppressSelectionFor( 1200 );
 			},
 			onPlacementBaseResolved: () => {},
 			applyModelLayerVisibility: () => {
@@ -599,6 +603,7 @@ export class ThreeEngine {
 			},
 			onSelectionCleared: () => {
 				this.clearAnnotationDetail();
+				this.undergroundPortal.markDirty();
 			},
 			handlePreSelectionRaycast: ( selection ) => {
 				if ( this.annotationLabelsController.hitDetailPanel( selection.raycaster ) ) {
@@ -610,6 +615,10 @@ export class ThreeEngine {
 				}
 
 				if ( this.handleSiteOriginReferencePick( selection.raycaster ) ) {
+					return true;
+				}
+
+				if ( this.handleUndergroundPortalPick( selection.raycaster ) ) {
 					return true;
 				}
 
@@ -637,10 +646,12 @@ export class ThreeEngine {
 			},
 			resetPlacement: () => {
 				this.placementSession.resetPlacement();
+				this.undergroundPortal.reset();
 				this.syncArSessionPhase();
 				this.emit();
 			},
 			onRuntimeReset: () => {
+				this.undergroundPortal.reset();
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
 				this.registrationSolution = null;
@@ -694,7 +705,9 @@ export class ThreeEngine {
 				if ( bundle.demoModelConfig.undergroundPlacement?.enabled === true ) {
 					const opacity = resolveXrayOpacityPercent( bundle.demoModelConfig.undergroundDisplay?.xrayOpacity );
 					this.store.patch( {
-						displayMode: 'transparent-xray',
+						displayMode: bundle.demoModelConfig.modelInstances[ 0 ]?.display.belowGroundMode === 'top-portal'
+							? 'underground-portal'
+							: 'transparent-xray',
 						structureRevealValue: opacity,
 						transparentXrayValue: opacity
 					} );
@@ -739,6 +752,9 @@ export class ThreeEngine {
 			onFrameUpdate: ( frame ) => {
 				this.safeFrameTask( 'real-depth', () => {
 					this.updateRealDepth( frame );
+				} );
+				this.safeFrameTask( 'underground-portal', () => {
+					this.updateUndergroundPortal();
 				} );
 				this.safeFrameTask( 'marker-hints', () => {
 					this.inspectionMarkerWorkflow.syncHints();
@@ -871,6 +887,7 @@ export class ThreeEngine {
 		this.structureRevealController.dispose();
 		this.layerPeelingController.dispose();
 		this.sectionCutController.dispose();
+		this.undergroundPortal.dispose();
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();
 		this.sceneBundle.renderer.dispose();
@@ -887,6 +904,7 @@ export class ThreeEngine {
 
 		this.pointerSelection.suppressSelectionFor( 1000 );
 		this.propertySelection.clearSelection();
+		this.undergroundPortal.markDirty();
 		this.clearAnnotationDetail();
 		this.annotationLayer.setSelected( null );
 		this.setStatus( '已关闭构件信息面板。' );
@@ -904,6 +922,7 @@ export class ThreeEngine {
 		if (
 			mode !== 'solid-overlay'
 			&& mode !== 'transparent-xray'
+			&& mode !== 'underground-portal'
 			&& mode !== 'layer-peeling'
 			&& mode !== 'section-cut'
 		) {
@@ -920,6 +939,7 @@ export class ThreeEngine {
 			displayMode: mode,
 			structureRevealValue: getDisplayModeSliderValue( state, mode )
 		} );
+		this.undergroundPortal.markDirty();
 
 		if ( previousMode === 'layer-peeling' && mode !== 'layer-peeling' ) {
 			this.layerVisibility.reset();
@@ -2028,8 +2048,7 @@ export class ThreeEngine {
 
 		if ( this.engineeringDebugLayers.showFootprintExpected && this.registrationSolution !== null ) {
 			const footprintControlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
-			const footprintCornersAr = footprintControlPoints
-				.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+			const footprintCornersAr = this.getCurrentFootprintCornersAr();
 			const footprintCenterAr = averageVectors( footprintControlPoints.map( ( point ) => point.worldEnu ) )
 				.applyMatrix4( arFromEnuSolution.matrix );
 			this.yellowUpdateCount += 1;
@@ -3833,6 +3852,29 @@ export class ThreeEngine {
 
 	}
 
+	private updateUndergroundPortal(): void {
+
+		this.undergroundPortal.update( {
+			renderer: this.sceneBundle.renderer,
+			mainCamera: this.sceneBundle.renderer.xr.getCamera(),
+			model: this.placementSession.getArPlacedModel(),
+			footprintCorners: this.getCurrentFootprintCornersAr(),
+			depthFrame: this.realDepthProvider.getCurrentFrame(),
+			enabled: this.store.getState().displayMode === 'underground-portal'
+		} );
+
+	}
+
+	private getCurrentFootprintCornersAr(): THREE.Vector3[] {
+
+		const arFromEnuSolution = this.getActiveArFromEnuSolution();
+		if ( this.registrationSolution === null || arFromEnuSolution === null ) return [];
+		return this.registrationSolution.controlPoints
+			.slice( 0, 4 )
+			.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+
+	}
+
 	private handleXRSessionStart(result: ArSessionStartResult): void {
 
 		this.store.clearModelPlacementDebug();
@@ -3845,6 +3887,7 @@ export class ThreeEngine {
 	private handleXRSessionEnd(): void {
 
 		this.arSessionEndPending = false;
+		this.undergroundPortal.reset();
 		this.realDepthProvider.dispose();
 		this.arCoordinateService.clear( 'xr-session-end' );
 		this.annotationLayer.clear();
@@ -4254,6 +4297,7 @@ export class ThreeEngine {
 	private applyModelLayerVisibility(): void {
 
 		this.visualizationStateRuntime.applyModelLayerVisibility();
+		this.undergroundPortal.markDirty();
 
 	}
 
@@ -4305,6 +4349,30 @@ export class ThreeEngine {
 
 	}
 
+	private handleUndergroundPortalPick(raycaster: THREE.Raycaster): boolean {
+
+		const result = this.undergroundPortal.pick( raycaster );
+		if ( result.hitPortal === false ) return false;
+		if ( result.sourceObject === null ) return true;
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel === null ) return true;
+		const businessObject = this.propertySelection.resolveBusinessObject(
+			result.sourceObject,
+			placedModel,
+			this.pipesByName
+		);
+		const businessName = typeof businessObject.userData.__businessName === 'string'
+			? businessObject.userData.__businessName
+			: businessObject.name;
+		const properties = this.pipesByName.get( businessName ) ?? null;
+		this.propertySelection.selectBusinessObject( businessObject, properties, result.sourceObject );
+		this.showCanvasModelPropertyPanel( businessObject, properties );
+		this.undergroundPortal.markDirty();
+		this.setStatus( `已选择 ${businessName || '模型构件'}。` );
+		return true;
+
+	}
+
 	private logGroundAwareArAudit(config: DemoModelConfig): void {
 
 		if ( this.groundAwareArAuditLogged ) {
@@ -4332,13 +4400,9 @@ export class ThreeEngine {
 			currentCanvasPropertyPanelEntry: 'annotationLabelsController.setDetail(CanvasTexture Sprite)',
 			currentAnnotationLayerEntry: 'AnnotationLayer.setAnnotations',
 			currentDepthProvider: 'RealDepthProvider',
-			currentPortalImplementation: 'not implemented; fallback is existing surface footprint/x-ray diagnostics',
+			currentPortalImplementation: 'UndergroundTopPortal with footprint corners, orthographic render target, and CPU depth foreground occlusion',
 			currentLegacyVisualOffsetReferences: 'visualMatrix remains snapshot/debug name only; no visualOffsetY/buriedDepthMeters positioning path',
-			migrationRisks: [
-				'Portal render target is not implemented',
-				'Current runtime still places one model template',
-				'CPU depth is limited to a minimal validation path'
-			]
+			migrationRisks: [ 'Current runtime still places one model template' ]
 		} );
 
 	}
@@ -4349,6 +4413,7 @@ export class ThreeEngine {
 	): void {
 
 		this.propertySelection.clearSelection();
+		this.undergroundPortal.markDirty();
 		this.annotationLayer.setSelected( annotation.id );
 		this.store.patch( {
 			selectedAnnotationId: annotation.id,

@@ -100,7 +100,12 @@ export function createDisplayModeController(
 
 	function applyMode(root: THREE.Group, mode: ArDisplayMode): void {
 
-		if ( mode === 'solid-overlay' || mode === 'transparent-xray' || mode === 'layer-peeling' ) {
+		if (
+			mode === 'solid-overlay'
+			|| mode === 'transparent-xray'
+			|| mode === 'underground-portal'
+			|| mode === 'layer-peeling'
+		) {
 			return;
 		}
 

@@ -10,6 +10,7 @@ export type InspectionPlacementSource = 'manual-marker';
 export type ArDisplayMode =
 	| 'solid-overlay'
 	| 'transparent-xray'
+	| 'underground-portal'
 	| 'layer-peeling'
 	| 'section-cut';
 export type SectionCutPlaneMode = 'cross-section' | 'longitudinal-section' | 'horizontal-section';
