@@ -1,7 +1,17 @@
 import type * as THREE from 'three';
 
 export type SetStatus = (message: string) => void;
-export type ArSessionRequestMode = 'normal' | 'normal-with-depth' | 'cpu-depth-debug';
+
+export interface ArSessionStartResult {
+	session: XRSession;
+	depthRequested: boolean;
+	depthGranted: boolean;
+	depthUsage: 'cpu-optimized' | 'gpu-optimized' | null;
+	depthDataFormat: 'luminance-alpha' | 'float32' | 'unsigned-short' | null;
+	depthActive: boolean | null;
+	fallbackUsed: boolean;
+	fallbackReason: string | null;
+}
 
 export interface ARSceneBundle {
 	scene: THREE.Scene;
@@ -26,7 +36,7 @@ export interface XRHitTestController {
 	getHitTestQuality(): XRHitTestQuality | null;
 	supportsAnchors(): boolean;
 	createAnchorFromLatestHit(): Promise<XRAnchorHandle | null>;
-	requestSession(options?: { mode?: ArSessionRequestMode; cpuDepthDebug?: boolean }): void;
+	requestSession(): void;
 }
 
 export interface XRHitTestQuality {

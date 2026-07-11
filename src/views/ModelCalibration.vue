@@ -4,9 +4,7 @@ import { useRoute } from 'vue-router';
 import ArInfoGrid from '@/components/ar/ArInfoGrid.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
-import CpuDepthDebugOverlay from '@/components/ar/CpuDepthDebugOverlay.vue';
 import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
-import { cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
 type CalibrationPanelView = 'overview' | 'model' | 'marker' | 'ar-check';
@@ -338,23 +336,6 @@ async function handleExitPrecisionCalibration(): Promise<void> {
 	closeDrawerIfOpen();
 }
 
-const cpuDepthButtonLabel = computed( () => {
-	if ( cpuDepthDebugState.enabled ) {
-		return '隐藏 CPU Depth 深度图';
-	}
-	if ( cpuDepthDebugState.supported === false ) {
-		return '当前设备不支持 CPU Depth';
-	}
-	if ( cpuDepthDebugState.errorMessage ) {
-		return 'CPU Depth 不可用';
-	}
-	return '显示 CPU Depth 深度图';
-} );
-
-function handleToggleCpuDepthDebug(): void {
-	store.actions.toggleCpuDepthDebug();
-}
-
 onMounted( () => {
 	void mountEngineHosts();
 	store.actions.setWorkflowMode( 'site-baseline-config' );
@@ -550,8 +531,6 @@ function setArOverlayClass(active: boolean): void {
 			</div>
 		</section>
 
-		<CpuDepthDebugOverlay />
-
 		<nav
 			v-if="hasArSession && showMarkerCalibrationOverlay === false"
 			class="action-dock action-dock-compact"
@@ -562,15 +541,6 @@ function setArOverlayClass(active: boolean): void {
 			<button type="button" class="dock-item dock-item-primary" @click.stop="toggleWorkspacePanel">
 				<span class="dock-icon">板</span>
 				<span class="dock-label">校验面板</span>
-			</button>
-			<button
-				type="button"
-				class="dock-item"
-				:class="{ 'dock-item-active': cpuDepthDebugState.enabled }"
-				@click.stop="handleToggleCpuDepthDebug"
-			>
-				<span class="dock-icon">深</span>
-				<span class="dock-label">{{ cpuDepthButtonLabel }}</span>
 			</button>
 			<button type="button" class="dock-item" @click.stop="store.actions.exitAr()">
 				<span class="dock-icon">退</span>

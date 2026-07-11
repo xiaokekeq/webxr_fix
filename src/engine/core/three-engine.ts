@@ -111,18 +111,14 @@ import type {
 	SiteCalibrationBaseline,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
-import type { ArSessionRequestMode } from '@/features/ar/types/runtime-types.js';
+import type { ArSessionStartResult } from '@/features/ar/types/runtime-types.js';
 import type { ArSessionContext } from '@/features/ar/types/ar-session-context.js';
 import { repositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
-import { updateCpuDepthFromFrame, setCpuDepthEnabled, cpuDepthDebugState } from '@/engine/visualization/cpu-depth-visualization.js';
+import { RealDepthProvider } from '@/engine/depth/real-depth-provider.js';
 import { readPlaceableTemplateReport } from '@/engine/core/model.js';
 import { arInfo } from '@/engine/debug/ar-logger.js';
-import {
-	updateXrFreezeWatchdog,
-	xrFreezeHealthState
-} from '@/engine/platform/xr-freeze-diagnostics.js';
 
 const MAX_LOG_ITEMS = 24;
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
@@ -307,7 +303,7 @@ export class ThreeEngine {
 	private currentArSessionContext: ArSessionContext | null = null;
 	private currentArSessionId: string | null = null;
 	private siteOriginReferencePanelOpen = false;
-	private currentArSessionRequestMode: ArSessionRequestMode = 'normal';
+	private readonly realDepthProvider = new RealDepthProvider();
 	private readonly frameTaskErrorCounts = new Map<string, number>();
 	private readonly frameTaskLastErrorLogAt = new Map<string, number>();
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
@@ -342,30 +338,12 @@ export class ThreeEngine {
 	private replacedModelCount = 0;
 	private lastPlacementReason = '-';
 	private lastPlacementTimestamp = 0;
-	private xrFreezeWatchdogId: number | null = null;
 	private readonly handleWebglContextLost = ( event: Event ) => {
-		event.preventDefault();
-		xrFreezeHealthState.webglContextLost = true;
-		xrFreezeHealthState.webglContextLostCount += 1;
-		updateXrFreezeWatchdog();
-		console.warn( '[WebGLContextLostDuringXR]', {
-			diagnosticMode: xrFreezeHealthState.diagnosticMode,
-			rendererProfile: xrFreezeHealthState.rendererProfile,
-			sessionStartedAt: xrFreezeHealthState.sessionStartedAt,
-			sessionEndedAt: xrFreezeHealthState.sessionEndedAt,
-			lastStartedStage: xrFreezeHealthState.lastStartedStage,
-			lastSuccessfulStage: xrFreezeHealthState.lastSuccessfulStage,
-			lastFailedStage: xrFreezeHealthState.lastFailedStage
-		} );
+		( event as WebGLContextEvent ).preventDefault();
+		console.error( '[WebGLContextLost]', { xrPresenting: this.sceneBundle.renderer.xr.isPresenting } );
 	};
 	private readonly handleWebglContextRestored = () => {
-		xrFreezeHealthState.webglContextLost = false;
-		xrFreezeHealthState.webglContextRestoredCount += 1;
-		updateXrFreezeWatchdog();
-		console.info( '[WebGLContextRestoredDuringXR]', {
-			diagnosticMode: xrFreezeHealthState.diagnosticMode,
-			rendererProfile: xrFreezeHealthState.rendererProfile
-		} );
+		console.info( '[WebGLContextRestored]' );
 	};
 
 	constructor() {
@@ -745,8 +723,8 @@ export class ThreeEngine {
 				statusRuntime.setStatus( message );
 				this.emit();
 			},
-			onSessionStart: () => {
-				this.handleXRSessionStart();
+			onSessionStart: ( result ) => {
+				this.handleXRSessionStart( result );
 			},
 			onSessionEnd: () => {
 				this.handleXRSessionEnd();
@@ -759,15 +737,11 @@ export class ThreeEngine {
 				this.placementWorkflow.attemptAutoPlacement();
 			},
 			onFrameUpdate: ( frame ) => {
+				this.safeFrameTask( 'real-depth', () => {
+					this.updateRealDepth( frame );
+				} );
 				this.safeFrameTask( 'display-depth-state', () => {
 					this.displayModeController.updateDepthState( frame );
-				} );
-				this.safeFrameTask( 'cpu-depth-debug', () => {
-					updateCpuDepthFromFrame(
-						frame,
-						this.sceneBundle.renderer.xr.getReferenceSpace(),
-						this.currentArSessionRequestMode
-					);
 				} );
 				this.safeFrameTask( 'marker-hints', () => {
 					this.inspectionMarkerWorkflow.syncHints();
@@ -798,9 +772,6 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.domElement.addEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
 		this.sceneBundle.renderer.domElement.addEventListener( 'webglcontextlost', this.handleWebglContextLost );
 		this.sceneBundle.renderer.domElement.addEventListener( 'webglcontextrestored', this.handleWebglContextRestored );
-		this.xrFreezeWatchdogId = window.setInterval( () => {
-			updateXrFreezeWatchdog();
-		}, 500 );
 		window.addEventListener( 'pointerdown', this.handleGlobalArPointerDown, true );
 		window.addEventListener( 'pointerup', this.handleGlobalArPointerUp, true );
 		window.addEventListener( 'resize', this.handleWindowResize );
@@ -888,10 +859,7 @@ export class ThreeEngine {
 
 		this.disposed = true;
 		this.sceneBundle.renderer.setAnimationLoop( null );
-		if ( this.xrFreezeWatchdogId !== null ) {
-			window.clearInterval( this.xrFreezeWatchdogId );
-			this.xrFreezeWatchdogId = null;
-		}
+		this.realDepthProvider.dispose();
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'webglcontextlost', this.handleWebglContextLost );
@@ -1354,39 +1322,16 @@ export class ThreeEngine {
 
 	}
 
-	toggleCpuDepthDebug(): void {
-
-		const wantEnable = ! cpuDepthDebugState.enabled;
-
-		if ( wantEnable ) {
-			if ( this.sceneBundle.renderer.xr.isPresenting === false ) {
-				setCpuDepthEnabled( true );
-				this.enterAr( 'cpu-depth-debug' );
-				this.emit();
-				return;
-			}
-			if ( cpuDepthDebugState.depthSensingSessionEnabled === false ) {
-				cpuDepthDebugState.errorMessage = '当前 AR 会话未启用 CPU Depth，请退出 AR 后重新进入深度调试模式。';
-				return;
-			}
-		}
-
-		setCpuDepthEnabled( wantEnable );
-		this.emit();
-
-	}
-
-	enterAr(mode: ArSessionRequestMode = 'normal'): void {
+	enterAr(): void {
 
 		if ( this.store.getState().arSupportState !== 'supported' ) {
 			this.setStatus( this.store.getState().arSupportMessage );
 			return;
 		}
 
-		this.currentArSessionRequestMode = mode;
 		void this.ensureArSessionContextReady().then( () => {
 			this.pointerSelection.suppressSelectionFor( 1200 );
-			this.xrRuntime.requestSession( { mode } );
+			this.xrRuntime.requestSession();
 		} );
 
 	}
@@ -1588,7 +1533,6 @@ export class ThreeEngine {
 			stack: error instanceof Error ? error.stack : undefined,
 			timestamp: Date.now(),
 			errorCount: count,
-			sessionMode: this.currentArSessionRequestMode,
 			isPresenting: this.sceneBundle.renderer.xr.isPresenting
 		} );
 		this.setStatus( `XR 帧任务异常：${stage}；已继续渲染。` );
@@ -3883,9 +3827,25 @@ export class ThreeEngine {
 	}
 
 
-	private handleXRSessionStart(): void {
+	private updateRealDepth(frame: XRFrame): void {
+
+		if ( this.realDepthProvider.isAvailable() === false ) {
+			return;
+		}
+		const referenceSpace = this.sceneBundle.renderer.xr.getReferenceSpace();
+		const view = referenceSpace === null ? null : frame.getViewerPose( referenceSpace )?.views[ 0 ] ?? null;
+		if ( view !== null ) {
+			this.realDepthProvider.update( frame, view, performance.now() );
+		}
+
+	}
+
+	private handleXRSessionStart(result: ArSessionStartResult): void {
 
 		this.store.clearModelPlacementDebug();
+		if ( result.depthGranted ) {
+			this.realDepthProvider.initialize( result.session, this.sceneBundle.renderer );
+		}
 		this.sessionLifecycleRuntime.handleXRSessionStart();
 
 	}
@@ -3893,7 +3853,7 @@ export class ThreeEngine {
 	private handleXRSessionEnd(): void {
 
 		this.arSessionEndPending = false;
-		this.currentArSessionRequestMode = 'normal';
+		this.realDepthProvider.dispose();
 		this.arCoordinateService.clear( 'xr-session-end' );
 		this.annotationLayer.clear();
 		this.annotationLayer.setSelected( null );
@@ -4379,10 +4339,7 @@ export class ThreeEngine {
 			},
 			currentCanvasPropertyPanelEntry: 'annotationLabelsController.setDetail(CanvasTexture Sprite)',
 			currentAnnotationLayerEntry: 'AnnotationLayer.setAnnotations',
-			currentDepthAwareOverlayEntry: 'cpu-depth-visualization debug only',
-			currentDepthSessionRequest: 'normal session optional dom-overlay/anchors; cpu-depth-debug requests optional depth-sensing cpu-optimized',
-			currentCpuDepthPath: 'frame.getDepthInformation(view) debug sampler',
-			currentGpuDepthPath: 'not implemented',
+			currentDepthProvider: 'RealDepthProvider',
 			currentPortalImplementation: 'not implemented; fallback is existing surface footprint/x-ray diagnostics',
 			currentLegacyVisualOffsetReferences: 'visualMatrix remains snapshot/debug name only; no visualOffsetY/buriedDepthMeters positioning path',
 			migrationRisks: [

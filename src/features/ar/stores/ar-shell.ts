@@ -7,7 +7,6 @@ import {
 	type RegistrationView
 } from '@/features/ar/controller/ar-controller.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
-import type { ArSessionRequestMode } from '@/features/ar/types/runtime-types.js';
 import type {
 	ArDisplayMode,
 	InspectionPlacementSource,
@@ -384,9 +383,9 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		enterAr(mode?: ArSessionRequestMode): void {
+		enterAr(): void {
 
-			ensureController().actions.enterAr( mode );
+			ensureController().actions.enterAr();
 
 		},
 
@@ -465,11 +464,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		toggleCpuDepthDebug(): void {
-
-			ensureController().actions.toggleCpuDepthDebug();
-
-		}
 	};
 
 	const controllerState = computed<LoadModelArControllerState>( () => ( {
