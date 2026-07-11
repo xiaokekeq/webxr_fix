@@ -51,7 +51,7 @@ export class VisualizationStateRuntime {
 		this.options.sectionCutController.restore();
 		if ( state.sectionCutEnabled ) {
 			this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
-			clippingPlane = this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ).plane;
+			clippingPlane = this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue );
 		}
 		this.options.materialStateRuntime.apply( undergroundRoot, { mode: state.undergroundMaterialMode, opacity: state.transparentXrayValue, clippingPlane } );
 		if ( state.layerPeelingEnabled ) {

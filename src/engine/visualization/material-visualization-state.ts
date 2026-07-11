@@ -64,7 +64,7 @@ export function restoreMaterialSnapshot(
 	material.depthWrite = snapshot.depthWrite;
 	material.depthTest = snapshot.depthTest;
 	material.side = snapshot.side;
-	material.clippingPlanes = snapshot.clippingPlanes?.map( ( plane ) => plane.clone() ) ?? null;
+	material.clippingPlanes = snapshot.clippingPlanes;
 	material.clipIntersection = snapshot.clipIntersection;
 	material.clipShadows = snapshot.clipShadows;
 	material.needsUpdate = true;

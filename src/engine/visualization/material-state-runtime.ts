@@ -10,6 +10,7 @@ export interface ComposedMaterialState {
 export class MaterialStateRuntime {
 
 	private readonly snapshots = new WeakMap<THREE.Material, VisualizationMaterialSnapshot>();
+	private readonly clippingPlanes = new WeakMap<THREE.Material, [ THREE.Plane ]>();
 	private currentRoot: THREE.Object3D | null = null;
 
 	apply(root: THREE.Object3D | null, state: ComposedMaterialState): void {
@@ -30,7 +31,13 @@ export class MaterialStateRuntime {
 				}
 				if ( state.clippingPlane !== null ) {
 					material.side = THREE.DoubleSide;
-					material.clippingPlanes = [ state.clippingPlane.clone() ];
+					let planes = this.clippingPlanes.get( material );
+					if ( planes === undefined ) {
+						planes = [ new THREE.Plane() ];
+						this.clippingPlanes.set( material, planes );
+					}
+					planes[ 0 ].copy( state.clippingPlane );
+					material.clippingPlanes = planes;
 					material.clipIntersection = false;
 					material.clipShadows = false;
 				}
@@ -64,5 +71,30 @@ function shouldAffectMesh(mesh: THREE.Mesh): boolean {
 	return mesh.userData.__nonSelectableHelper !== true
 		&& mesh.userData.__excludeFromLayerIndex !== true
 		&& mesh.userData.__visualizationHelper !== true;
+
+}
+
+if ( import.meta.env.DEV ) runMaterialStateSelfCheck();
+
+function runMaterialStateSelfCheck(): void {
+
+	const material = new THREE.MeshBasicMaterial( { transparent: false, opacity: 0.8, depthWrite: true } );
+	const root = new THREE.Group();
+	root.add( new THREE.Mesh( new THREE.BoxGeometry(), material ) );
+	const runtime = new MaterialStateRuntime();
+	const plane = new THREE.Plane( new THREE.Vector3( 0, 1, 0 ), -1 );
+	runtime.apply( root, { mode: 'xray', opacity: 35, clippingPlane: plane } );
+	const clippingArray = material.clippingPlanes;
+	runtime.apply( root, { mode: 'solid', opacity: 35, clippingPlane: plane.set( new THREE.Vector3( 1, 0, 0 ), -2 ) } );
+	console.assert( material.transparent === false && material.opacity === 0.8 && material.depthWrite === true, 'Solid + section must restore original opacity state.' );
+	console.assert( material.clippingPlanes === clippingArray && material.clippingPlanes?.[ 0 ].normal.x === 1, 'Section updates must reuse the clipping plane array.' );
+	runtime.apply( root, { mode: 'xray', opacity: 20, clippingPlane: null } );
+	console.assert( material.transparent && material.opacity === 0.2 && material.clippingPlanes === null, 'X-ray without section must remove composed clipping.' );
+	runtime.restore();
+	console.assert( material.transparent === false && material.opacity === 0.8 && material.depthWrite === true && material.clippingPlanes === null, 'Material restore must return the original state.' );
+	root.children[ 0 ].traverse( ( object ) => {
+		if ( object instanceof THREE.Mesh ) object.geometry.dispose();
+	} );
+	material.dispose();
 
 }
