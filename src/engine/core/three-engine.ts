@@ -306,6 +306,9 @@ export class ThreeEngine {
 	private siteOriginReferencePanelOpen = false;
 	private readonly realDepthProvider = new RealDepthProvider();
 	private readonly undergroundPortal: UndergroundTopPortal;
+	private portalUpdateArgs: Parameters<UndergroundTopPortal['update']>[ 0 ] | null = null;
+	private readonly footprintCornersAr = [ new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3() ];
+	private readonly emptyFootprintCorners: THREE.Vector3[] = [];
 	private readonly frameTaskErrorCounts = new Map<string, number>();
 	private readonly frameTaskLastErrorLogAt = new Map<string, number>();
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
@@ -340,6 +343,7 @@ export class ThreeEngine {
 	private replacedModelCount = 0;
 	private lastPlacementReason = '-';
 	private lastPlacementTimestamp = 0;
+	private lastPortalDebugAt = 0;
 	private readonly handleWebglContextLost = ( event: Event ) => {
 		( event as WebGLContextEvent ).preventDefault();
 		console.error( '[WebGLContextLost]', { xrPresenting: this.sceneBundle.renderer.xr.isPresenting } );
@@ -355,6 +359,14 @@ export class ThreeEngine {
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
 		this.undergroundPortal = new UndergroundTopPortal( this.sceneBundle.scene );
+		this.portalUpdateArgs = {
+			renderer: this.sceneBundle.renderer,
+			mainCamera: this.sceneBundle.renderer.xr.getCamera(),
+			model: null,
+			footprintCorners: this.emptyFootprintCorners,
+			depthFrame: this.realDepthProvider.getCurrentFrame(),
+			enabled: false
+		};
 		this.engineeringCornerDebugGroup.name = '__engineering-corner-debug';
 		this.sceneBundle.scene.add( this.engineeringCornerDebugGroup );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
@@ -3853,25 +3865,42 @@ export class ThreeEngine {
 	}
 
 	private updateUndergroundPortal(): void {
-
-		this.undergroundPortal.update( {
-			renderer: this.sceneBundle.renderer,
-			mainCamera: this.sceneBundle.renderer.xr.getCamera(),
-			model: this.placementSession.getArPlacedModel(),
-			footprintCorners: this.getCurrentFootprintCornersAr(),
-			depthFrame: this.realDepthProvider.getCurrentFrame(),
-			enabled: this.store.getState().displayMode === 'underground-portal'
-		} );
+		const depthFrame = this.realDepthProvider.getCurrentFrame();
+		const args = this.portalUpdateArgs!;
+		args.mainCamera = this.sceneBundle.renderer.xr.getCamera();
+		args.model = this.placementSession.getArPlacedModel();
+		args.footprintCorners = this.getCurrentFootprintCornersAr();
+		args.depthFrame = depthFrame;
+		args.enabled = this.store.getState().displayMode === 'underground-portal';
+		this.undergroundPortal.update( args );
+		this.logPortalDiagnostics( depthFrame );
 
 	}
 
 	private getCurrentFootprintCornersAr(): THREE.Vector3[] {
 
 		const arFromEnuSolution = this.getActiveArFromEnuSolution();
-		if ( this.registrationSolution === null || arFromEnuSolution === null ) return [];
-		return this.registrationSolution.controlPoints
-			.slice( 0, 4 )
-			.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+		if ( this.registrationSolution === null || arFromEnuSolution === null || this.registrationSolution.controlPoints.length < 4 ) return this.emptyFootprintCorners;
+		for ( let index = 0; index < 4; index += 1 ) {
+			this.footprintCornersAr[ index ].copy( this.registrationSolution.controlPoints[ index ].worldEnu ).applyMatrix4( arFromEnuSolution.matrix );
+		}
+		return this.footprintCornersAr;
+
+	}
+
+	private logPortalDiagnostics(depthFrame: ReturnType<RealDepthProvider['getCurrentFrame']>): void {
+
+		if ( import.meta.env.DEV === false || new URLSearchParams( window.location.search ).get( 'arDebug' ) !== 'portal' ) return;
+		const now = performance.now();
+		if ( now - this.lastPortalDebugAt < 500 ) return;
+		this.lastPortalDebugAt = now;
+		console.info( '[PortalDiagnostics]', {
+			...this.undergroundPortal.getDiagnostics(),
+			cpuDepthValid: depthFrame.available && depthFrame.stale === false,
+			depthSize: `${depthFrame.width}x${depthFrame.height}`,
+			rawValueToMeters: depthFrame.rawValueToMeters,
+			depthAgeMs: Math.round( depthFrame.ageMs )
+		} );
 
 	}
 

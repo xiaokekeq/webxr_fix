@@ -10,7 +10,9 @@ const PORTAL_SURFACE_NAME = '__underground-top-portal-surface';
 const PORTAL_RENDER_ORDER = 40;
 const PORTAL_SURFACE_LIFT_METERS = 0.002;
 const PORTAL_MAX_RESOLUTION = 1024;
-const PORTAL_MIN_RESOLUTION = 512;
+const PORTAL_MIN_RESOLUTION = 384;
+const PORTAL_FOREGROUND_THRESHOLD_METERS = readPortalNumber( 'portalThreshold', 0.05 );
+const PORTAL_DEPTH_FEATHER_METERS = readPortalNumber( 'portalFeather', 0.025 );
 
 const vertexShader = /* glsl */`
 precision highp float;
@@ -116,6 +118,14 @@ export class UndergroundTopPortal {
 	private readonly previousViewport = new THREE.Vector4();
 	private readonly previousScissor = new THREE.Vector4();
 	private readonly previousClearColor = new THREE.Color();
+	private readonly portalPickNdc = new THREE.Vector2();
+	private readonly worldUp = new THREE.Vector3( 0, 1, 0 );
+	private readonly lookAtTarget = new THREE.Vector3();
+	private readonly bounds = new THREE.Box3();
+	private readonly boundsSize = new THREE.Vector3();
+	private readonly boundsCenter = new THREE.Vector3();
+	private readonly cornerValues = new Float32Array( 12 );
+	private readonly modelMatrixValues = new Float32Array( 16 );
 	private sourceModel: THREE.Group | null = null;
 	private sourceModelWasVisible = true;
 	private renderModel: THREE.Group | null = null;
@@ -127,9 +137,9 @@ export class UndergroundTopPortal {
 		uDepthFeatherMeters: { value: number };
 		uViewOpacity: { value: number };
 	} | null = null;
-	private cornersSignature = '';
-	private matrixSignature = '';
 	private portalDirty = true;
+	private redrawCount = 0;
+	private lastFrameError = '';
 
 	constructor(private readonly scene: THREE.Scene) {
 
@@ -153,7 +163,7 @@ export class UndergroundTopPortal {
 			args.enabled === false
 			|| args.model === null
 			|| args.footprintCorners.length !== 4
-			|| args.footprintCorners.some( ( point ) => point.toArray().some( ( value ) => Number.isFinite( value ) === false ) )
+		|| args.footprintCorners.some( ( point ) => Number.isFinite( point.x ) === false || Number.isFinite( point.y ) === false || Number.isFinite( point.z ) === false )
 		) {
 			this.hide();
 			return;
@@ -162,7 +172,10 @@ export class UndergroundTopPortal {
 		this.setSourceModel( args.model );
 		this.updateGeometry( args.renderer, args.footprintCorners );
 		this.syncModelMatrix();
-		this.ensureSurface();
+		if ( this.ensureSurface() === false ) {
+			this.hide();
+			return;
+		}
 		syncCpuDepthOcclusionUniforms( this.uniforms!, args.depthFrame );
 		this.updateViewOpacity( args.mainCamera );
 		this.sourceModel!.visible = false;
@@ -183,10 +196,8 @@ export class UndergroundTopPortal {
 		if ( portalHit?.uv === undefined ) {
 			return { hitPortal: false, sourceObject: null };
 		}
-		this.portalRaycaster.setFromCamera(
-			new THREE.Vector2( portalHit.uv.x * 2 - 1, portalHit.uv.y * 2 - 1 ),
-			this.camera
-		);
+		this.portalPickNdc.set( portalHit.uv.x * 2 - 1, portalHit.uv.y * 2 - 1 );
+		this.portalRaycaster.setFromCamera( this.portalPickNdc, this.camera );
 		const modelHit = this.renderModel === null
 			? undefined
 			: this.portalRaycaster.intersectObject( this.renderModel, true )
@@ -219,8 +230,8 @@ export class UndergroundTopPortal {
 		this.renderTarget?.dispose();
 		this.renderTarget = null;
 		this.uniforms = null;
-		this.cornersSignature = '';
-		this.matrixSignature = '';
+		this.cornerValues.fill( Number.NaN );
+		this.modelMatrixValues.fill( Number.NaN );
 		this.portalDirty = true;
 
 	}
@@ -259,7 +270,10 @@ export class UndergroundTopPortal {
 		this.renderModel?.removeFromParent();
 		this.sourceObjects.clear();
 		if ( this.sourceModel === null ) return;
+		// This renderProxy shares the source model's geometry/material resources. It is only
+		// rendered into the Portal target and is never attached to the main XR scene.
 		this.renderModel = this.sourceModel.clone( true );
+		this.renderModel.name = '__underground-top-portal-render-proxy';
 		const sourceNodes: THREE.Object3D[] = [];
 		const renderNodes: THREE.Object3D[] = [];
 		this.sourceModel.traverse( ( object ) => sourceNodes.push( object ) );
@@ -276,21 +290,19 @@ export class UndergroundTopPortal {
 		}
 		this.renderModel.matrixAutoUpdate = false;
 		this.renderScene.add( this.renderModel );
-		this.matrixSignature = '';
+		this.modelMatrixValues.fill( Number.NaN );
 		this.portalDirty = true;
 
 	}
 
 	private updateGeometry(renderer: THREE.WebGLRenderer, corners: THREE.Vector3[]): void {
 
-		const signature = corners.flatMap( ( point ) => point.toArray().map( ( value ) => value.toFixed( 5 ) ) ).join( ',' );
-		if ( signature === this.cornersSignature ) return;
-		this.cornersSignature = signature;
-		const [ p0, p1, p2, p3 ] = corners.map( ( point ) => point.clone() );
-		const axisU = p1.clone().sub( p0 ).normalize();
-		const axisV = p3.clone().sub( p0 ).normalize();
+		if ( this.copyChangedCorners( corners ) === false ) return;
+		const [ p0, p1, p2, p3 ] = corners;
+		const axisU = this.cameraForward.copy( p1 ).sub( p0 ).normalize();
+		const axisV = this.camera.up.copy( p3 ).sub( p0 ).normalize();
 		this.normal.crossVectors( axisU, axisV ).normalize();
-		if ( this.normal.dot( new THREE.Vector3( 0, 1, 0 ) ) < 0 ) this.normal.negate();
+		if ( this.normal.dot( this.worldUp ) < 0 ) this.normal.negate();
 		this.center.copy( p0 ).add( p1 ).add( p2 ).add( p3 ).multiplyScalar( 0.25 );
 		const width = 0.5 * ( p0.distanceTo( p1 ) + p3.distanceTo( p2 ) );
 		const height = 0.5 * ( p0.distanceTo( p3 ) + p1.distanceTo( p2 ) );
@@ -300,14 +312,20 @@ export class UndergroundTopPortal {
 		this.camera.bottom = - height / 2;
 		this.camera.position.copy( this.center ).addScaledVector( this.normal, 1 );
 		this.camera.up.copy( axisV );
-		this.camera.lookAt( this.center.clone().addScaledVector( this.normal, -1 ) );
+		this.lookAtTarget.copy( this.center ).addScaledVector( this.normal, -1 );
+		this.camera.lookAt( this.lookAtTarget );
 		this.camera.updateProjectionMatrix();
 		this.camera.updateMatrixWorld( true );
 
-		const lifted = [ p0, p1, p2, p3 ].map( ( point ) => point.addScaledVector( this.normal, PORTAL_SURFACE_LIFT_METERS ) );
-		const positions = [ lifted[ 0 ], lifted[ 1 ], lifted[ 2 ], lifted[ 0 ], lifted[ 2 ], lifted[ 3 ] ];
 		const geometry = new THREE.BufferGeometry();
-		geometry.setFromPoints( positions );
+		geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [
+			p0.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p0.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p0.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p1.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p1.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p1.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p2.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p2.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p2.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p0.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p0.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p0.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p2.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p2.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p2.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p3.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p3.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p3.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS
+		], 3 ) );
 		geometry.setAttribute( 'uv', new THREE.Float32BufferAttribute( [ 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1 ], 2 ) );
 		this.surface?.geometry.dispose();
 		if ( this.surface === null ) {
@@ -329,8 +347,8 @@ export class UndergroundTopPortal {
 
 		this.uniforms = Object.assign( createCpuDepthOcclusionUniforms(), {
 			uPortalColorTexture: { value: this.renderTarget?.texture ?? null },
-			uForegroundThresholdMeters: { value: 0.05 },
-			uDepthFeatherMeters: { value: 0.025 },
+			uForegroundThresholdMeters: { value: PORTAL_FOREGROUND_THRESHOLD_METERS },
+			uDepthFeatherMeters: { value: PORTAL_DEPTH_FEATHER_METERS },
 			uViewOpacity: { value: 1 }
 		} );
 		return new THREE.ShaderMaterial( {
@@ -347,10 +365,9 @@ export class UndergroundTopPortal {
 
 	}
 
-	private ensureSurface(): void {
+	private ensureSurface(): boolean {
 
-		if ( this.surface !== null && this.renderTarget !== null && this.uniforms !== null ) return;
-		throw new Error( 'Portal surface is missing valid footprint geometry.' );
+		return this.surface !== null && this.renderTarget !== null && this.uniforms !== null;
 
 	}
 
@@ -366,21 +383,37 @@ export class UndergroundTopPortal {
 		targetWidth = Math.min( maxSize, Math.max( PORTAL_MIN_RESOLUTION, targetWidth ) );
 		targetHeight = Math.min( maxSize, Math.max( PORTAL_MIN_RESOLUTION, targetHeight ) );
 		if ( this.renderTarget?.width === targetWidth && this.renderTarget.height === targetHeight ) return;
+		const nextTarget = this.createRenderTarget( renderer, targetWidth, targetHeight );
+		if ( nextTarget === null ) return;
 		this.renderTarget?.dispose();
-		this.renderTarget = new THREE.WebGLRenderTarget( targetWidth, targetHeight, {
-			format: THREE.RGBAFormat,
-			type: THREE.UnsignedByteType,
-			minFilter: THREE.LinearFilter,
-			magFilter: THREE.LinearFilter,
-			generateMipmaps: false,
-			depthBuffer: true,
-			stencilBuffer: false
-		} );
-		if ( renderer.capabilities.isWebGL2 ) {
-			this.renderTarget.samples = Math.min( renderer.capabilities.maxSamples, 4 );
-		}
+		this.renderTarget = nextTarget;
 		if ( this.uniforms !== null ) this.uniforms.uPortalColorTexture.value = this.renderTarget.texture;
 		this.portalDirty = true;
+
+	}
+
+	private createRenderTarget(renderer: THREE.WebGLRenderer, width: number, height: number): THREE.WebGLRenderTarget | null {
+
+		const longEdge = Math.max( width, height );
+		const aspect = width / height;
+		const sampleOptions = renderer.capabilities.isWebGL2 ? [ Math.min( renderer.capabilities.maxSamples, 2 ), 0 ] : [ 0 ];
+		for ( const candidateLongEdge of [ longEdge, Math.min( longEdge, 768 ), Math.min( longEdge, 512 ) ] ) {
+			const candidateWidth = Math.max( PORTAL_MIN_RESOLUTION, Math.round( aspect >= 1 ? candidateLongEdge : candidateLongEdge * aspect ) );
+			const candidateHeight = Math.max( PORTAL_MIN_RESOLUTION, Math.round( aspect >= 1 ? candidateLongEdge / aspect : candidateLongEdge ) );
+			for ( const samples of sampleOptions ) {
+				try {
+					const target = new THREE.WebGLRenderTarget( candidateWidth, candidateHeight, {
+						format: THREE.RGBAFormat, type: THREE.UnsignedByteType, minFilter: THREE.LinearFilter,
+						magFilter: THREE.LinearFilter, generateMipmaps: false, depthBuffer: true, stencilBuffer: false
+					} );
+					target.samples = samples;
+					return target;
+				} catch ( error ) {
+					this.lastFrameError = error instanceof Error ? error.message : String( error );
+				}
+			}
+		}
+		return null;
 
 	}
 
@@ -388,16 +421,14 @@ export class UndergroundTopPortal {
 
 		if ( this.sourceModel === null || this.renderModel === null ) return;
 		this.sourceModel.updateMatrixWorld( true );
-		const signature = this.sourceModel.matrixWorld.elements.map( ( value ) => value.toFixed( 6 ) ).join( ',' );
-		if ( signature === this.matrixSignature ) return;
-		this.matrixSignature = signature;
+		if ( this.copyChangedMatrix( this.sourceModel.matrixWorld.elements ) === false ) return;
 		this.renderModel.matrix.copy( this.sourceModel.matrixWorld );
 		this.renderModel.matrixWorld.copy( this.sourceModel.matrixWorld );
 		this.renderModel.updateMatrixWorld( true );
-		const bounds = new THREE.Box3().setFromObject( this.renderModel );
-		const size = bounds.getSize( new THREE.Vector3() );
-		const boundsCenter = bounds.getCenter( new THREE.Vector3() );
-		this.camera.far = Math.max( 50, this.camera.position.distanceTo( boundsCenter ) + size.length() + 10 );
+		this.bounds.setFromObject( this.renderModel );
+		this.bounds.getSize( this.boundsSize );
+		this.bounds.getCenter( this.boundsCenter );
+		this.camera.far = Math.max( 50, this.camera.position.distanceTo( this.boundsCenter ) + this.boundsSize.length() + 10 );
 		this.camera.updateProjectionMatrix();
 		this.portalDirty = true;
 
@@ -425,7 +456,7 @@ export class UndergroundTopPortal {
 
 		camera.updateMatrixWorld( true );
 		camera.getWorldDirection( this.cameraForward );
-		const factor = this.cameraForward.dot( this.normal.clone().negate() );
+		const factor = - this.cameraForward.dot( this.normal );
 		this.uniforms!.uViewOpacity.value = THREE.MathUtils.smoothstep( factor, 0.2, 0.45 );
 
 	}
@@ -451,6 +482,10 @@ export class UndergroundTopPortal {
 			renderer.clear( true, true, true );
 			renderer.render( this.renderScene, this.camera );
 			this.portalDirty = false;
+			this.redrawCount += 1;
+		} catch ( error ) {
+			this.lastFrameError = error instanceof Error ? error.message : String( error );
+			throw error;
 		} finally {
 			renderer.setRenderTarget( previousTarget );
 			renderer.xr.enabled = previousXrEnabled;
@@ -462,4 +497,58 @@ export class UndergroundTopPortal {
 		}
 
 	}
+
+	getDiagnostics(): Record<string, string | number | boolean> {
+
+		return {
+			enabled: this.surface?.visible === true,
+			dirty: this.portalDirty,
+			redrawCount: this.redrawCount,
+			renderTarget: this.renderTarget === null ? 'none' : `${this.renderTarget.width}x${this.renderTarget.height}`,
+			msaaSamples: this.renderTarget?.samples ?? 0,
+			foregroundThresholdMeters: PORTAL_FOREGROUND_THRESHOLD_METERS,
+			depthFeatherMeters: PORTAL_DEPTH_FEATHER_METERS,
+			lastFrameError: this.lastFrameError || 'none'
+		};
+
+	}
+
+	private copyChangedCorners(corners: THREE.Vector3[]): boolean {
+
+		let changed = false;
+		for ( let index = 0; index < 4; index += 1 ) {
+			const point = corners[ index ];
+			const offset = index * 3;
+			const x = Math.fround( point.x );
+			const y = Math.fround( point.y );
+			const z = Math.fround( point.z );
+			if ( this.cornerValues[ offset ] !== x || this.cornerValues[ offset + 1 ] !== y || this.cornerValues[ offset + 2 ] !== z ) changed = true;
+			this.cornerValues[ offset ] = x;
+			this.cornerValues[ offset + 1 ] = y;
+			this.cornerValues[ offset + 2 ] = z;
+		}
+		return changed;
+
+	}
+
+	private copyChangedMatrix(elements: ArrayLike<number>): boolean {
+
+		let changed = false;
+		for ( let index = 0; index < 16; index += 1 ) {
+			const value = Math.fround( elements[ index ] );
+			if ( this.modelMatrixValues[ index ] !== value ) changed = true;
+			this.modelMatrixValues[ index ] = value;
+		}
+		return changed;
+
+	}
+
+}
+
+function readPortalNumber(name: string, fallback: number): number {
+
+	if ( import.meta.env.DEV === false ) return fallback;
+	const value = Number( new URLSearchParams( window.location.search ).get( name ) );
+	return Number.isFinite( value ) && value >= 0 ? value : fallback;
+
 }
