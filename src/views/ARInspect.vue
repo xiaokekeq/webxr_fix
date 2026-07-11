@@ -1255,9 +1255,9 @@ function setArOverlayClass(active: boolean): void {
 							<button v-if="false && arDebugMode" type="button" class="debug-toggle" @click="store.actions.toggleCpuDepthOcclusionValidation()">
 							{{ engine.cpuDepthOcclusion.validationCubeEnabled ? '关闭 CPU Depth 遮挡验证方块' : 'CPU Depth 遮挡验证方块' }}
 						</button>
-							<ArInfoGrid v-if="arDebugMode" :items="cpuDepthOcclusionCards" />
+								<ArInfoGrid v-if="hasArSession" :items="cpuDepthOcclusionCards" />
 							<button
-								v-if="arDebugMode && hasArSession"
+									v-if="hasArSession"
 								type="button"
 								class="debug-toggle"
 								:disabled="canToggleCpuDepthValidation === false"
@@ -1266,7 +1266,7 @@ function setArOverlayClass(active: boolean): void {
 							>
 								{{ cpuDepthValidationButtonLabel }}
 							</button>
-							<div v-if="arDebugMode && hasArSession && canToggleCpuDepthValidation === false" class="runtime-banner warning">
+								<div v-if="hasArSession && canToggleCpuDepthValidation === false" class="runtime-banner warning">
 								{{ cpuDepthValidationBlockedReason }}
 							</div>
 							<button v-if="arDebugMode" type="button" class="debug-toggle" @click="registrationDiagnosticOpen = !registrationDiagnosticOpen">
