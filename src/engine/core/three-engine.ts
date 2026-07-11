@@ -3956,10 +3956,13 @@ export class ThreeEngine {
 
 	private getCurrentFootprintCornersAr(): THREE.Vector3[] {
 
-		const arFromEnuSolution = this.getActiveArFromEnuSolution();
-		if ( this.registrationSolution === null || arFromEnuSolution === null || this.registrationSolution.controlPoints.length < 4 ) return this.emptyFootprintCorners;
+		const undergroundRoot = this.getPortalModelScope().undergroundRoot;
+		if ( this.registrationSolution === null || undergroundRoot === null || this.registrationSolution.controlPoints.length < 4 ) return this.emptyFootprintCorners;
+		undergroundRoot.updateMatrixWorld( true );
 		for ( let index = 0; index < 4; index += 1 ) {
-			this.footprintCornersAr[ index ].copy( this.registrationSolution.controlPoints[ index ].worldEnu ).applyMatrix4( arFromEnuSolution.matrix );
+			this.footprintCornersAr[ index ]
+				.copy( this.registrationSolution.controlPoints[ index ].modelLocal )
+				.applyMatrix4( undergroundRoot.matrixWorld );
 		}
 		return this.footprintCornersAr;
 

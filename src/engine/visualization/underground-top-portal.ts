@@ -5,6 +5,7 @@ import {
 	type CpuDepthOcclusionUniforms
 } from '@/engine/depth/cpu-depth-occlusion.js';
 import type { CpuDepthFrame } from '@/engine/depth/real-depth-provider.js';
+import { isArDebugEnabled } from '@/engine/debug/ar-logger.js';
 
 const PORTAL_SURFACE_NAME = '__underground-top-portal-surface';
 const PORTAL_RENDER_ORDER = 40;
@@ -43,6 +44,7 @@ uniform ivec2 uDepthTextureSize;
 uniform float uForegroundThresholdMeters;
 uniform float uDepthFeatherMeters;
 uniform float uViewOpacity;
+uniform bool uDiagnosticDirectTexture;
 
 in vec2 vPortalUv;
 in vec4 vDepthClipPosition;
@@ -94,6 +96,10 @@ float foregroundMask() {
 
 void main() {
   vec4 portalColor = texture(uPortalColorTexture, vPortalUv);
+  if (uDiagnosticDirectTexture) {
+    outColor = portalColor;
+    return;
+  }
   vec3 portalBackground = vec3(0.025, 0.055, 0.08);
   vec3 visibleColor = mix(portalBackground, portalColor.rgb, portalColor.a);
   float baseAlpha = mix(0.68, 1.0, portalColor.a) * uViewOpacity;
@@ -113,6 +119,8 @@ export class UndergroundTopPortal {
 	private readonly portalRaycaster = new THREE.Raycaster();
 	private readonly sourceObjects = new Map<string, THREE.Object3D>();
 	private readonly normal = new THREE.Vector3( 0, 1, 0 );
+	private readonly axisU = new THREE.Vector3();
+	private readonly axisV = new THREE.Vector3();
 	private readonly center = new THREE.Vector3();
 	private readonly cameraForward = new THREE.Vector3();
 	private readonly previousViewport = new THREE.Vector4();
@@ -136,6 +144,7 @@ export class UndergroundTopPortal {
 		uForegroundThresholdMeters: { value: number };
 		uDepthFeatherMeters: { value: number };
 		uViewOpacity: { value: number };
+		uDiagnosticDirectTexture: { value: boolean };
 	} | null = null;
 	private portalDirty = true;
 	private redrawCount = 0;
@@ -177,11 +186,13 @@ export class UndergroundTopPortal {
 			return;
 		}
 		syncCpuDepthOcclusionUniforms( this.uniforms!, args.depthFrame );
+		if ( isArDebugEnabled() ) this.uniforms!.uDepthOcclusionEnabled.value = false;
 		this.updateViewOpacity( args.mainCamera );
 		this.sourceModel!.visible = false;
 		this.surface!.visible = this.uniforms!.uViewOpacity.value > 0.001;
 		if ( this.portalDirty ) {
 			this.syncRenderModelState();
+			this.logDirtyDiagnostics( args.footprintCorners );
 			this.render( args.renderer );
 		}
 
@@ -273,6 +284,7 @@ export class UndergroundTopPortal {
 		// This renderProxy shares the source model's geometry/material resources. It is only
 		// rendered into the Portal target and is never attached to the main XR scene.
 		this.renderModel = this.sourceModel.clone( true );
+		this.renderModel.visible = true;
 		this.renderModel.name = '__underground-top-portal-render-proxy';
 		const sourceNodes: THREE.Object3D[] = [];
 		const renderNodes: THREE.Object3D[] = [];
@@ -299,9 +311,9 @@ export class UndergroundTopPortal {
 
 		if ( this.copyChangedCorners( corners ) === false ) return;
 		const [ p0, p1, p2, p3 ] = corners;
-		const axisU = this.cameraForward.copy( p1 ).sub( p0 ).normalize();
-		const axisV = this.camera.up.copy( p3 ).sub( p0 ).normalize();
-		this.normal.crossVectors( axisU, axisV ).normalize();
+		this.axisU.copy( p1 ).sub( p0 ).normalize();
+		this.axisV.copy( p3 ).sub( p0 ).normalize();
+		this.normal.crossVectors( this.axisU, this.axisV ).normalize();
 		if ( this.normal.dot( this.worldUp ) < 0 ) this.normal.negate();
 		this.center.copy( p0 ).add( p1 ).add( p2 ).add( p3 ).multiplyScalar( 0.25 );
 		const width = 0.5 * ( p0.distanceTo( p1 ) + p3.distanceTo( p2 ) );
@@ -311,7 +323,7 @@ export class UndergroundTopPortal {
 		this.camera.top = height / 2;
 		this.camera.bottom = - height / 2;
 		this.camera.position.copy( this.center ).addScaledVector( this.normal, 1 );
-		this.camera.up.copy( axisV );
+		this.camera.up.copy( this.axisV );
 		this.lookAtTarget.copy( this.center ).addScaledVector( this.normal, -1 );
 		this.camera.lookAt( this.lookAtTarget );
 		this.camera.updateProjectionMatrix();
@@ -349,7 +361,8 @@ export class UndergroundTopPortal {
 			uPortalColorTexture: { value: this.renderTarget?.texture ?? null },
 			uForegroundThresholdMeters: { value: PORTAL_FOREGROUND_THRESHOLD_METERS },
 			uDepthFeatherMeters: { value: PORTAL_DEPTH_FEATHER_METERS },
-			uViewOpacity: { value: 1 }
+			uViewOpacity: { value: 1 },
+			uDiagnosticDirectTexture: { value: isArDebugEnabled() }
 		} );
 		return new THREE.ShaderMaterial( {
 			uniforms: this.uniforms,
@@ -437,6 +450,7 @@ export class UndergroundTopPortal {
 	private syncRenderModelState(): void {
 
 		if ( this.renderModel === null ) return;
+		this.renderModel.visible = true;
 		this.renderModel.traverse( ( renderObject ) => {
 			if ( renderObject === this.renderModel ) return;
 			const sourceId = renderObject.userData.__portalSourceObjectId;
@@ -449,6 +463,44 @@ export class UndergroundTopPortal {
 				renderObject.material = source.material;
 			}
 		} );
+
+	}
+
+	private logDirtyDiagnostics(corners: THREE.Vector3[]): void {
+
+		if ( isArDebugEnabled() === false || this.sourceModel === null || this.renderModel === null ) return;
+		this.renderModel.updateMatrixWorld( true );
+		const box = new THREE.Box3().setFromObject( this.renderModel );
+		const boxCenter = box.getCenter( new THREE.Vector3() );
+		const boxSize = box.getSize( new THREE.Vector3() );
+		const ndcBounds = projectBoxToNdc( box, this.camera );
+		let visibleMeshCount = 0;
+		let renderableVisibleMeshCount = 0;
+		this.renderModel.traverseVisible( ( object ) => {
+			if ( object instanceof THREE.Mesh ) {
+				visibleMeshCount += 1;
+				if ( object.geometry?.getAttribute( 'position' ) !== undefined && object.material !== undefined ) renderableVisibleMeshCount += 1;
+			}
+		} );
+		const outside = ndcBounds.right < -1 || ndcBounds.left > 1 || ndcBounds.top < -1 || ndcBounds.bottom > 1;
+		console.info( '[PortalDirtyDiagnostic]', {
+			corners: corners.map( vectorToObject ),
+			center: vectorToObject( this.center ), normal: vectorToObject( this.normal ),
+			axisU: vectorToObject( this.axisU ), axisV: vectorToObject( this.axisV ),
+			camera: { left: this.camera.left, right: this.camera.right, top: this.camera.top, bottom: this.camera.bottom, near: this.camera.near, far: this.camera.far },
+			sourceModelMatrixWorld: this.sourceModel.matrixWorld.toArray(),
+			renderProxyMatrixWorld: this.renderModel.matrixWorld.toArray(),
+			renderProxyWorldBox: { center: vectorToObject( boxCenter ), size: vectorToObject( boxSize ) },
+			portalModelNdcBounds: ndcBounds,
+			renderProxyVisible: this.renderModel.visible,
+			visibleMeshCount,
+			renderableVisibleMeshCount,
+			renderTargetHasRenderableModel: renderableVisibleMeshCount > 0,
+			cpuDepthOcclusionEnabled: false,
+			result: outside ? 'Portal model is outside orthographic footprint.' : 'Portal model intersects orthographic footprint.'
+		} );
+		console.assert( this.renderModel.visible, 'Portal render proxy root must be visible.' );
+		console.assert( renderableVisibleMeshCount > 0, 'Portal render proxy must contain renderable visible meshes.' );
 
 	}
 
@@ -542,6 +594,28 @@ export class UndergroundTopPortal {
 		return changed;
 
 	}
+
+}
+
+function projectBoxToNdc(box: THREE.Box3, camera: THREE.Camera): { left: number; right: number; bottom: number; top: number; near: number; far: number } {
+
+	const result = { left: Infinity, right: -Infinity, bottom: Infinity, top: -Infinity, near: Infinity, far: -Infinity };
+	for ( const x of [ box.min.x, box.max.x ] ) for ( const y of [ box.min.y, box.max.y ] ) for ( const z of [ box.min.z, box.max.z ] ) {
+		const point = new THREE.Vector3( x, y, z ).project( camera );
+		result.left = Math.min( result.left, point.x );
+		result.right = Math.max( result.right, point.x );
+		result.bottom = Math.min( result.bottom, point.y );
+		result.top = Math.max( result.top, point.y );
+		result.near = Math.min( result.near, point.z );
+		result.far = Math.max( result.far, point.z );
+	}
+	return result;
+
+}
+
+function vectorToObject(vector: THREE.Vector3): { x: number; y: number; z: number } {
+
+	return { x: vector.x, y: vector.y, z: vector.z };
 
 }
 
