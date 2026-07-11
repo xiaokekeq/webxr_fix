@@ -6,6 +6,7 @@ export const SECTION_CUT_SEMANTICS = 'open-clipping' as const;
 export interface ArSectionCutController {
 	setPlaneMode(mode: SectionCutPlaneMode): void;
 	apply(modelRoot: THREE.Object3D | null, value: number): THREE.Plane | null;
+	markBoundsDirty(): void;
 	restore(): void;
 	dispose(): void;
 }
@@ -24,7 +25,10 @@ const relativeMatrix = new THREE.Matrix4();
 export function createArSectionCutController(renderer: THREE.WebGLRenderer): ArSectionCutController {
 
 	const plane = new THREE.Plane();
+	const matrixValues = new Float32Array( 16 );
 	let planeMode: SectionCutPlaneMode = 'horizontal-section';
+	let cachedRoot: THREE.Object3D | null = null;
+	let boundsDirty = true;
 
 	function apply(modelRoot: THREE.Object3D | null, value: number): THREE.Plane | null {
 
@@ -33,8 +37,13 @@ export function createArSectionCutController(renderer: THREE.WebGLRenderer): ArS
 			return null;
 		}
 		modelRoot.updateWorldMatrix( true, true );
-		worldBounds.setFromObject( modelRoot );
-		resolveModelLocalBounds( modelRoot );
+		const matrixChanged = copyChangedMatrix( modelRoot.matrixWorld.elements, matrixValues );
+		if ( cachedRoot !== modelRoot || boundsDirty || matrixChanged ) {
+			cachedRoot = modelRoot;
+			resolveModelLocalBounds( modelRoot );
+			worldBounds.copy( localBounds ).applyMatrix4( modelRoot.matrixWorld );
+			boundsDirty = false;
+		}
 		const axis = resolvePlaneAxis( planeMode );
 		worldNormal.set( 0, 0, 0 ).setComponent( axisToIndex( axis ), -1 )
 			.applyQuaternion( modelRoot.getWorldQuaternion( worldQuaternion ) ).normalize();
@@ -47,13 +56,32 @@ export function createArSectionCutController(renderer: THREE.WebGLRenderer): ArS
 	}
 
 	function restore(): void { renderer.localClippingEnabled = false; }
+	function markBoundsDirty(): void { boundsDirty = true; }
 
 	return {
 		setPlaneMode(mode) { planeMode = mode; },
 		apply,
+		markBoundsDirty,
 		restore,
-		dispose: restore
+		dispose() {
+			restore();
+			cachedRoot = null;
+			boundsDirty = true;
+			matrixValues.fill( Number.NaN );
+		}
 	};
+
+}
+
+function copyChangedMatrix(elements: ArrayLike<number>, previous: Float32Array): boolean {
+
+	let changed = false;
+	for ( let index = 0; index < 16; index += 1 ) {
+		const value = Math.fround( elements[ index ] );
+		if ( previous[ index ] !== value ) changed = true;
+		previous[ index ] = value;
+	}
+	return changed;
 
 }
 

@@ -79,7 +79,6 @@ import {
 } from '@/localization/marker/marker-localization-storage.js';
 import { createLayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
 import { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
-import { createArLayerPeelingController } from '@/engine/visualization/ar-layer-peeling.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { UndergroundTopPortal } from '@/engine/visualization/underground-top-portal.js';
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
@@ -256,7 +255,7 @@ export class ThreeEngine {
 	private readonly sceneBundle;
 	private readonly xrButtonWrap: HTMLDivElement;
 	private readonly modelOrientation = new THREE.Quaternion();
-	private readonly engineeringCornerDebugGroup = new THREE.Group();
+	private readonly registrationDebugRoot = new THREE.Group();
 	private readonly engineeringDebugLayers: EngineeringDebugLayerOptions = {
 		showMarkerExpected: readDebugLayerFlag( 'VITE_SHOW_MARKER_EXPECTED', false ),
 		showMarkerCaptured: readDebugLayerFlag( 'VITE_SHOW_MARKER_CAPTURED', false ),
@@ -265,7 +264,6 @@ export class ThreeEngine {
 		showModelBoundingBox: readDebugLayerFlag( 'VITE_SHOW_MODEL_BOUNDING_BOX', false )
 	};
 	private readonly materialStateRuntime = new MaterialStateRuntime();
-	private readonly layerPeelingController = createArLayerPeelingController();
 	private readonly sectionCutController;
 	private readonly annotationLabelsController;
 	private readonly annotationLayer = new AnnotationLayer();
@@ -367,8 +365,8 @@ export class ThreeEngine {
 			depthFrame: this.realDepthProvider.getCurrentFrame(),
 			enabled: false
 		};
-		this.engineeringCornerDebugGroup.name = '__engineering-corner-debug';
-		this.sceneBundle.scene.add( this.engineeringCornerDebugGroup );
+		this.registrationDebugRoot.name = '__registration-debug-root';
+		this.sceneBundle.scene.add( this.registrationDebugRoot );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
 
 		const statusRuntime = createStatusRuntime( {
@@ -405,7 +403,6 @@ export class ThreeEngine {
 			placementSession: this.placementSession,
 			layerVisibility: this.layerVisibility,
 			materialStateRuntime: this.materialStateRuntime,
-			layerPeelingController: this.layerPeelingController,
 			sectionCutController: this.sectionCutController,
 			getUndergroundModelRoot: () => this.getPortalModelScope().undergroundRoot,
 			syncAttachmentInfoBoardVisibility: () => {
@@ -887,7 +884,6 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.materialStateRuntime.dispose();
-		this.layerPeelingController.dispose();
 		this.sectionCutController.dispose();
 		this.undergroundPortal.dispose();
 		this.annotationLabelsController.dispose();
@@ -2043,7 +2039,7 @@ export class ThreeEngine {
 
 		if ( this.engineeringDebugLayers.showFootprintExpected && this.registrationSolution !== null ) {
 			const footprintControlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
-			const footprintCornersAr = this.getCurrentFootprintCornersAr();
+			const footprintCornersAr = this.getTargetControlPointCornersAr( arFromEnuSolution );
 			const footprintCenterAr = averageVectors( footprintControlPoints.map( ( point ) => point.worldEnu ) )
 				.applyMatrix4( arFromEnuSolution.matrix );
 			this.yellowUpdateCount += 1;
@@ -2080,10 +2076,6 @@ export class ThreeEngine {
 		const placedModel = this.placementSession.getArPlacedModel();
 		if ( placedModel !== null && this.registrationSolution !== null ) {
 			const controlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
-			const engineeringMatrix = this.fixedEngineeringMatrix ?? composeModelRawLocalToArMatrix( {
-				arFromEnuSolution,
-				registrationSolution: this.registrationSolution as EngineeringRegistrationSolution
-			} );
 			const undergroundPlacement = this.modelTemplate === null
 				? null
 				: deriveUndergroundRegistrationSolution( {
@@ -2091,8 +2083,8 @@ export class ThreeEngine {
 					modelTemplate: this.modelTemplate
 				} );
 			placedModel.updateMatrixWorld( true );
-			const engineeringPoints = controlPoints
-				.map( ( point ) => point.modelLocal.clone().applyMatrix4( engineeringMatrix ) );
+			const engineeringPoints = this.getActualModelControlPointCornersAr();
+			const targetPoints = this.getTargetControlPointCornersAr( arFromEnuSolution );
 			const undergroundExpectedPoints = controlPoints
 				.map( ( _point, index ) => undergroundPlacement?.undergroundControlPoints[ index ]?.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) )
 				.filter( ( point ): point is THREE.Vector3 => point !== undefined );
@@ -2116,6 +2108,17 @@ export class ThreeEngine {
 					labels: controlPoints.map( ( point ) => `actual-${point.id}-engineering` ),
 					color: 0xff4dff
 				} );
+				for ( let index = 0; index < Math.min( targetPoints.length, engineeringPoints.length ); index += 1 ) {
+					this.addDebugLine( `residual-${controlPoints[ index ].id}`, [ targetPoints[ index ], engineeringPoints[ index ] ], 0xffffff );
+				}
+				arInfo( 'RegistrationControlPointResiduals', controlPoints.map( ( point, index ) => ( {
+					id: point.id,
+					targetWorldEnu: vector3ToRoundedObject( point.worldEnu ),
+					targetAr: vector3ToRoundedObject( targetPoints[ index ] ),
+					modelLocal: vector3ToRoundedObject( point.modelLocal ),
+					actualAr: vector3ToRoundedObject( engineeringPoints[ index ] ),
+					residualMeters: targetPoints[ index ].distanceTo( engineeringPoints[ index ] )
+				} ) ) );
 				if ( import.meta.env.VITE_AR_DEBUG === 'true' ) {
 					this.addDebugQuad( {
 						name: 'model-cp-underground-expected',
@@ -2135,7 +2138,7 @@ export class ThreeEngine {
 			if ( this.engineeringDebugLayers.showModelBoundingBox && bbox.isEmpty() === false ) {
 				const helper = new THREE.Box3Helper( bbox, 0xffffff );
 				helper.name = 'model-bbox';
-				this.engineeringCornerDebugGroup.add( helper );
+				this.registrationDebugRoot.add( helper );
 			}
 		}
 
@@ -2167,7 +2170,7 @@ export class ThreeEngine {
 		const geometry = new THREE.BufferGeometry().setFromPoints( [ ...args.points, args.points[ 0 ] ] );
 		const line = new THREE.Line( geometry, material );
 		line.name = `${args.name}-quad`;
-		this.engineeringCornerDebugGroup.add( line );
+		this.registrationDebugRoot.add( line );
 
 		for ( let index = 0; index < args.points.length; index += 1 ) {
 			const sphere = new THREE.Mesh(
@@ -2176,11 +2179,11 @@ export class ThreeEngine {
 			);
 			sphere.position.copy( args.points[ index ] );
 			sphere.name = `${args.name}-${args.labels[ index ]}`;
-			this.engineeringCornerDebugGroup.add( sphere );
+			this.registrationDebugRoot.add( sphere );
 
 			const label = createDebugTextSprite( args.labels[ index ], args.color );
 			label.position.copy( args.points[ index ] ).add( new THREE.Vector3( 0, 0.08, 0 ) );
-			this.engineeringCornerDebugGroup.add( label );
+			this.registrationDebugRoot.add( label );
 		}
 
 	}
@@ -2193,11 +2196,11 @@ export class ThreeEngine {
 		);
 		sphere.name = labelText;
 		sphere.position.copy( position );
-		this.engineeringCornerDebugGroup.add( sphere );
+		this.registrationDebugRoot.add( sphere );
 
 		const label = createDebugTextSprite( labelText, color );
 		label.position.copy( position ).add( new THREE.Vector3( 0, 0.1, 0 ) );
-		this.engineeringCornerDebugGroup.add( label );
+		this.registrationDebugRoot.add( label );
 
 	}
 
@@ -2207,7 +2210,7 @@ export class ThreeEngine {
 		const geometry = new THREE.BufferGeometry().setFromPoints( points );
 		const line = new THREE.Line( geometry, material );
 		line.name = name;
-		this.engineeringCornerDebugGroup.add( line );
+		this.registrationDebugRoot.add( line );
 
 	}
 
@@ -2222,7 +2225,7 @@ export class ThreeEngine {
 		point.name = 'site-origin-reference-point';
 		point.position.copy( originAr );
 		markSiteOriginReferenceObject( point );
-		this.engineeringCornerDebugGroup.add( point );
+		this.registrationDebugRoot.add( point );
 
 		this.addDebugLine( 'site-origin-reference-line', [ originAr, labelPosition ], 0x38bdf8 );
 		const label = createCanvasPanelSprite( {
@@ -2234,7 +2237,19 @@ export class ThreeEngine {
 		label.name = 'site-origin-reference-label';
 		label.position.copy( labelPosition );
 		markSiteOriginReferenceObject( label );
-		this.engineeringCornerDebugGroup.add( label );
+		this.registrationDebugRoot.add( label );
+		this.registrationDebugRoot.updateMatrixWorld( true );
+		const displayedOrigin = point.getWorldPosition( new THREE.Vector3() );
+		console.assert(
+			displayedOrigin.distanceTo( originAr ) <= 0.001 && point.parent === this.registrationDebugRoot && this.registrationDebugRoot.parent === this.sceneBundle.scene,
+			'Site origin debug marker must use ENU (0,0,0) -> arFromEnu under registrationDebugRoot.',
+			{
+				expectedSiteOriginAr: vector3ToRoundedObject( originAr ),
+				displayedSiteOriginWorldPosition: vector3ToRoundedObject( displayedOrigin ),
+				parent: point.parent?.name ?? 'none',
+				parentMatrixWorld: this.registrationDebugRoot.matrixWorld.toArray()
+			}
+		);
 
 		if ( this.siteOriginReferencePanelOpen ) {
 			const detail = createCanvasPanelSprite( {
@@ -2247,14 +2262,14 @@ export class ThreeEngine {
 			detail.name = 'site-origin-reference-detail';
 			detail.position.copy( labelPosition ).add( new THREE.Vector3( 0, 0.34, 0 ) );
 			markSiteOriginReferenceObject( detail );
-			this.engineeringCornerDebugGroup.add( detail );
+			this.registrationDebugRoot.add( detail );
 		}
 
 	}
 
 	private handleSiteOriginReferencePick(raycaster: THREE.Raycaster): boolean {
 
-		const hit = raycaster.intersectObjects( this.engineeringCornerDebugGroup.children, true )
+		const hit = raycaster.intersectObjects( this.registrationDebugRoot.children, true )
 			.find( ( intersection ) => hasSiteOriginReferenceObject( intersection.object ) );
 		if ( hit === undefined ) {
 			return false;
@@ -2276,8 +2291,8 @@ export class ThreeEngine {
 
 	private clearEngineeringCornerDebug(): void {
 
-		while ( this.engineeringCornerDebugGroup.children.length > 0 ) {
-			const child = this.engineeringCornerDebugGroup.children.pop();
+		while ( this.registrationDebugRoot.children.length > 0 ) {
+			const child = this.registrationDebugRoot.children.pop();
 			if ( child !== undefined ) {
 				disposeDebugObject( child );
 			}
@@ -3852,7 +3867,7 @@ export class ThreeEngine {
 		const args = this.portalUpdateArgs!;
 		args.mainCamera = this.sceneBundle.renderer.xr.getCamera();
 		args.model = this.getPortalModelScope().undergroundRoot;
-		args.footprintCorners = this.getCurrentFootprintCornersAr();
+		args.footprintCorners = this.getPortalFootprintCornersAr();
 		args.depthFrame = depthFrame;
 		args.enabled = this.store.getState().undergroundViewMode === 'portal';
 		const portalStatus = this.undergroundPortal.update( args );
@@ -3866,7 +3881,7 @@ export class ThreeEngine {
 
 	}
 
-	private getCurrentFootprintCornersAr(): THREE.Vector3[] {
+	private getPortalFootprintCornersAr(): THREE.Vector3[] {
 
 		const undergroundRoot = this.getPortalModelScope().undergroundRoot;
 		if ( this.registrationSolution === null || undergroundRoot === null || this.registrationSolution.controlPoints.length < 4 ) return this.emptyFootprintCorners;
@@ -3877,6 +3892,24 @@ export class ThreeEngine {
 				.applyMatrix4( undergroundRoot.matrixWorld );
 		}
 		return this.footprintCornersAr;
+
+	}
+
+	private getTargetControlPointCornersAr(arFromEnuSolution: ArFromEnuSolution): THREE.Vector3[] {
+
+		if ( this.registrationSolution === null ) return [];
+		return this.registrationSolution.controlPoints.slice( 0, 4 )
+			.map( ( point ) => point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix ) );
+
+	}
+
+	private getActualModelControlPointCornersAr(): THREE.Vector3[] {
+
+		const undergroundRoot = this.getPortalModelScope().undergroundRoot;
+		if ( this.registrationSolution === null || undergroundRoot === null ) return [];
+		undergroundRoot.updateMatrixWorld( true );
+		return this.registrationSolution.controlPoints.slice( 0, 4 )
+			.map( ( point ) => point.modelLocal.clone().applyMatrix4( undergroundRoot.matrixWorld ) );
 
 	}
 
@@ -4303,6 +4336,7 @@ export class ThreeEngine {
 
 	private rebuildModelLayers(): void {
 
+		this.sectionCutController.markBoundsDirty();
 		this.layerVisibility.rebuild( {
 			modelRoot: this.modelTemplate,
 			pipesByName: this.pipesByName

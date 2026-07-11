@@ -36,6 +36,7 @@ export function createLayerVisibilityController(): LayerVisibilityController {
 
 	let layerDefinitions: LayerDefinition[] = [];
 	let hiddenLayerIds: string[] = [];
+	const visibilityRecords = new WeakMap<THREE.Object3D, { originalVisible: boolean; hiddenByLayerPeeling: boolean }>();
 
 	return {
 		rebuild(options) {
@@ -100,8 +101,22 @@ export function createLayerVisibilityController(): LayerVisibilityController {
 				}
 
 				for ( const object of objects ) {
-					object.visible = layer.visible;
-					object.userData.__layerHidden = layer.visible === false;
+					let record = visibilityRecords.get( object );
+					if ( record === undefined ) {
+						record = { originalVisible: object.visible, hiddenByLayerPeeling: false };
+						visibilityRecords.set( object, record );
+					}
+					if ( layer.visible === false ) {
+						if ( record.hiddenByLayerPeeling === false ) record.originalVisible = object.visible;
+						record.hiddenByLayerPeeling = true;
+						object.visible = false;
+					} else if ( record.hiddenByLayerPeeling ) {
+						record.hiddenByLayerPeeling = false;
+						object.visible = record.originalVisible;
+					} else {
+						record.originalVisible = object.visible;
+					}
+					object.userData.__layerHidden = record.hiddenByLayerPeeling;
 				}
 			}
 

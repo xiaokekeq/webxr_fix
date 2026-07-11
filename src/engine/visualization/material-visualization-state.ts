@@ -42,7 +42,7 @@ export function rememberMaterialSnapshot(
 		depthWrite: material.depthWrite,
 		depthTest: material.depthTest,
 		side: material.side,
-		clippingPlanes: material.clippingPlanes?.map( ( plane ) => plane.clone() ) ?? null,
+		clippingPlanes: material.clippingPlanes,
 		clipIntersection: material.clipIntersection,
 		clipShadows: material.clipShadows
 	} );
