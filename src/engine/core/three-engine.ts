@@ -117,6 +117,7 @@ import { repositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
 import { RealDepthProvider } from '@/engine/depth/real-depth-provider.js';
+import { CpuDepthOcclusionValidation } from '@/engine/depth/cpu-depth-occlusion-validation.js';
 import { readPlaceableTemplateReport } from '@/engine/core/model.js';
 import { arInfo } from '@/engine/debug/ar-logger.js';
 
@@ -161,6 +162,20 @@ export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
 	hasSelection: boolean;
 	currentStatus: string;
+	cpuDepthOcclusion: CpuDepthOcclusionDebugState;
+}
+
+export interface CpuDepthOcclusionDebugState {
+	sessionEnabled: boolean;
+	valid: boolean;
+	stale: boolean;
+	width: number;
+	height: number;
+	ageMs: number | null;
+	rawValueToMeters: number;
+	validationCubeEnabled: boolean;
+	validationCubeVisible: boolean;
+	occlusionEnabled: boolean;
 }
 
 function createInitialState(): RegistrationStoreState {
@@ -304,6 +319,20 @@ export class ThreeEngine {
 	private currentArSessionId: string | null = null;
 	private siteOriginReferencePanelOpen = false;
 	private readonly realDepthProvider = new RealDepthProvider();
+	private readonly cpuDepthOcclusionValidation: CpuDepthOcclusionValidation;
+	private cpuDepthOcclusionDebug: CpuDepthOcclusionDebugState = {
+		sessionEnabled: false,
+		valid: false,
+		stale: true,
+		width: 0,
+		height: 0,
+		ageMs: null,
+		rawValueToMeters: 0,
+		validationCubeEnabled: false,
+		validationCubeVisible: false,
+		occlusionEnabled: false
+	};
+	private lastCpuDepthDebugSyncAt = 0;
 	private readonly frameTaskErrorCounts = new Map<string, number>();
 	private readonly frameTaskLastErrorLogAt = new Map<string, number>();
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
@@ -352,6 +381,7 @@ export class ThreeEngine {
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
+		this.cpuDepthOcclusionValidation = new CpuDepthOcclusionValidation( this.sceneBundle.scene );
 		this.engineeringCornerDebugGroup.name = '__engineering-corner-debug';
 		this.sceneBundle.scene.add( this.engineeringCornerDebugGroup );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
@@ -803,7 +833,8 @@ export class ThreeEngine {
 		return {
 			...state,
 			hasSelection: hasSelectedPipe( state ),
-			currentStatus: this.currentStatus
+			currentStatus: this.currentStatus,
+			cpuDepthOcclusion: this.cpuDepthOcclusionDebug
 		};
 
 	}
@@ -856,6 +887,7 @@ export class ThreeEngine {
 
 		this.disposed = true;
 		this.sceneBundle.renderer.setAnimationLoop( null );
+		this.cpuDepthOcclusionValidation.dispose();
 		this.realDepthProvider.dispose();
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
@@ -990,6 +1022,15 @@ export class ThreeEngine {
 
 		this.store.patch( { sectionCutPlaneMode: mode } );
 		this.setStatus( `剖切方向已切换为：${getSectionCutPlaneModeLabel( mode )}` );
+
+	}
+
+	toggleCpuDepthOcclusionValidation(): void {
+
+		const current = this.cpuDepthOcclusionValidation.getState();
+		this.cpuDepthOcclusionValidation.setEnabled( current.enabled === false );
+		this.syncCpuDepthOcclusionDebug( true );
+		this.emit();
 
 	}
 
@@ -3825,15 +3866,43 @@ export class ThreeEngine {
 
 
 	private updateRealDepth(frame: XRFrame): void {
-
-		if ( this.realDepthProvider.isSessionEnabled() === false ) {
-			return;
-		}
 		const referenceSpace = this.sceneBundle.renderer.xr.getReferenceSpace();
 		const view = referenceSpace === null ? null : frame.getViewerPose( referenceSpace )?.views[ 0 ] ?? null;
-		if ( view !== null ) {
+		if ( this.realDepthProvider.isSessionEnabled() && view !== null ) {
 			this.realDepthProvider.update( frame, view, performance.now() );
 		}
+		if ( view !== null ) {
+			this.cpuDepthOcclusionValidation.update(
+				this.sceneBundle.renderer.xr.getCamera(),
+				this.realDepthProvider.getCurrentFrame()
+			);
+		}
+		this.syncCpuDepthOcclusionDebug();
+
+	}
+
+	private syncCpuDepthOcclusionDebug(force = false): void {
+
+		const now = performance.now();
+		if ( force === false && now - this.lastCpuDepthDebugSyncAt < 500 ) {
+			return;
+		}
+		this.lastCpuDepthDebugSyncAt = now;
+		const frame = this.realDepthProvider.getCurrentFrame();
+		const validation = this.cpuDepthOcclusionValidation.getState();
+		this.cpuDepthOcclusionDebug = {
+			sessionEnabled: frame.sessionEnabled,
+			valid: frame.available && frame.stale === false,
+			stale: frame.stale,
+			width: frame.width,
+			height: frame.height,
+			ageMs: Number.isFinite( frame.ageMs ) ? Math.round( frame.ageMs ) : null,
+			rawValueToMeters: frame.rawValueToMeters,
+			validationCubeEnabled: validation.enabled,
+			validationCubeVisible: validation.placed,
+			occlusionEnabled: validation.occlusionEnabled
+		};
+		this.emit();
 
 	}
 
@@ -3842,6 +3911,7 @@ export class ThreeEngine {
 		this.store.clearModelPlacementDebug();
 		if ( result.depthGranted ) this.realDepthProvider.initialize( result.session );
 		else this.realDepthProvider.dispose();
+		this.syncCpuDepthOcclusionDebug( true );
 		this.sessionLifecycleRuntime.handleXRSessionStart();
 
 	}
@@ -3849,7 +3919,9 @@ export class ThreeEngine {
 	private handleXRSessionEnd(): void {
 
 		this.arSessionEndPending = false;
+		this.cpuDepthOcclusionValidation.dispose();
 		this.realDepthProvider.dispose();
+		this.syncCpuDepthOcclusionDebug( true );
 		this.arCoordinateService.clear( 'xr-session-end' );
 		this.annotationLayer.clear();
 		this.annotationLayer.setSelected( null );

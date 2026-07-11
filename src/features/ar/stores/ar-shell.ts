@@ -234,6 +234,12 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
+		toggleCpuDepthOcclusionValidation(): void {
+
+			ensureController().actions.toggleCpuDepthOcclusionValidation();
+
+		},
+
 		closePropertyPanel(): void {
 
 			ensureController().actions.closePropertyPanel();

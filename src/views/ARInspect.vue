@@ -118,6 +118,19 @@ const debugCards = computed( () => [
 	{ label: 'mock note', value: configStatus.value.mockWarningText || '-', wide: true }
 ] );
 
+const cpuDepthOcclusionCards = computed( () => {
+	const depth = engine.value.cpuDepthOcclusion;
+	return [
+		{ label: 'CPU Depth Session', value: depth.sessionEnabled ? '可用' : '不可用' },
+		{ label: 'Frame', value: depth.valid ? '有效' : depth.stale ? '过期' : '等待' },
+		{ label: 'Size', value: `${depth.width} x ${depth.height}` },
+		{ label: 'Age', value: depth.ageMs === null ? '-' : `${depth.ageMs}ms` },
+		{ label: 'rawValueToMeters', value: depth.rawValueToMeters.toFixed( 6 ), wide: true },
+		{ label: 'Validation Cube', value: depth.validationCubeVisible ? '显示' : '隐藏' },
+		{ label: 'Occlusion', value: depth.occlusionEnabled ? '启用' : '禁用' }
+	];
+} );
+
 const activeControlTargetSummary = computed( () => {
 	const activeId = configStatus.value.activeControlTargetId;
 	if ( activeId !== undefined ) {
@@ -1206,6 +1219,10 @@ function setArOverlayClass(active: boolean): void {
 							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
 						</button>
 						<ArInfoGrid v-if="arDebugMode && debugInfoOpen" :items="debugCards" />
+						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="store.actions.toggleCpuDepthOcclusionValidation()">
+							{{ engine.cpuDepthOcclusion.validationCubeEnabled ? '关闭 CPU Depth 遮挡验证方块' : 'CPU Depth 遮挡验证方块' }}
+						</button>
+						<ArInfoGrid v-if="arDebugMode" :items="cpuDepthOcclusionCards" />
 						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="registrationDiagnosticOpen = !registrationDiagnosticOpen">
 							{{ registrationDiagnosticOpen ? '收起配准诊断' : '配准诊断' }}
 						</button>
