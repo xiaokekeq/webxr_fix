@@ -80,8 +80,7 @@ import {
 import { createLayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
 import { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
-import { UndergroundTopPortal, type PortalState } from '@/engine/visualization/underground-top-portal.js';
-import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
 import {
@@ -153,51 +152,11 @@ interface EngineeringPlacementGuardResult {
 	controlTarget?: VisualControlTarget | null;
 }
 
-interface PortalModelScope {
-	placedRoot: THREE.Object3D | null;
-	undergroundRoot: THREE.Object3D | null;
-	surfaceRoot: THREE.Object3D | null;
-	source: 'ar-placed-model' | 'whole-model-underground' | 'classified-subtree' | 'none';
-	failureReason: 'model-not-placed' | 'not-underground' | null;
-}
-
-interface PortalActivationSnapshot {
-	attemptId: number;
-	sessionId: string | null;
-	placementRevision: number;
-	footprintRevision: number;
-	timestamp: number;
-	state: 'waiting' | 'ready' | 'failed';
-	reason: string | null;
-	modelScopeSource: PortalModelScope['source'];
-	placedRoot: THREE.Object3D | null;
-	undergroundRoot: THREE.Object3D | null;
-	configuredControlPointCount: number;
-	modelLocalCornerCount: number;
-	transformedCornerCount: number;
-	worldCorners: readonly THREE.Vector3[];
-	targetSurfaceCorners: readonly THREE.Vector3[];
-}
-
-interface PendingPortalAttempt {
-	id: number;
-	resolve: (result: UndergroundViewChangeResult) => void;
-}
-
 export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
 	hasSelection: boolean;
 	currentStatus: string;
-	portalDiagnostics: Record<string, string | number | boolean>;
-}
-
-export interface UndergroundViewChangeResult {
-	requestedMode: UndergroundViewMode;
-	effectiveMode: UndergroundViewMode;
-	applied: boolean;
-	portalState: PortalState;
-	failureReason: string | null;
 }
 
 function createInitialState(): RegistrationStoreState {
@@ -338,16 +297,6 @@ export class ThreeEngine {
 	private currentArSessionId: string | null = null;
 	private siteOriginReferencePanelOpen = false;
 	private readonly realDepthProvider = new RealDepthProvider();
-	private readonly undergroundPortal: UndergroundTopPortal;
-	private portalUpdateArgs: Parameters<UndergroundTopPortal['update']>[ 0 ] | null = null;
-	private portalFallbackReported = false;
-	private requestedUndergroundViewMode: UndergroundViewMode = DEFAULT_UNDERGROUND_DISPLAY_STATE.undergroundViewMode;
-	private portalClickPreviousEffectiveMode: UndergroundViewMode | null = null;
-	private pendingPortalAttempt: PendingPortalAttempt | null = null;
-	private portalActivationAttemptId = 0;
-	private placementRevision = 0;
-	private lastPlacementRootUuid: string | null = null;
-	private lastPortalActivationSnapshot: PortalActivationSnapshot | null = null;
 	private readonly frameTaskErrorCounts = new Map<string, number>();
 	private readonly frameTaskLastErrorLogAt = new Map<string, number>();
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
@@ -382,7 +331,6 @@ export class ThreeEngine {
 	private replacedModelCount = 0;
 	private lastPlacementReason = '-';
 	private lastPlacementTimestamp = 0;
-	private lastPortalDebugAt = 0;
 	private readonly handleWebglContextLost = ( event: Event ) => {
 		( event as WebGLContextEvent ).preventDefault();
 		console.error( '[WebGLContextLost]', { xrPresenting: this.sceneBundle.renderer.xr.isPresenting } );
@@ -397,17 +345,6 @@ export class ThreeEngine {
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
-		this.undergroundPortal = new UndergroundTopPortal( this.sceneBundle.scene );
-		this.portalUpdateArgs = {
-			renderer: this.sceneBundle.renderer,
-			mainCamera: this.sceneBundle.renderer.xr.getCamera(),
-			model: this.sceneBundle.scene,
-			sourceModelCorners: [],
-			targetSurfaceCorners: [],
-			surfaceUpNormal: new THREE.Vector3( 0, 1, 0 ),
-			depthFrame: this.realDepthProvider.getCurrentFrame(),
-			enabled: false
-		};
 		this.registrationDebugRoot.name = '__registration-debug-root';
 		this.sceneBundle.scene.add( this.registrationDebugRoot );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
@@ -447,7 +384,7 @@ export class ThreeEngine {
 			layerVisibility: this.layerVisibility,
 			materialStateRuntime: this.materialStateRuntime,
 			sectionCutController: this.sectionCutController,
-			getUndergroundModelRoot: () => this.resolveActiveEngineeringModelScope().undergroundRoot,
+			getUndergroundModelRoot: () => this.placementSession.getArPlacedModel(),
 			syncAttachmentInfoBoardVisibility: () => {
 				this.syncAttachmentInfoBoardVisibility();
 			}
@@ -567,7 +504,6 @@ export class ThreeEngine {
 			getModelOrientationTarget: () => this.modelOrientation,
 				onBeforePlacementRequest: () => {
 					this.propertySelection.clearSelection();
-					this.undergroundPortal.invalidateGeometry();
 					this.pointerSelection.suppressSelectionFor( 1200 );
 			},
 			onPlacementBaseResolved: () => {},
@@ -668,10 +604,6 @@ export class ThreeEngine {
 					return true;
 				}
 
-				if ( this.handleUndergroundPortalPick( selection.raycaster ) ) {
-					return true;
-				}
-
 				const item = this.annotationLabelsController.pick( selection.raycaster );
 				if ( item === null ) {
 					return false;
@@ -696,12 +628,10 @@ export class ThreeEngine {
 			},
 			resetPlacement: () => {
 				this.placementSession.resetPlacement();
-				this.undergroundPortal.reset();
 				this.syncArSessionPhase();
 				this.emit();
 			},
 			onRuntimeReset: () => {
-				this.undergroundPortal.reset();
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
 				this.registrationSolution = null;
@@ -805,9 +735,6 @@ export class ThreeEngine {
 				this.safeFrameTask( 'placement-anchor', () => {
 					this.placementSession.updateArPlacementAnchor( frame );
 				} );
-				this.safeFrameTask( 'underground-portal', () => {
-					this.updateUndergroundPortal();
-				} );
 				this.safeFrameTask( 'session-phase', () => {
 					this.syncArSessionPhase();
 				} );
@@ -860,37 +787,10 @@ export class ThreeEngine {
 	getState(): ThreeEngineSnapshot {
 
 		const state = this.store.getState();
-		const scope = this.resolveActiveEngineeringModelScope();
-		const attempt = this.lastPortalActivationSnapshot;
 		return {
 			...state,
 			hasSelection: hasSelectedPipe( state ),
-			currentStatus: this.currentStatus,
-			portalDiagnostics: {
-				...this.undergroundPortal.getDiagnostics(),
-				attemptId: attempt?.attemptId ?? 0,
-				attemptSessionId: attempt?.sessionId ?? 'none',
-				attemptPrerequisiteState: attempt?.state ?? 'none',
-				attemptPrerequisiteReason: attempt?.reason ?? 'none',
-				attemptPlacementRevision: attempt?.placementRevision ?? 0,
-				attemptFootprintRevision: attempt?.footprintRevision ?? 0,
-				attemptModelScopeSource: attempt?.modelScopeSource ?? 'none',
-				attemptPlacedModelExists: attempt?.placedRoot !== null,
-				attemptUndergroundRootExists: attempt?.undergroundRoot !== null,
-				attemptModelUuid: attempt?.undergroundRoot?.uuid ?? 'none',
-				configuredControlPointCount: attempt?.configuredControlPointCount ?? 0,
-				modelLocalCornerCount: attempt?.modelLocalCornerCount ?? 0,
-				transformedCornerCount: attempt?.transformedCornerCount ?? 0,
-				pendingPortalRequest: this.pendingPortalAttempt !== null,
-				currentPlacementRevision: this.placementRevision,
-				currentModelScopeSource: scope.source,
-				currentModelScopeFailureReason: scope.failureReason ?? 'none',
-				currentPlacedModelExists: scope.placedRoot !== null,
-				currentUndergroundRootExists: scope.undergroundRoot !== null,
-				currentPlacedModelUuid: scope.placedRoot?.uuid ?? 'none',
-				currentUndergroundRootUuid: scope.undergroundRoot?.uuid ?? 'none',
-				currentUndergroundRootParentPath: getObjectParentPath( scope.undergroundRoot )
-			}
+			currentStatus: this.currentStatus
 		};
 
 	}
@@ -953,11 +853,9 @@ export class ThreeEngine {
 		window.removeEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
-		this.settlePendingPortalAttempt( false, 'disposed' );
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.materialStateRuntime.dispose();
 		this.sectionCutController.dispose();
-		this.undergroundPortal.dispose();
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();
 		this.sceneBundle.renderer.dispose();
@@ -974,7 +872,6 @@ export class ThreeEngine {
 
 		this.pointerSelection.suppressSelectionFor( 1000 );
 		this.propertySelection.clearSelection();
-		this.undergroundPortal.invalidateBaseContent( 'selection-changed' );
 		this.clearAnnotationDetail();
 		this.annotationLayer.setSelected( null );
 		this.setStatus( '已关闭构件信息面板。' );
@@ -1012,7 +909,6 @@ export class ThreeEngine {
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().transparentXrayValue === clampedValue ) return;
 		this.store.patch( { transparentXrayValue: clampedValue } );
-		this.undergroundPortal.invalidateBaseContent( 'opacity-changed' );
 
 	}
 
@@ -1035,43 +931,6 @@ export class ThreeEngine {
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().sectionCutValue === clampedValue ) return;
 		this.store.patch( { sectionCutValue: clampedValue } );
-		this.undergroundPortal.invalidateLayerContent( 'section-state-changed', 'section-cut-changed' );
-
-	}
-
-	setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult> {
-
-		this.settlePendingPortalAttempt( false, 'superseded' );
-		if ( mode === 'real-space' ) {
-			this.requestedUndergroundViewMode = mode;
-			this.undergroundPortal.deactivate();
-			this.store.patch( { undergroundViewMode: mode } );
-			return Promise.resolve( this.createUndergroundViewResult( true ) );
-		}
-		const diagnostics = this.undergroundPortal.getDiagnostics();
-		if ( this.store.getState().undergroundViewMode === 'portal' && diagnostics.portalState === 'ready' ) {
-			this.requestedUndergroundViewMode = mode;
-			return Promise.resolve( this.createUndergroundViewResult( true ) );
-		}
-		this.portalActivationAttemptId += 1;
-		this.portalFallbackReported = false;
-		this.portalClickPreviousEffectiveMode = this.store.getState().undergroundViewMode;
-		this.undergroundPortal.beginAttempt();
-		this.requestedUndergroundViewMode = mode;
-		return new Promise( ( resolve ) => { this.pendingPortalAttempt = { id: this.portalActivationAttemptId, resolve }; } );
-
-	}
-
-	private createUndergroundViewResult(applied: boolean, failureReason?: string): UndergroundViewChangeResult {
-
-		const diagnostics = this.undergroundPortal.getDiagnostics();
-		return {
-			requestedMode: this.requestedUndergroundViewMode,
-			effectiveMode: this.store.getState().undergroundViewMode,
-			applied,
-			portalState: diagnostics.portalState as PortalState,
-			failureReason: failureReason ?? ( diagnostics.portalFailureReason === 'none' ? null : String( diagnostics.portalFailureReason ) )
-		};
 
 	}
 
@@ -1079,7 +938,6 @@ export class ThreeEngine {
 
 		if ( this.store.getState().undergroundMaterialMode === mode ) return;
 		this.store.patch( { undergroundMaterialMode: mode } );
-		this.undergroundPortal.invalidateBaseContent( 'material-mode-changed' );
 
 	}
 
@@ -3950,127 +3808,6 @@ export class ThreeEngine {
 
 	}
 
-	private updateUndergroundPortal(): void {
-		const depthFrame = this.realDepthProvider.getCurrentFrame();
-		const args = this.portalUpdateArgs!;
-		if ( this.requestedUndergroundViewMode !== 'portal' ) {
-			args.enabled = false;
-			this.undergroundPortal.update( args );
-			return;
-		}
-		const snapshot = this.resolvePortalActivationSnapshot();
-		if (
-			this.lastPortalActivationSnapshot === null
-			|| this.lastPortalActivationSnapshot.attemptId !== snapshot.attemptId
-			|| ( this.lastPortalActivationSnapshot.state === 'waiting' && snapshot.state !== 'waiting' )
-		) this.lastPortalActivationSnapshot = snapshot;
-		if ( snapshot.state === 'waiting' ) {
-			this.undergroundPortal.setWaiting( snapshot.reason ?? 'waiting-for-placement' );
-			this.logPortalDiagnostics( depthFrame );
-			return;
-		}
-		if ( snapshot.state === 'failed' ) {
-			this.handleTerminalPortalFailure( snapshot.reason ?? 'portal-prerequisite-failed' );
-			this.logPortalDiagnostics( depthFrame );
-			return;
-		}
-		args.mainCamera = this.sceneBundle.renderer.xr.getCamera();
-		args.model = snapshot.undergroundRoot!;
-		args.sourceModelCorners = [ ...snapshot.worldCorners ];
-		args.targetSurfaceCorners = [ ...snapshot.targetSurfaceCorners ];
-		args.surfaceUpNormal.set( 0, 0, 1 ).transformDirection( this.activeMarkerArFromEnuSolution!.matrix );
-		args.depthFrame = depthFrame;
-		args.enabled = true;
-		const portalStatus = this.undergroundPortal.update( args );
-		if ( portalStatus === 'ready' ) {
-			this.portalFallbackReported = false;
-			if ( this.store.getState().undergroundViewMode !== 'portal' ) this.store.patch( { undergroundViewMode: 'portal' } );
-			this.logPortalClickResult();
-			this.settlePendingPortalAttempt( true );
-		}
-		if ( portalStatus === 'failed' ) this.handleTerminalPortalFailure( String( this.undergroundPortal.getDiagnostics().portalFailureReason ) );
-		this.logPortalDiagnostics( depthFrame );
-
-	}
-
-	private handleTerminalPortalFailure(reason: string): void {
-
-		this.undergroundPortal.setPrerequisiteFailure( reason );
-		if ( this.portalFallbackReported ) return;
-		this.portalFallbackReported = true;
-		this.store.patch( { undergroundViewMode: 'real-space', undergroundMaterialMode: 'xray' } );
-		this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
-		this.logPortalClickResult();
-		if ( import.meta.env.DEV ) console.assert( isEffectivelyVisible( this.resolveActiveEngineeringModelScope().undergroundRoot ), 'Portal fallback must restore effective underground model visibility.' );
-		this.settlePendingPortalAttempt( false, reason );
-
-	}
-
-	private settlePendingPortalAttempt(applied: boolean, failureReason?: string): void {
-
-		const pending = this.pendingPortalAttempt;
-		if ( pending === null ) return;
-		this.pendingPortalAttempt = null;
-		pending.resolve( this.createUndergroundViewResult( applied, failureReason ) );
-
-	}
-
-	private logPortalClickResult(): void {
-
-		if ( import.meta.env.DEV === false || this.portalClickPreviousEffectiveMode === null ) return;
-		const diagnostics = this.undergroundPortal.getDiagnostics();
-		console.info( '[PortalActivation]', {
-			requestedMode: this.requestedUndergroundViewMode,
-			previousEffectiveMode: this.portalClickPreviousEffectiveMode,
-			nextEffectiveMode: this.store.getState().undergroundViewMode,
-			portalAttemptId: diagnostics.lastPortalAttemptId,
-			portalState: diagnostics.portalState,
-			portalFailureReason: diagnostics.portalFailureReason
-		} );
-		this.portalClickPreviousEffectiveMode = null;
-
-	}
-
-	private resolvePortalActivationSnapshot(): PortalActivationSnapshot {
-
-		const scope = this.resolveActiveEngineeringModelScope();
-		if ( scope.placedRoot?.uuid !== this.lastPlacementRootUuid ) {
-			this.lastPlacementRootUuid = scope.placedRoot?.uuid ?? null;
-			this.placementRevision += 1;
-		}
-		const base = {
-			attemptId: this.portalActivationAttemptId,
-			sessionId: this.currentArSessionId,
-			placementRevision: this.placementRevision,
-			footprintRevision: this.placementRevision,
-			timestamp: Date.now(),
-			modelScopeSource: scope.source,
-			placedRoot: scope.placedRoot,
-			undergroundRoot: scope.undergroundRoot,
-			configuredControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
-			modelLocalCornerCount: 0,
-			transformedCornerCount: 0,
-			worldCorners: [] as readonly THREE.Vector3[],
-			targetSurfaceCorners: [] as readonly THREE.Vector3[]
-		};
-		if ( scope.placedRoot === null ) return { ...base, state: 'waiting', reason: 'waiting-for-placement' };
-		if ( scope.undergroundRoot === null ) return { ...base, state: 'failed', reason: scope.failureReason ?? 'not-underground' };
-		const controlPoints = this.registrationSolution?.controlPoints;
-		if ( controlPoints === undefined || controlPoints.length < 4 ) return { ...base, state: 'failed', reason: 'portal-footprint-config-missing' };
-		const modelLocalCorners = controlPoints.slice( 0, 4 ).map( ( point ) => point.modelLocal ).filter( ( point ) => point !== undefined && Number.isFinite( point.x ) && Number.isFinite( point.y ) && Number.isFinite( point.z ) );
-		if ( modelLocalCorners.length !== 4 ) return { ...base, state: 'failed', reason: 'portal-footprint-model-local-missing', modelLocalCornerCount: modelLocalCorners.length };
-		scope.undergroundRoot.updateMatrixWorld( true );
-		const targetSolution = this.getActiveArFromEnuSolution();
-		if ( targetSolution === null ) return { ...base, state: 'waiting', reason: 'waiting-for-target-surface' };
-		const worldCorners = modelLocalCorners.map( ( point ) => point.clone().applyMatrix4( scope.undergroundRoot!.matrixWorld ) );
-		const targetSurfaceCorners = controlPoints.slice( 0, 4 ).map( ( point ) => point.worldEnu.clone().applyMatrix4( targetSolution.matrix ) );
-		if ( worldCorners.some( ( point ) => Number.isFinite( point.x ) === false || Number.isFinite( point.y ) === false || Number.isFinite( point.z ) === false ) ) {
-			return { ...base, state: 'failed', reason: 'portal-footprint-invalid', modelLocalCornerCount: 4, transformedCornerCount: worldCorners.length };
-		}
-		return { ...base, state: 'ready', reason: null, modelLocalCornerCount: 4, transformedCornerCount: worldCorners.length, worldCorners, targetSurfaceCorners };
-
-	}
-
 	private getTargetControlPointCornersAr(arFromEnuSolution: ArFromEnuSolution): THREE.Vector3[] {
 
 		if ( this.registrationSolution === null ) return [];
@@ -4081,48 +3818,11 @@ export class ThreeEngine {
 
 	private getActualModelControlPointCornersAr(): THREE.Vector3[] {
 
-		const undergroundRoot = this.resolveActiveEngineeringModelScope().undergroundRoot;
-		if ( this.registrationSolution === null || undergroundRoot === null ) return [];
-		undergroundRoot.updateMatrixWorld( true );
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( this.registrationSolution === null || placedModel === null ) return [];
+		placedModel.updateMatrixWorld( true );
 		return this.registrationSolution.controlPoints.slice( 0, 4 )
-			.map( ( point ) => point.modelLocal.clone().applyMatrix4( undergroundRoot.matrixWorld ) );
-
-	}
-
-	private resolveActiveEngineeringModelScope(): PortalModelScope {
-
-		const placedRoot = this.placementSession.getArPlacedModel();
-		if ( placedRoot === null ) return { placedRoot: null, undergroundRoot: null, surfaceRoot: null, source: 'none', failureReason: 'model-not-placed' };
-		const instance = this.demoModelConfig?.modelInstances[ 0 ];
-		const names = instance?.verticalPlacement.groundRelation === 'mixed' && instance.groundClassification?.mode === 'node-groups'
-			? instance.groundClassification.belowGroundNodes ?? []
-			: [];
-		if ( names.length === 1 ) {
-			const undergroundRoot = placedRoot.getObjectByName( names[ 0 ] ) ?? null;
-			if ( undergroundRoot !== null ) return { placedRoot, undergroundRoot, surfaceRoot: placedRoot, source: 'classified-subtree', failureReason: null };
-		}
-		if ( instance?.verticalPlacement.groundRelation === 'underground' || this.demoModelConfig?.undergroundPlacement?.enabled === true ) {
-			return { placedRoot, undergroundRoot: placedRoot, surfaceRoot: null, source: 'whole-model-underground', failureReason: null };
-		}
-		return { placedRoot, undergroundRoot: null, surfaceRoot: placedRoot, source: 'ar-placed-model', failureReason: 'not-underground' };
-
-	}
-
-	private logPortalDiagnostics(depthFrame: ReturnType<RealDepthProvider['getCurrentFrame']>): void {
-
-		if ( import.meta.env.DEV === false || new URLSearchParams( window.location.search ).get( 'arDebug' ) !== 'portal' ) return;
-		const now = performance.now();
-		if ( now - this.lastPortalDebugAt < 500 ) return;
-		this.lastPortalDebugAt = now;
-		console.info( '[PortalDiagnostics]', {
-			requestedViewMode: this.requestedUndergroundViewMode,
-			effectiveViewMode: this.store.getState().undergroundViewMode,
-			...this.undergroundPortal.getDiagnostics(),
-			cpuDepthValid: depthFrame.available && depthFrame.stale === false,
-			depthSize: `${depthFrame.width}x${depthFrame.height}`,
-			rawValueToMeters: depthFrame.rawValueToMeters,
-			depthAgeMs: Math.round( depthFrame.ageMs )
-		} );
+			.map( ( point ) => point.modelLocal.clone().applyMatrix4( placedModel.matrixWorld ) );
 
 	}
 
@@ -4132,20 +3832,12 @@ export class ThreeEngine {
 		if ( result.depthGranted ) this.realDepthProvider.initialize( result.session );
 		else this.realDepthProvider.dispose();
 		this.sessionLifecycleRuntime.handleXRSessionStart();
-		this.placementRevision += 1;
-		this.lastPlacementRootUuid = null;
-		this.lastPortalActivationSnapshot = null;
 
 	}
 
 	private handleXRSessionEnd(): void {
 
 		this.arSessionEndPending = false;
-		this.undergroundPortal.reset();
-		this.settlePendingPortalAttempt( false, 'xr-session-ended' );
-		this.placementRevision += 1;
-		this.lastPlacementRootUuid = null;
-		this.lastPortalActivationSnapshot = null;
 		this.realDepthProvider.dispose();
 		this.arCoordinateService.clear( 'xr-session-end' );
 		this.annotationLayer.clear();
@@ -4159,9 +3851,6 @@ export class ThreeEngine {
 	private handlePlacementCompleted(): void {
 
 		this.sessionLifecycleRuntime.handlePlacementCompleted();
-		this.placementRevision += 1;
-		this.lastPlacementRootUuid = this.placementSession.getArPlacedModel()?.uuid ?? null;
-		this.undergroundPortal.invalidateGeometry();
 
 	}
 
@@ -4552,8 +4241,7 @@ export class ThreeEngine {
 
 	private applyModelLayerVisibility(caller: 'auto-placement' | 'selection-cleared' | 'inspection-tool-changed' | 'layer-peeling-value-changed' | 'initialization' = 'initialization'): void {
 
-		const result = this.visualizationStateRuntime.applyModelLayerVisibility();
-		if ( result.changed ) this.undergroundPortal.invalidateLayerContent( 'layer-visibility-changed', caller );
+		this.visualizationStateRuntime.applyModelLayerVisibility();
 
 	}
 
@@ -4602,30 +4290,6 @@ export class ThreeEngine {
 
 	}
 
-	private handleUndergroundPortalPick(raycaster: THREE.Raycaster): boolean {
-
-		const result = this.undergroundPortal.pick( raycaster );
-		if ( result.hitPortal === false ) return false;
-		if ( result.sourceObject === null ) return true;
-		const placedModel = this.placementSession.getArPlacedModel();
-		if ( placedModel === null ) return true;
-		const businessObject = this.propertySelection.resolveBusinessObject(
-			result.sourceObject,
-			placedModel,
-			this.pipesByName
-		);
-		const businessName = typeof businessObject.userData.__businessName === 'string'
-			? businessObject.userData.__businessName
-			: businessObject.name;
-		const properties = this.pipesByName.get( businessName ) ?? null;
-		this.propertySelection.selectBusinessObject( businessObject, properties, result.sourceObject );
-		this.showCanvasModelPropertyPanel( businessObject, properties );
-		this.undergroundPortal.invalidateBaseContent( 'selection-changed' );
-		this.setStatus( `已选择 ${businessName || '模型构件'}。` );
-		return true;
-
-	}
-
 	private logGroundAwareArAudit(config: DemoModelConfig): void {
 
 		if ( this.groundAwareArAuditLogged ) {
@@ -4638,7 +4302,6 @@ export class ThreeEngine {
 				id: instance.id,
 				groundRelation: instance.verticalPlacement.groundRelation,
 				referencePlane: instance.verticalPlacement.referencePlane,
-				belowGroundMode: instance.display.belowGroundMode
 			} ) ),
 			currentSingleModelCompatibilityEntry: config.undergroundPlacement?.enabled === true ? 'legacy undergroundPlacement mapped to modelInstances[0].verticalPlacement' : 'single model maps to above-ground default',
 			currentModelToEnuResolver: 'solveEngineeringRegistration -> solveGroundPlaneRigidTransform',
@@ -4653,7 +4316,6 @@ export class ThreeEngine {
 			currentCanvasPropertyPanelEntry: 'annotationLabelsController.setDetail(CanvasTexture Sprite)',
 			currentAnnotationLayerEntry: 'AnnotationLayer.setAnnotations',
 			currentDepthProvider: 'RealDepthProvider',
-			currentPortalImplementation: 'UndergroundTopPortal with footprint corners, orthographic render target, and CPU depth foreground occlusion',
 			currentLegacyVisualOffsetReferences: 'visualMatrix remains snapshot/debug name only; no visualOffsetY/buriedDepthMeters positioning path',
 			migrationRisks: [ 'Current runtime still places one model template' ]
 		} );
@@ -4666,7 +4328,6 @@ export class ThreeEngine {
 	): void {
 
 		this.propertySelection.clearSelection();
-		this.undergroundPortal.invalidateBaseContent( 'selection-changed' );
 		this.annotationLayer.setSelected( annotation.id );
 		this.store.patch( {
 			selectedAnnotationId: annotation.id,

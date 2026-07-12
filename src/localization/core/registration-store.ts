@@ -416,7 +416,6 @@ export interface RegistrationStoreState {
 	arSupportMessage: string;
 	arSessionPhase: ArSessionPhase;
 	workspaceMode: WorkspaceMode;
-	undergroundViewMode: 'portal' | 'real-space';
 	undergroundMaterialMode: 'solid' | 'xray';
 	undergroundInspectionTool: 'complete' | 'layer-peeling' | 'section-cut';
 	transparentXrayValue: number;

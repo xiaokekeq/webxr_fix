@@ -247,7 +247,6 @@
   "undergroundDisplay": {
     "defaultMode": "x-ray",
     "xrayOpacity": 0.5,
-    "showSurfaceProjection": true,
     "showDepthGuideLines": true
   },
   "modelInstances": [
@@ -268,7 +267,6 @@
       },
       "display": {
         "aboveGroundMode": "hidden",
-        "belowGroundMode": "top-portal",
         "realWorldOcclusion": true,
         "opacity": 0.85,
         "selectable": true

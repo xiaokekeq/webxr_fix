@@ -12,9 +12,9 @@ import type {
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
-import type { ThreeEngineHosts, ThreeEngineSnapshot, UndergroundViewChangeResult } from '@/engine/core/three-engine.js';
+import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
-import type { UndergroundInspectionTool, UndergroundMaterialMode, UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import type { LegacyArDisplayMode } from '@/engine/visualization/underground-display-state.js';
 
 interface ControllerUiState {
@@ -260,7 +260,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult> { return ensureController().actions.setUndergroundViewMode( mode ); },
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void { ensureController().actions.setUndergroundMaterialMode( mode ); },
 		setUndergroundInspectionTool(tool: UndergroundInspectionTool): void { ensureController().actions.setUndergroundInspectionTool( tool ); },
 		setTransparentXrayValue(value: number): void { ensureController().actions.setTransparentXrayValue( value ); },

@@ -3,11 +3,11 @@
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
-import type { ThreeEngineHosts, ThreeEngineSnapshot, UndergroundViewChangeResult } from '@/engine/core/three-engine.js';
+import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
-import { mapLegacyDisplayMode, type LegacyArDisplayMode, type UndergroundInspectionTool, type UndergroundMaterialMode, type UndergroundViewMode } from '@/engine/visualization/underground-display-state.js';
+import { mapLegacyDisplayMode, type LegacyArDisplayMode, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 
 export interface InspectionDraft {
 	result: string;
@@ -29,7 +29,6 @@ export interface LoadModelArController {
 		closePropertyPanel(): void;
 		selectModel(modelId: string): void;
 		setDisplayMode(mode: LegacyArDisplayMode): void;
-		setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult>;
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void;
 		setUndergroundInspectionTool(tool: UndergroundInspectionTool): void;
 		setTransparentXrayValue(value: number): void;
@@ -137,7 +136,6 @@ export function createLoadModelArController(): LoadModelArController {
 			setDisplayMode(mode) {
 
 				const state = mapLegacyDisplayMode( mode );
-				if ( state.undergroundViewMode !== undefined ) engine.setUndergroundViewMode( state.undergroundViewMode );
 				if ( state.undergroundMaterialMode !== undefined ) engine.setUndergroundMaterialMode( state.undergroundMaterialMode );
 				if ( state.undergroundInspectionTool !== undefined ) engine.setUndergroundInspectionTool( state.undergroundInspectionTool );
 
@@ -149,7 +147,6 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			setUndergroundViewMode(mode) { return engine.setUndergroundViewMode( mode ); },
 			setUndergroundMaterialMode(mode) { engine.setUndergroundMaterialMode( mode ); },
 			setUndergroundInspectionTool(tool) { engine.setUndergroundInspectionTool( tool ); },
 			setTransparentXrayValue(value) { engine.setTransparentXrayValue( value ); },

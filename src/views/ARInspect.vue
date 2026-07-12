@@ -27,7 +27,6 @@ const store = useArShellStore();
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
 const activePanelView = ref<InspectPanelView>( 'localization' );
-const displaySelectionError = ref( '' );
 const markerCalibrationOverlayOpen = ref( false );
 const markerApplyFeedback = ref<{
 	type: 'success' | 'warning' | 'error';
@@ -35,7 +34,6 @@ const markerApplyFeedback = ref<{
 	createdAt: number;
 } | null>( null );
 const arDebugMode = isArDebugEnabled();
-const portalDebugPanel = typeof window !== 'undefined' && new URLSearchParams( window.location.search ).get( 'arDebug' ) === 'portal';
 const debugInfoOpen = ref( false );
 const registrationDiagnosticOpen = ref( false );
 const modelPlacementDiagnosticOpen = ref( false );
@@ -846,17 +844,6 @@ function activatePanelView(view: InspectPanelView): void {
 	activePanelView.value = view;
 }
 
-async function selectUndergroundViewMode(mode: 'portal' | 'real-space'): Promise<void> {
-
-	displaySelectionError.value = '';
-	const result = await store.actions.setUndergroundViewMode( mode );
-	if ( result.applied && result.effectiveMode === mode ) store.actions.closeDrawer();
-	else displaySelectionError.value = result.failureReason === 'no-renderable-mesh-structure'
-		? '未检测到可渲染的地下模型，已切换到真实空间。'
-		: '地下顶视暂不可用，已保持真实空间显示。';
-
-}
-
 function selectMaterialMode(mode: UndergroundMaterialMode): void {
 	store.actions.setUndergroundMaterialMode( mode );
 	selectMaterial( mode );
@@ -1158,7 +1145,7 @@ function setArOverlayClass(active: boolean): void {
 				</div>
 
 				<template v-if="activePanelView === 'display'">
-					<UndergroundDisplayControls :view-mode="engine.undergroundViewMode" :material-mode="engine.undergroundMaterialMode" :inspection-tool="engine.undergroundInspectionTool" :section-mode="engine.sectionCutPlaneMode" :error="displaySelectionError" :diagnostics="portalDebugPanel ? engine.portalDiagnostics : undefined" @view="selectUndergroundViewMode" @material="selectMaterialMode" @tool="selectInspectionTool" @section="selectSectionMode" />
+					<UndergroundDisplayControls :material-mode="engine.undergroundMaterialMode" :inspection-tool="engine.undergroundInspectionTool" :section-mode="engine.sectionCutPlaneMode" @material="selectMaterialMode" @tool="selectInspectionTool" @section="selectSectionMode" />
 				</template>
 
 				<template v-else-if="activePanelView === 'localization'">

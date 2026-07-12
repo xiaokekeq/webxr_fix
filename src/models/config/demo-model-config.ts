@@ -87,7 +87,6 @@ export type GroundClassificationMode = 'whole-model' | 'node-groups' | 'clip-by-
 export type ModelReferencePlane = 'bbox-bottom' | 'bbox-top' | 'local-ground-plane' | 'control-point-plane' | 'none';
 export type ModelSurfaceReference = 'rtk-surface-control-points' | 'absolute-enu';
 export type AboveGroundDisplayMode = 'normal-ar' | 'hidden';
-export type BelowGroundDisplayMode = 'top-portal' | 'surface-projection' | 'engineering-xray' | 'hidden';
 
 export interface ModelVerticalPlacementConfig {
 	groundRelation: ModelGroundRelation;
@@ -108,7 +107,6 @@ export interface ModelGroundClassificationConfig {
 
 export interface ModelDisplayConfig {
 	aboveGroundMode: AboveGroundDisplayMode;
-	belowGroundMode: BelowGroundDisplayMode;
 	realWorldOcclusion: boolean;
 	opacity?: number;
 	selectable?: boolean;
@@ -133,10 +131,9 @@ export interface UndergroundPlacementConfig {
 	coverDepthMeters?: number;
 }
 export interface UndergroundDisplayConfig {
-	defaultMode?: 'true-depth' | 'x-ray' | 'surface-projection' | 'lifted-preview';
+	defaultMode?: 'true-depth' | 'x-ray' | 'lifted-preview';
 	liftedPreviewOffsetMeters?: number;
 	xrayOpacity?: number;
-	showSurfaceProjection?: boolean;
 	showDepthGuideLines?: boolean;
 }
 
@@ -1263,7 +1260,6 @@ function normalizeModelDisplayConfig(
 	const underground = legacyUndergroundPlacement?.enabled === true;
 	return {
 		aboveGroundMode: value?.aboveGroundMode === 'hidden' ? 'hidden' : 'normal-ar',
-		belowGroundMode: value?.belowGroundMode ?? ( underground ? 'top-portal' : 'hidden' ),
 		realWorldOcclusion: value?.realWorldOcclusion ?? underground,
 		opacity: typeof value?.opacity === 'number' && Number.isFinite( value.opacity )
 			? Math.min( 1, Math.max( 0, value.opacity ) )
@@ -1351,7 +1347,6 @@ function normalizeUndergroundDisplayConfig(value: UndergroundDisplayConfig | und
 	if (
 		value.defaultMode === 'true-depth'
 		|| value.defaultMode === 'x-ray'
-		|| value.defaultMode === 'surface-projection'
 		|| value.defaultMode === 'lifted-preview'
 	) {
 		config.defaultMode = value.defaultMode;
@@ -1363,10 +1358,6 @@ function normalizeUndergroundDisplayConfig(value: UndergroundDisplayConfig | und
 
 	if ( typeof value.xrayOpacity === 'number' && Number.isFinite( value.xrayOpacity ) ) {
 		config.xrayOpacity = value.xrayOpacity;
-	}
-
-	if ( typeof value.showSurfaceProjection === 'boolean' ) {
-		config.showSurfaceProjection = value.showSurfaceProjection;
 	}
 
 	if ( typeof value.showDepthGuideLines === 'boolean' ) {
