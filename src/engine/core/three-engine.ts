@@ -567,7 +567,7 @@ export class ThreeEngine {
 			getModelOrientationTarget: () => this.modelOrientation,
 				onBeforePlacementRequest: () => {
 					this.propertySelection.clearSelection();
-					this.undergroundPortal.markDirty();
+					this.undergroundPortal.invalidateGeometry();
 					this.pointerSelection.suppressSelectionFor( 1200 );
 			},
 			onPlacementBaseResolved: () => {},
@@ -654,7 +654,7 @@ export class ThreeEngine {
 				this.clearAnnotationDetail();
 				this.visualizationStateRuntime.syncVisualizationState();
 				this.applyModelLayerVisibility();
-				this.undergroundPortal.markDirty();
+				this.undergroundPortal.invalidateLayerContent();
 			},
 			handlePreSelectionRaycast: ( selection ) => {
 				if ( this.annotationLabelsController.hitDetailPanel( selection.raycaster ) ) {
@@ -975,7 +975,7 @@ export class ThreeEngine {
 
 		this.pointerSelection.suppressSelectionFor( 1000 );
 		this.propertySelection.clearSelection();
-		this.undergroundPortal.markDirty();
+		this.undergroundPortal.invalidateBaseContent( 'selection-changed' );
 		this.clearAnnotationDetail();
 		this.annotationLayer.setSelected( null );
 		this.setStatus( '已关闭构件信息面板。' );
@@ -1013,7 +1013,7 @@ export class ThreeEngine {
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().transparentXrayValue === clampedValue ) return;
 		this.store.patch( { transparentXrayValue: clampedValue } );
-		this.undergroundPortal.markDirty();
+		this.undergroundPortal.invalidateBaseContent( 'opacity-changed' );
 
 	}
 
@@ -1036,7 +1036,7 @@ export class ThreeEngine {
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().sectionCutValue === clampedValue ) return;
 		this.store.patch( { sectionCutValue: clampedValue } );
-		this.undergroundPortal.markDirty();
+		this.undergroundPortal.invalidateLayerContent();
 
 	}
 
@@ -1059,7 +1059,6 @@ export class ThreeEngine {
 		this.portalClickPreviousEffectiveMode = this.store.getState().undergroundViewMode;
 		this.undergroundPortal.beginAttempt();
 		this.requestedUndergroundViewMode = mode;
-		this.undergroundPortal.markDirty();
 		return new Promise( ( resolve ) => { this.pendingPortalAttempt = { id: this.portalActivationAttemptId, resolve }; } );
 
 	}
@@ -1081,7 +1080,7 @@ export class ThreeEngine {
 
 		if ( this.store.getState().undergroundMaterialMode === mode ) return;
 		this.store.patch( { undergroundMaterialMode: mode } );
-		this.undergroundPortal.markDirty();
+		this.undergroundPortal.invalidateBaseContent( 'material-mode-changed' );
 
 	}
 
@@ -1092,7 +1091,6 @@ export class ThreeEngine {
 		this.store.patch( { undergroundInspectionTool: tool } );
 		this.layerVisibility.setHiddenLayerCount( tool === 'layer-peeling' ? mapLayerPeelingValue( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0 );
 		this.applyModelLayerVisibility();
-		this.undergroundPortal.markDirty();
 
 	}
 
@@ -4164,7 +4162,7 @@ export class ThreeEngine {
 		this.sessionLifecycleRuntime.handlePlacementCompleted();
 		this.placementRevision += 1;
 		this.lastPlacementRootUuid = this.placementSession.getArPlacedModel()?.uuid ?? null;
-		this.undergroundPortal.markDirty();
+		this.undergroundPortal.invalidateGeometry();
 
 	}
 
@@ -4556,7 +4554,7 @@ export class ThreeEngine {
 	private applyModelLayerVisibility(): void {
 
 		this.visualizationStateRuntime.applyModelLayerVisibility();
-		this.undergroundPortal.markDirty();
+		this.undergroundPortal.invalidateLayerContent();
 
 	}
 
@@ -4623,7 +4621,7 @@ export class ThreeEngine {
 		const properties = this.pipesByName.get( businessName ) ?? null;
 		this.propertySelection.selectBusinessObject( businessObject, properties, result.sourceObject );
 		this.showCanvasModelPropertyPanel( businessObject, properties );
-		this.undergroundPortal.markDirty();
+		this.undergroundPortal.invalidateBaseContent( 'selection-changed' );
 		this.setStatus( `已选择 ${businessName || '模型构件'}。` );
 		return true;
 
@@ -4669,7 +4667,7 @@ export class ThreeEngine {
 	): void {
 
 		this.propertySelection.clearSelection();
-		this.undergroundPortal.markDirty();
+		this.undergroundPortal.invalidateBaseContent( 'selection-changed' );
 		this.annotationLayer.setSelected( annotation.id );
 		this.store.patch( {
 			selectedAnnotationId: annotation.id,

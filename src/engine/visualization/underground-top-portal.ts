@@ -335,9 +335,22 @@ export class UndergroundTopPortal {
 
 	}
 
-	markDirty(): void {
+	invalidateBaseContent(reason: 'material-mode-changed' | 'opacity-changed' | 'selection-changed'): void {
 
-		this.markContentDirty();
+		this.markBaseDirty( reason );
+
+	}
+
+	invalidateLayerContent(): void {
+
+		this.markBaseDirty( 'layer-visibility-changed' );
+		this.markElevationDirty( 'layer-visibility-changed' );
+
+	}
+
+	invalidateGeometry(): void {
+
+		this.markGeometryDirty( 'portal-reactivated' );
 
 	}
 
@@ -1008,22 +1021,24 @@ export class UndergroundTopPortal {
 
 	private markContentDirty(): void {
 
+		this.markBaseDirty( 'portal-reactivated' );
+		this.markElevationDirty( 'portal-reactivated' );
+
+	}
+
+	private markBaseDirty(reason: string): void {
+
 		if ( this.contentDirty === false ) {
 			this.contentDirty = true;
 			this.baseDirtyCount += 1;
-			this.lastBaseDirtyReason = 'manual-invalidate';
+			this.lastBaseDirtyReason = reason;
 			this.offscreenRevision += 1;
-		}
-		if ( this.elevationDirty === false ) {
-			this.elevationDirty = true;
-			this.elevationDirtyCount += 1;
-			this.lastElevationDirtyReason = 'manual-invalidate';
 		}
 		if ( PORTAL_DEBUG_MODE !== 'surface' ) this.offscreenState = 'pending';
 
 	}
 
-	private markGeometryDirty(reason: 'geometry-changed' | 'proxy-matrix-changed'): void {
+	private markGeometryDirty(reason: 'geometry-changed' | 'proxy-matrix-changed' | 'portal-reactivated'): void {
 
 		if ( this.portalDirty === false ) {
 			this.portalDirty = true;
@@ -1034,7 +1049,7 @@ export class UndergroundTopPortal {
 
 	}
 
-	private markElevationDirty(reason: 'proxy-created' | 'render-target-resized' | 'manual-invalidate'): void {
+	private markElevationDirty(reason: 'proxy-created' | 'render-target-resized' | 'portal-reactivated' | 'layer-visibility-changed'): void {
 
 		if ( this.elevationDirty ) return;
 		this.elevationDirty = true;
