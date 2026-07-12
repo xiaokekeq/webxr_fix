@@ -6,6 +6,9 @@ export interface PortalRenderProxyBuildResult {
 	proxyToSource: Map<THREE.Object3D, THREE.Object3D>;
 	sourceRenderableCount: number;
 	proxyRenderableCount: number;
+	includedAnnotatedRenderableCount: number;
+	skippedHelperRenderableCount: number;
+	skippedUnsupportedRenderableCount: number;
 	skippedHelperCount: number;
 }
 
@@ -14,11 +17,15 @@ export function buildPortalRenderProxy(sourceRoot: THREE.Object3D): PortalRender
 	const sourceToProxy = new Map<THREE.Object3D, THREE.Object3D>();
 	const proxyToSource = new Map<THREE.Object3D, THREE.Object3D>();
 	let skippedHelperCount = 0;
+	let skippedHelperRenderableCount = 0;
+	let includedAnnotatedRenderableCount = 0;
 	const buildNode = ( source: THREE.Object3D ): THREE.Object3D | null => {
 		if ( shouldIncludeInPortalProxy( source ) === false ) {
 			skippedHelperCount += 1;
+			if ( isRenderable( source ) ) skippedHelperRenderableCount += 1;
 			return null;
 		}
+		if ( isRenderable( source ) && source.userData.__annotationItem !== undefined ) includedAnnotatedRenderableCount += 1;
 		const proxy = createProxyNode( source );
 		copyRenderTransform( source, proxy );
 		proxy.userData.__portalSourceObjectId = source.uuid;
@@ -37,7 +44,11 @@ export function buildPortalRenderProxy(sourceRoot: THREE.Object3D): PortalRender
 	if ( sourceToProxy.size !== proxyToSource.size ) throw new Error( 'render-proxy-tree-mismatch' );
 	if ( proxyRenderableCount === 0 ) throw new Error( 'render-proxy-empty' );
 	if ( import.meta.env.DEV ) assertProxyUserData( root );
-	return { root, sourceToProxy, proxyToSource, sourceRenderableCount, proxyRenderableCount, skippedHelperCount };
+	return {
+		root, sourceToProxy, proxyToSource, sourceRenderableCount, proxyRenderableCount,
+		includedAnnotatedRenderableCount, skippedHelperRenderableCount,
+		skippedUnsupportedRenderableCount: 0, skippedHelperCount
+	};
 
 }
 
@@ -83,8 +94,7 @@ function shouldIncludeInPortalProxy(source: THREE.Object3D): boolean {
 
 	return source instanceof THREE.Sprite === false
 		&& source.userData.__nonSelectableHelper !== true
-		&& source.userData.__visualizationHelper !== true
-		&& source.userData.__annotationItem === undefined;
+		&& source.userData.__visualizationHelper !== true;
 
 }
 
@@ -92,9 +102,15 @@ function countRenderable(root: THREE.Object3D): number {
 
 	let count = 0;
 	root.traverse( ( object ) => {
-		if ( shouldIncludeInPortalProxy( object ) && ( object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points ) ) count += 1;
+		if ( shouldIncludeInPortalProxy( object ) && isRenderable( object ) ) count += 1;
 	} );
 	return count;
+
+}
+
+function isRenderable(object: THREE.Object3D): boolean {
+
+	return object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points;
 
 }
 

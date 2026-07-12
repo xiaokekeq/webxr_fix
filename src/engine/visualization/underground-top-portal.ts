@@ -163,6 +163,7 @@ export class UndergroundTopPortal {
 	private proxyState: 'not-required' | 'missing' | 'building' | 'ready' | 'failed' = 'missing';
 	private proxyBuildAttemptCount = 0;
 	private proxyBuildSuccessCount = 0;
+	private proxyBuildStats = { sourceRenderableCount: 0, proxyRenderableCount: 0, includedAnnotatedRenderableCount: 0, skippedHelperRenderableCount: 0, skippedUnsupportedRenderableCount: 0 };
 	private lastProxyBuildFailureReason = '';
 	private redrawCount = 0;
 	private lastRedrawTimestamp = 0;
@@ -400,6 +401,13 @@ export class UndergroundTopPortal {
 			this.renderModel = nextRenderModel;
 			this.proxyToSource.clear();
 			for ( const [ proxy, source ] of build.proxyToSource ) this.proxyToSource.set( proxy, source );
+			this.proxyBuildStats = {
+				sourceRenderableCount: build.sourceRenderableCount,
+				proxyRenderableCount: build.proxyRenderableCount,
+				includedAnnotatedRenderableCount: build.includedAnnotatedRenderableCount,
+				skippedHelperRenderableCount: build.skippedHelperRenderableCount,
+				skippedUnsupportedRenderableCount: build.skippedUnsupportedRenderableCount
+			};
 			this.modelMatrixValues.fill( Number.NaN );
 			this.proxyState = 'ready';
 			this.proxyBuildSuccessCount += 1;
@@ -728,6 +736,7 @@ export class UndergroundTopPortal {
 			renderProxyExists: this.renderModel !== null,
 			proxyStructuralRenderableCount: this.countStructuralRenderableMeshes(),
 			proxyVisibleRenderableCount: this.countVisibleRenderableMeshes(),
+			...this.proxyBuildStats,
 			renderProxyVisible: this.renderModel?.visible === true,
 			sourceStructuralRenderableCount: this.countRenderableMeshes( this.sourceModel, false ),
 			sourceVisibleRenderableCount: this.countRenderableMeshes( this.sourceModel, true ),
