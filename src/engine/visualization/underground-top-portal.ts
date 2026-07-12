@@ -159,6 +159,10 @@ export class UndergroundTopPortal {
 	private lastRenderedRevision = -1;
 	private offscreenState: 'not-required' | 'pending' | 'rendering' | 'ready' | 'failed' = 'pending';
 	private lastOffscreenFailureReason = '';
+	private proxyState: 'not-required' | 'missing' | 'building' | 'ready' | 'failed' = 'missing';
+	private proxyBuildAttemptCount = 0;
+	private proxyBuildSuccessCount = 0;
+	private lastProxyBuildFailureReason = '';
 	private redrawCount = 0;
 	private lastRedrawTimestamp = 0;
 	private lastFrameError = '';
@@ -198,7 +202,13 @@ export class UndergroundTopPortal {
 		if ( corners.ok === false ) return this.fail( corners.reason );
 		if ( args.model === null && PORTAL_DEBUG_MODE !== 'surface' ) return this.fail( args.modelUnavailableReason ?? 'missing-model' );
 
-		if ( args.model !== null ) this.setSourceModel( args.model );
+		if ( args.model !== null ) this.bindSourceModel( args.model );
+		if ( PORTAL_DEBUG_MODE === 'surface' ) this.proxyState = 'not-required';
+		if ( PORTAL_DEBUG_MODE !== 'surface' ) {
+			if ( this.countRenderableMeshes( this.sourceModel, false ) === 0 ) return this.fail( 'no-renderable-model-structure' );
+			const proxyFailure = this.ensureRenderProxy();
+			if ( proxyFailure !== null ) return this.fail( proxyFailure );
+		}
 		this.updateGeometry( args.renderer, corners.value );
 		if ( args.model !== null ) this.syncModelMatrix();
 		if ( this.ensureSurface() === false && PORTAL_DEBUG_MODE !== 'surface' ) {
@@ -208,17 +218,17 @@ export class UndergroundTopPortal {
 		this.setState( 'surface-ready' );
 		syncCpuDepthOcclusionUniforms( this.uniforms!, args.depthFrame );
 		if ( PORTAL_DEBUG_MODE !== 'full' || ( isArDebugEnabled() && readPortalFlag( 'portalDisableCpuDepth' ) ) ) this.uniforms!.uDepthOcclusionEnabled.value = false;
-		if ( this.sourceModel !== null ) this.sourceModel.visible = false;
 		this.surface!.visible = true;
 		if ( this.portalDirty || ( this.contentDirty && PORTAL_DEBUG_MODE !== 'surface' ) ) {
 			this.syncRenderModelState();
-			if ( PORTAL_DEBUG_MODE !== 'surface' && this.countStructuralRenderableMeshes() === 0 ) return this.fail( 'no-renderable-mesh-structure' );
+			if ( PORTAL_DEBUG_MODE !== 'surface' && this.countStructuralRenderableMeshes() === 0 ) return this.fail( 'render-proxy-empty' );
 			this.setState( 'content-ready' );
 			this.logDirtyDiagnostics( corners.value, args.mainCamera );
 			this.portalDirty = false;
 			if ( PORTAL_DEBUG_MODE !== 'surface' && this.contentDirty ) this.render( args.renderer );
 			else if ( PORTAL_DEBUG_MODE === 'surface' ) this.offscreenState = 'not-required';
 		}
+		if ( PORTAL_DEBUG_MODE !== 'surface' && this.offscreenState === 'ready' && this.sourceModel !== null ) this.sourceModel.visible = false;
 		return this.setState( 'ready' );
 
 	}
@@ -249,8 +259,6 @@ export class UndergroundTopPortal {
 	markDirty(): void {
 
 		this.portalDirty = true;
-		this.contentDirty = true;
-		this.offscreenState = 'pending';
 		this.markContentDirty();
 
 	}
@@ -284,6 +292,8 @@ export class UndergroundTopPortal {
 		this.markContentDirty();
 		this.state = 'idle';
 		this.failureReason = '';
+		this.proxyState = 'missing';
+		this.lastProxyBuildFailureReason = '';
 
 	}
 
@@ -317,13 +327,14 @@ export class UndergroundTopPortal {
 
 	}
 
-	private setSourceModel(model: THREE.Object3D): void {
+	private bindSourceModel(model: THREE.Object3D): void {
 
 		if ( this.sourceModel === model ) return;
 		this.restoreSourceVisibility();
 		this.sourceModel = model;
 		this.sourceModelWasVisible = model.visible;
-		this.rebuildRenderModel();
+		this.proxyState = 'missing';
+		this.markContentDirty();
 
 	}
 
@@ -333,34 +344,58 @@ export class UndergroundTopPortal {
 
 	}
 
-	private rebuildRenderModel(): void {
+	private ensureRenderProxy(): string | null {
 
-		this.renderModel?.removeFromParent();
-		this.sourceObjects.clear();
-		if ( this.sourceModel === null ) return;
-		// This renderProxy shares the source model's geometry/material resources. It is only
-		// rendered into the Portal target and is never attached to the main XR scene.
-		this.renderModel = this.sourceModel.clone( true );
-		this.renderModel.visible = true;
-		this.renderModel.name = '__underground-top-portal-render-proxy';
-		const sourceNodes: THREE.Object3D[] = [];
-		const renderNodes: THREE.Object3D[] = [];
-		this.sourceModel.traverse( ( object ) => sourceNodes.push( object ) );
-		this.renderModel.traverse( ( object ) => renderNodes.push( object ) );
-		for ( let index = 0; index < Math.min( sourceNodes.length, renderNodes.length ); index += 1 ) {
-			const source = sourceNodes[ index ];
-			const render = renderNodes[ index ];
-			this.sourceObjects.set( source.uuid, source );
-			render.userData.__portalSourceObjectId = source.uuid;
-			if (
-				index > 0
-				&& ( source.userData.__nonSelectableHelper === true || source instanceof THREE.Sprite )
-			) render.visible = false;
+		if ( this.isRenderProxyValid() ) return null;
+		return this.rebuildRenderProxy();
+
+	}
+
+	private isRenderProxyValid(): boolean {
+
+		return this.renderModel !== null
+			&& this.renderModel.parent === this.renderScene
+			&& this.renderModel.visible
+			&& this.renderModel.userData.__portalSourceRootId === this.sourceModel?.uuid
+			&& this.countStructuralRenderableMeshes() > 0;
+
+	}
+
+	private rebuildRenderProxy(): string | null {
+
+		if ( this.sourceModel === null ) return 'render-proxy-unavailable';
+		this.proxyState = 'building';
+		this.proxyBuildAttemptCount += 1;
+		try {
+			const nextRenderModel = this.sourceModel.clone( true );
+			const nextSourceObjects = new Map<string, THREE.Object3D>();
+			mapProxyTree( this.sourceModel, nextRenderModel, nextSourceObjects );
+			nextRenderModel.visible = true;
+			nextRenderModel.name = '__underground-top-portal-render-proxy';
+			nextRenderModel.userData.__portalSourceRootId = this.sourceModel.uuid;
+			nextRenderModel.matrixAutoUpdate = false;
+			this.renderScene.add( nextRenderModel );
+			if ( nextRenderModel.parent !== this.renderScene ) throw new Error( 'render-proxy-detached' );
+			if ( countRenderableMeshesIn( nextRenderModel ) === 0 ) {
+				nextRenderModel.removeFromParent();
+				return 'render-proxy-empty';
+			}
+			this.renderModel?.removeFromParent();
+			this.renderModel = nextRenderModel;
+			this.sourceObjects.clear();
+			for ( const [ id, source ] of nextSourceObjects ) this.sourceObjects.set( id, source );
+			this.modelMatrixValues.fill( Number.NaN );
+			this.proxyState = 'ready';
+			this.proxyBuildSuccessCount += 1;
+			this.lastProxyBuildFailureReason = '';
+			this.portalDirty = true;
+			this.markContentDirty();
+			return null;
+		} catch ( error ) {
+			this.proxyState = 'failed';
+			this.lastProxyBuildFailureReason = error instanceof Error ? error.message : String( error );
+			return this.lastProxyBuildFailureReason === 'render-proxy-tree-mismatch' ? 'render-proxy-tree-mismatch' : 'render-proxy-build-failed';
 		}
-		this.renderModel.matrixAutoUpdate = false;
-		this.renderScene.add( this.renderModel );
-		this.modelMatrixValues.fill( Number.NaN );
-		this.portalDirty = true;
 
 	}
 
@@ -495,7 +530,7 @@ export class UndergroundTopPortal {
 		this.sourceModel.updateMatrixWorld( true );
 		if ( this.copyChangedMatrix( this.sourceModel.matrixWorld.elements ) === false ) return;
 		this.renderModel.matrix.copy( this.sourceModel.matrixWorld );
-		this.renderModel.matrixWorld.copy( this.sourceModel.matrixWorld );
+		this.renderModel.matrixWorldNeedsUpdate = true;
 		this.renderModel.updateMatrixWorld( true );
 		this.bounds.setFromObject( this.renderModel );
 		this.bounds.getSize( this.boundsSize );
@@ -664,6 +699,13 @@ export class UndergroundTopPortal {
 			offscreenRevision: this.offscreenRevision,
 			lastRenderedRevision: this.lastRenderedRevision,
 			lastOffscreenFailureReason: this.lastOffscreenFailureReason || 'none',
+			proxyState: this.proxyState,
+			proxySourceUuid: this.renderModel?.userData.__portalSourceRootId ?? 'none',
+			activeSourceUuid: this.sourceModel?.uuid ?? 'none',
+			proxyAttachedToRenderScene: this.renderModel?.parent === this.renderScene,
+			proxyBuildAttemptCount: this.proxyBuildAttemptCount,
+			proxyBuildSuccessCount: this.proxyBuildSuccessCount,
+			lastProxyBuildFailureReason: this.lastProxyBuildFailureReason || 'none',
 			renderProxyExists: this.renderModel !== null,
 			proxyStructuralRenderableCount: this.countStructuralRenderableMeshes(),
 			proxyVisibleRenderableCount: this.countVisibleRenderableMeshes(),
@@ -733,6 +775,24 @@ function isRenderablePortalMesh(object: THREE.Object3D): object is THREE.Mesh {
 		&& object.userData.__visualizationHelper !== true
 		&& object.geometry?.getAttribute( 'position' ) !== undefined
 		&& object.material !== undefined;
+
+}
+
+function countRenderableMeshesIn(root: THREE.Object3D): number {
+
+	let count = 0;
+	root.traverse( ( object ) => { if ( isRenderablePortalMesh( object ) ) count += 1; } );
+	return count;
+
+}
+
+function mapProxyTree(source: THREE.Object3D, proxy: THREE.Object3D, sourceObjects: Map<string, THREE.Object3D>): void {
+
+	if ( source.type !== proxy.type || source.children.length !== proxy.children.length ) throw new Error( 'render-proxy-tree-mismatch' );
+	sourceObjects.set( source.uuid, source );
+	proxy.userData.__portalSourceObjectId = source.uuid;
+	if ( source !== proxy && ( source.userData.__nonSelectableHelper === true || source instanceof THREE.Sprite ) ) proxy.visible = false;
+	for ( let index = 0; index < source.children.length; index += 1 ) mapProxyTree( source.children[ index ], proxy.children[ index ], sourceObjects );
 
 }
 
