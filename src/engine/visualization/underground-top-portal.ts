@@ -20,6 +20,8 @@ const PORTAL_BACKGROUND_COLOR = new THREE.Color( readPortalColor( 'portalBackgro
 const PORTAL_DEBUG_MODE = readPortalDebugMode();
 
 export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
+type GeometryCalibrationState = 'dirty' | 'calibrating' | 'ready' | 'failed';
+interface PortalCornerCorrespondence { id: string; sourceWorld: THREE.Vector3; targetWorld: THREE.Vector3; }
 
 const vertexShader = /* glsl */`
 precision highp float;
@@ -172,6 +174,14 @@ export class UndergroundTopPortal {
 	private lastRedrawTimestamp = 0;
 	private lastFrameError = '';
 	private maxSourceCornerNdcError = -1;
+	private sourceCornerNdc: THREE.Vector2[] = [];
+	private sourceCornerIds: string[] = [];
+	private originalCornerIds: string[] = [];
+	private windingBefore = 'unknown';
+	private windingWasReversed = false;
+	private geometryCalibrationState: GeometryCalibrationState = 'dirty';
+	private renderTargetCreationAttemptCount = 0;
+	private lastRenderTargetCreationError = '';
 	private cpuDepthDiagnostics = { enabled: false, available: false, stale: true, width: 0, height: 0, rawValueToMeters: 0 };
 	private state: PortalState = 'idle';
 	private failureReason = '';
@@ -217,10 +227,11 @@ export class UndergroundTopPortal {
 			const proxyFailure = this.ensureRenderProxy();
 			if ( proxyFailure !== null ) return this.fail( proxyFailure );
 		}
-		if ( this.updateGeometry( args.renderer, sourceCorners.value, targetCorners.value ) === false ) return this.fail( 'portal-source-corner-calibration-failed' );
+		const geometryFailure = this.updateGeometry( args.renderer, sourceCorners.value, targetCorners.value );
+		if ( geometryFailure !== null ) return this.fail( geometryFailure );
 		this.syncModelMatrix();
 		if ( this.ensureSurface() === false && PORTAL_DEBUG_MODE !== 'surface' ) {
-			return this.fail( this.renderTarget === null ? 'render-target-unavailable' : 'surface-unavailable' );
+			return this.fail( 'surface-unavailable' );
 		}
 		if ( this.surface === null || this.uniforms === null ) return this.fail( 'surface-unavailable' );
 		this.setState( 'surface-ready' );
@@ -283,6 +294,7 @@ export class UndergroundTopPortal {
 		this.attemptId += 1;
 		this.setState( 'initializing' );
 		this.portalDirty = true;
+		this.geometryCalibrationState = 'dirty';
 		this.markContentDirty();
 
 	}
@@ -301,6 +313,7 @@ export class UndergroundTopPortal {
 
 		this.hide();
 		this.setState( 'idle' );
+		this.geometryCalibrationState = 'dirty';
 
 	}
 
@@ -326,6 +339,7 @@ export class UndergroundTopPortal {
 		this.renderTarget = null;
 		this.uniforms = null;
 		this.cornerValues.fill( Number.NaN );
+		this.geometryCalibrationState = 'dirty';
 		this.modelMatrixValues.fill( Number.NaN );
 		this.portalDirty = true;
 		this.markContentDirty();
@@ -449,49 +463,50 @@ export class UndergroundTopPortal {
 
 	}
 
-	private updateGeometry(renderer: THREE.WebGLRenderer, sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[]): boolean {
+	private updateGeometry(renderer: THREE.WebGLRenderer, sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[]): string | null {
 
-		if ( this.copyChangedCorners( sourceCorners, targetCorners ) === false ) return true;
-		const [ s0, s1, , s3 ] = sourceCorners;
-		this.axisU.copy( s1 ).sub( s0 ).normalize();
-		this.normal.crossVectors( this.axisU, new THREE.Vector3().subVectors( s3, s0 ) ).normalize();
-		if ( this.normal.dot( this.worldUp ) < 0 ) this.normal.negate();
-		this.axisV.crossVectors( this.normal, this.axisU ).normalize();
-		this.axisU.crossVectors( this.axisV, this.normal ).normalize();
-		this.center.copy( s0 ).add( sourceCorners[ 1 ] ).add( sourceCorners[ 2 ] ).add( s3 ).multiplyScalar( 0.25 );
-		let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
-		for ( const corner of sourceCorners ) {
-			const relative = new THREE.Vector3().subVectors( corner, this.center );
-			const u = relative.dot( this.axisU );
-			const v = relative.dot( this.axisV );
-			minU = Math.min( minU, u ); maxU = Math.max( maxU, u ); minV = Math.min( minV, v ); maxV = Math.max( maxV, v );
-		}
-		this.camera.left = minU; this.camera.right = maxU; this.camera.top = maxV; this.camera.bottom = minV;
-		this.camera.position.copy( this.center ).addScaledVector( this.normal, 1 );
-		this.camera.matrix.makeBasis( this.axisU, this.axisV, this.normal ).setPosition( this.camera.position );
-		this.camera.matrix.decompose( this.camera.position, this.camera.quaternion, this.camera.scale );
-		this.camera.matrixAutoUpdate = true;
-		this.camera.updateProjectionMatrix();
-		this.camera.updateMatrixWorld( true );
+		if ( this.hasCornerChanges( sourceCorners, targetCorners ) === false && this.geometryCalibrationState === 'ready' ) return null;
+		this.geometryCalibrationState = 'calibrating';
+		const correspondences: PortalCornerCorrespondence[] = sourceCorners.map( ( sourceWorld, index ) => ( { id: String( index ), sourceWorld, targetWorld: targetCorners[ index ] } ) );
+		const center = correspondences.reduce( ( result, corner ) => result.add( corner.sourceWorld ), new THREE.Vector3() ).multiplyScalar( 0.25 );
+		const axisU = new THREE.Vector3().subVectors( sourceCorners[ 1 ], sourceCorners[ 0 ] ).normalize();
+		const normal = new THREE.Vector3().crossVectors( axisU, new THREE.Vector3().subVectors( sourceCorners[ 3 ], sourceCorners[ 0 ] ) ).normalize();
+		const windingWasReversed = normal.dot( this.worldUp ) < 0;
+		if ( windingWasReversed ) normal.negate();
+		const axisV = new THREE.Vector3().crossVectors( normal, axisU ).normalize();
+		axisU.crossVectors( axisV, normal ).normalize();
+		if ( Math.abs( axisU.dot( axisV ) ) > 1e-5 || axisU.dot( new THREE.Vector3().crossVectors( axisV, normal ) ) < 0.999 ) return this.calibrationFailed( 'portal-camera-basis-invalid' );
+		const projected = correspondences.map( ( corner ) => ( { corner, u: corner.sourceWorld.clone().sub( center ).dot( axisU ), v: corner.sourceWorld.clone().sub( center ).dot( axisV ) } ) );
+		const minU = Math.min( ...projected.map( ( point ) => point.u ) ), maxU = Math.max( ...projected.map( ( point ) => point.u ) );
+		const minV = Math.min( ...projected.map( ( point ) => point.v ) ), maxV = Math.max( ...projected.map( ( point ) => point.v ) );
+		const epsilon = Math.max( maxU - minU, maxV - minV ) * 1e-3;
+		const normalized = [ [ minU, minV ], [ maxU, minV ], [ maxU, maxV ], [ minU, maxV ] ].map( ( [ u, v ] ) => projected.find( ( point ) => Math.abs( point.u - u ) <= epsilon && Math.abs( point.v - v ) <= epsilon )?.corner );
+		if ( normalized.some( ( corner ) => corner === undefined ) || new Set( normalized ).size !== 4 ) return this.calibrationFailed( 'portal-corner-order-ambiguous' );
+		const camera = new THREE.OrthographicCamera( minU, maxU, maxV, minV );
+		camera.position.copy( center ).addScaledVector( normal, 1 );
+		camera.matrix.makeBasis( axisU, axisV, normal ).setPosition( camera.position );
+		camera.matrix.decompose( camera.position, camera.quaternion, camera.scale );
+		camera.matrixAutoUpdate = true;
+		camera.updateProjectionMatrix(); camera.updateMatrixWorld( true );
 		const expectedNdc = [ new THREE.Vector2( -1, -1 ), new THREE.Vector2( 1, -1 ), new THREE.Vector2( 1, 1 ), new THREE.Vector2( -1, 1 ) ];
-		const maxNdcError = Math.max( ...sourceCorners.map( ( corner, index ) => {
-			const projected = corner.clone().project( this.camera );
-			return Math.hypot( projected.x - expectedNdc[ index ].x, projected.y - expectedNdc[ index ].y );
-		} ) );
-		this.maxSourceCornerNdcError = maxNdcError;
-		if ( maxNdcError > 1e-3 ) return false;
-
-		const [ p0, p1, p2, p3 ] = targetCorners;
+		const sourceCornerNdc = normalized.map( ( corner ) => {
+			const projected = corner!.sourceWorld.clone().project( camera );
+			return new THREE.Vector2( projected.x, projected.y );
+		} );
+		const maxNdcError = Math.max( ...sourceCornerNdc.map( ( point, index ) => Math.hypot( point.x - expectedNdc[ index ].x, point.y - expectedNdc[ index ].y ) ) );
+		if ( maxNdcError > 1e-3 ) return this.calibrationFailed( 'portal-source-footprint-not-orthographic' );
+		const [ p0, p1, p2, p3 ] = normalized.map( ( corner ) => corner!.targetWorld );
 		const geometry = new THREE.BufferGeometry();
 		geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [
-			p0.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p0.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p0.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
-			p1.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p1.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p1.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
-			p2.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p2.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p2.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
-			p0.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p0.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p0.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
-			p2.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p2.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p2.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
-			p3.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p3.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p3.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS
+			p0.x + normal.x * PORTAL_SURFACE_LIFT_METERS, p0.y + normal.y * PORTAL_SURFACE_LIFT_METERS, p0.z + normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p1.x + normal.x * PORTAL_SURFACE_LIFT_METERS, p1.y + normal.y * PORTAL_SURFACE_LIFT_METERS, p1.z + normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p2.x + normal.x * PORTAL_SURFACE_LIFT_METERS, p2.y + normal.y * PORTAL_SURFACE_LIFT_METERS, p2.z + normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p0.x + normal.x * PORTAL_SURFACE_LIFT_METERS, p0.y + normal.y * PORTAL_SURFACE_LIFT_METERS, p0.z + normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p2.x + normal.x * PORTAL_SURFACE_LIFT_METERS, p2.y + normal.y * PORTAL_SURFACE_LIFT_METERS, p2.z + normal.z * PORTAL_SURFACE_LIFT_METERS,
+			p3.x + normal.x * PORTAL_SURFACE_LIFT_METERS, p3.y + normal.y * PORTAL_SURFACE_LIFT_METERS, p3.z + normal.z * PORTAL_SURFACE_LIFT_METERS
 		], 3 ) );
 		geometry.setAttribute( 'uv', new THREE.Float32BufferAttribute( [ 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1 ], 2 ) );
+		if ( this.resizeRenderTarget( renderer, maxU - minU, maxV - minV ) === false ) { geometry.dispose(); return this.calibrationFailed( 'render-target-unavailable' ); }
 		this.surface?.geometry.dispose();
 		if ( this.surface === null ) {
 			this.surface = new THREE.Mesh( geometry, this.createMaterial() );
@@ -503,10 +518,19 @@ export class UndergroundTopPortal {
 		} else {
 			this.surface.geometry = geometry;
 		}
-		this.resizeRenderTarget( renderer, maxU - minU, maxV - minV );
+		this.axisU.copy( axisU ); this.axisV.copy( axisV ); this.normal.copy( normal ); this.center.copy( center );
+		this.camera.copy( camera );
+		this.sourceCornerIds = normalized.map( ( corner ) => corner!.id );
+		this.originalCornerIds = correspondences.map( ( corner ) => corner.id );
+		this.windingBefore = windingWasReversed ? 'clockwise' : 'counter-clockwise';
+		this.windingWasReversed = windingWasReversed;
+		this.sourceCornerNdc = sourceCornerNdc;
+		this.maxSourceCornerNdcError = maxNdcError;
+		this.commitCornerCache( sourceCorners, targetCorners );
+		this.geometryCalibrationState = 'ready';
 		this.portalDirty = true;
 		this.markContentDirty();
-		return true;
+		return null;
 
 	}
 
@@ -540,7 +564,7 @@ export class UndergroundTopPortal {
 
 	}
 
-	private resizeRenderTarget(renderer: THREE.WebGLRenderer, width: number, height: number): void {
+	private resizeRenderTarget(renderer: THREE.WebGLRenderer, width: number, height: number): boolean {
 
 		const maxSize = Math.min( PORTAL_MAX_RESOLUTION, renderer.capabilities.maxTextureSize );
 		let targetWidth = maxSize;
@@ -551,14 +575,15 @@ export class UndergroundTopPortal {
 		}
 		targetWidth = Math.min( maxSize, Math.max( PORTAL_MIN_RESOLUTION, targetWidth ) );
 		targetHeight = Math.min( maxSize, Math.max( PORTAL_MIN_RESOLUTION, targetHeight ) );
-		if ( this.renderTarget?.width === targetWidth && this.renderTarget.height === targetHeight ) return;
+		if ( this.renderTarget?.width === targetWidth && this.renderTarget.height === targetHeight ) return true;
 		const nextTarget = this.createRenderTarget( renderer, targetWidth, targetHeight );
-		if ( nextTarget === null ) return;
+		if ( nextTarget === null ) return false;
 		this.renderTarget?.dispose();
 		this.renderTarget = nextTarget;
 		if ( this.uniforms !== null ) this.uniforms.uPortalColorTexture.value = this.renderTarget.texture;
 		this.portalDirty = true;
 		this.markContentDirty();
+		return true;
 
 	}
 
@@ -572,6 +597,7 @@ export class UndergroundTopPortal {
 			const candidateHeight = Math.max( PORTAL_MIN_RESOLUTION, Math.round( aspect >= 1 ? candidateLongEdge / aspect : candidateLongEdge ) );
 			for ( const samples of sampleOptions ) {
 				try {
+					this.renderTargetCreationAttemptCount += 1;
 					const target = new THREE.WebGLRenderTarget( candidateWidth, candidateHeight, {
 						format: THREE.RGBAFormat, type: THREE.UnsignedByteType, minFilter: THREE.LinearFilter,
 						magFilter: THREE.LinearFilter, generateMipmaps: false, depthBuffer: true, stencilBuffer: false
@@ -579,7 +605,8 @@ export class UndergroundTopPortal {
 					target.samples = samples;
 					return target;
 				} catch ( error ) {
-					this.lastFrameError = error instanceof Error ? error.message : String( error );
+					this.lastRenderTargetCreationError = error instanceof Error ? error.message : String( error );
+					this.lastFrameError = this.lastRenderTargetCreationError;
 				}
 			}
 		}
@@ -796,6 +823,17 @@ export class UndergroundTopPortal {
 			rawValueToMeters: this.cpuDepthDiagnostics.rawValueToMeters,
 			maxPortalCornerDriftMeters: this.getMaxPortalCornerDrift(),
 			maxSourceCornerNdcError: this.maxSourceCornerNdcError,
+			geometryCalibrationState: this.geometryCalibrationState,
+			sourceCornerIds: JSON.stringify( this.sourceCornerIds ),
+			originalCornerIds: JSON.stringify( this.originalCornerIds ),
+			normalizedCornerIds: JSON.stringify( this.sourceCornerIds ),
+			windingBefore: this.windingBefore,
+			windingAfter: 'counter-clockwise',
+			windingWasReversed: this.windingWasReversed,
+			sourceCornerNdc: JSON.stringify( this.sourceCornerNdc.map( ( point ) => [ point.x, point.y ] ) ),
+			expectedSourceCornerNdc: JSON.stringify( [ [ -1, -1 ], [ 1, -1 ], [ 1, 1 ], [ -1, 1 ] ] ),
+			renderTargetCreationAttemptCount: this.renderTargetCreationAttemptCount,
+			lastRenderTargetCreationError: this.lastRenderTargetCreationError || 'none',
 			lastFrameError: this.lastFrameError || 'none'
 		};
 
@@ -809,7 +847,14 @@ export class UndergroundTopPortal {
 
 	}
 
-	private copyChangedCorners(sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[]): boolean {
+	private calibrationFailed(reason: string): string {
+
+		this.geometryCalibrationState = 'failed';
+		return reason;
+
+	}
+
+	private hasCornerChanges(sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[]): boolean {
 
 		let changed = false;
 		for ( const [ group, corners ] of [ [ 0, sourceCorners ], [ 1, targetCorners ] ] as const ) for ( let index = 0; index < 4; index += 1 ) {
@@ -819,11 +864,19 @@ export class UndergroundTopPortal {
 			const y = Math.fround( point.y );
 			const z = Math.fround( point.z );
 			if ( this.cornerValues[ offset ] !== x || this.cornerValues[ offset + 1 ] !== y || this.cornerValues[ offset + 2 ] !== z ) changed = true;
-			this.cornerValues[ offset ] = x;
-			this.cornerValues[ offset + 1 ] = y;
-			this.cornerValues[ offset + 2 ] = z;
 		}
 		return changed;
+
+	}
+
+	private commitCornerCache(sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[]): void {
+
+		for ( const [ group, corners ] of [ [ 0, sourceCorners ], [ 1, targetCorners ] ] as const ) for ( let index = 0; index < 4; index += 1 ) {
+			const offset = group * 12 + index * 3;
+			this.cornerValues[ offset ] = Math.fround( corners[ index ].x );
+			this.cornerValues[ offset + 1 ] = Math.fround( corners[ index ].y );
+			this.cornerValues[ offset + 2 ] = Math.fround( corners[ index ].z );
+		}
 
 	}
 
