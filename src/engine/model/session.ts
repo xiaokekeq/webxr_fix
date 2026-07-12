@@ -17,7 +17,7 @@ import type {
 	EngineeringControlPoint
 } from '@/localization/coarse/engineering-registration.js';
 import type { SetStatus } from '@/features/ar/types/runtime-types.js';
-import { loadModelRuntimeBundle, type LoadedModelRuntimeBundle } from './runtime.js';
+import { disposeModelRuntimeBundle, loadModelRuntimeBundle, type LoadedModelRuntimeBundle } from './runtime.js';
 import { createRegistrationMetricsState } from '@/engine/session/view-state.js';
 
 interface CreateModelSessionOptions {
@@ -37,6 +37,7 @@ export interface ModelSessionController {
 	handleModelSelection(modelId: string): void;
 	loadSelectedModelResources(modelDefinition: ModelCatalogItem): Promise<void>;
 	getCurrentModelDefinition(): ModelCatalogItem | null;
+	getDebug(): { modelLoadRequestId: number; modelLoadCompletedRequestId: number; staleModelBundleDisposeCount: number; lastDisposedStaleModelId: string | null; lastModelLoadAbortReason: string | null };
 }
 
 export function createModelSession(options: CreateModelSessionOptions): ModelSessionController {
@@ -55,6 +56,9 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 
 	let currentModelDefinition: ModelCatalogItem | null = null;
 	let modelLoadRequestId = 0;
+	let modelLoadCompletedRequestId = 0;
+	let staleModelBundleDisposeCount = 0;
+	let lastDisposedStaleModelId: string | null = null;
 
 	async function loadSelectedModelResources(modelDefinition: ModelCatalogItem): Promise<void> {
 
@@ -79,9 +83,15 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 
 		const bundle = await loadModelRuntimeBundle( modelDefinition, setStatus );
 		if ( requestId !== modelLoadRequestId ) {
+			disposeModelRuntimeBundle( bundle );
+			staleModelBundleDisposeCount += 1;
+			lastDisposedStaleModelId = bundle.modelDefinition.id;
 			return;
 		}
 
+		bundle.modelTemplate.userData.__modelLoadRequestId = requestId;
+		modelLoadCompletedRequestId = requestId;
+		bundle.modelTemplate.userData.__modelLoadDebug = { modelLoadRequestId, modelLoadCompletedRequestId, staleModelBundleDisposeCount, lastDisposedStaleModelId, lastModelLoadAbortReason: null };
 		currentModelDefinition = bundle.modelDefinition;
 		onRuntimeBundleLoaded( bundle );
 		onLoadManualRegistration( bundle.demoModelConfig.modelId );
@@ -175,6 +185,12 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 		getCurrentModelDefinition() {
 
 			return currentModelDefinition;
+
+		},
+
+		getDebug() {
+
+			return { modelLoadRequestId, modelLoadCompletedRequestId, staleModelBundleDisposeCount, lastDisposedStaleModelId, lastModelLoadAbortReason: null };
 
 		}
 	};

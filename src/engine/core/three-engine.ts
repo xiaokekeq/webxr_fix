@@ -81,7 +81,6 @@ import { MaterialStateRuntime } from '@/engine/visualization/material-state-runt
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
-import { buildEnclosureShell } from '@/engine/visualization/enclosure-shell-builder.js';
 import { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosure-shell.js';
 import { SectionCapRuntime } from '@/engine/visualization/section-cap-runtime.js';
 import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
@@ -633,6 +632,7 @@ export class ThreeEngine {
 				this.emit();
 			},
 			onRuntimeReset: () => {
+				this.sectionCapRuntime.dispose( 'model-switch' );
 				this.enclosureShell.dispose();
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
@@ -669,7 +669,7 @@ export class ThreeEngine {
 				this.pipesByName = bundle.pipesByName;
 				this.demoModelConfig = bundle.demoModelConfig;
 				this.modelTemplate = bundle.modelTemplate;
-				this.enclosureShell.register( buildEnclosureShell( bundle.modelTemplate ), 'model-loaded' );
+				this.enclosureShell.rebuildForModel( { model: bundle.modelTemplate, modelName: bundle.modelDefinition.name, reason: 'model-loaded', modelRevision: Number( bundle.modelTemplate.userData.__modelLoadRequestId ?? 0 ) } );
 				this.registrationSolution = bundle.registrationSolution;
 				this.logGroundAwareArAudit( bundle.demoModelConfig );
 				this.annotationLayer.setAnnotations(
@@ -844,7 +844,7 @@ export class ThreeEngine {
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.materialStateRuntime.dispose();
 		this.sectionCutController.dispose();
-		this.sectionCapRuntime.dispose();
+		this.sectionCapRuntime.dispose( 'engine-dispose' );
 		this.enclosureShell.dispose();
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();

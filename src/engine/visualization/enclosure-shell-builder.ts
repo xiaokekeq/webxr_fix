@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { cloneEnclosureMaterial, resolveEnclosureMaterialSources, type EnclosureFaceName } from './enclosure-material-resolver.js';
 
-export interface EnclosureShellBuildResult { root: THREE.Group; meshCount: number; triangleCount: number; materialCount: number; materialSources: Record<EnclosureFaceName, string>; }
+export interface EnclosureShellBuildResult { root: THREE.Group; meshCount: number; triangleCount: number; materialCount: number; materialSources: Record<EnclosureFaceName, string>; bounds: THREE.Box3; renderableCount: number; }
 
 export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBuildResult {
 
@@ -11,7 +11,8 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 	root.name = '__textured-enclosure-shell';
 	root.userData.__enclosureShell = true;
 	root.userData.__excludeFromLayerIndex = true;
-	if ( bounds.isEmpty() ) return { root, meshCount: 0, triangleCount: 0, materialCount: 0, materialSources: { front: 'none', back: 'none', left: 'none', right: 'none', bottom: 'none' } };
+	const renderableCount = countRenderableMeshes( modelRoot );
+	if ( bounds.isEmpty() ) return { root, meshCount: 0, triangleCount: 0, materialCount: 0, materialSources: { front: 'none', back: 'none', left: 'none', right: 'none', bottom: 'none' }, bounds, renderableCount };
 	const sources = resolveEnclosureMaterialSources( modelRoot, bounds );
 	const size = bounds.getSize( new THREE.Vector3() );
 	const faces: Array<[ EnclosureFaceName, THREE.Vector3[] ]> = [
@@ -29,8 +30,14 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 		root.add( mesh );
 	}
 	modelRoot.add( root );
-	return { root, meshCount: 5, triangleCount: 10, materialCount: 5, materialSources: Object.fromEntries( Object.entries( sources ).map( ( [ face, source ] ) => [ face, source.source ] ) ) as Record<EnclosureFaceName, string> };
+	return { root, meshCount: 5, triangleCount: 10, materialCount: 5, materialSources: Object.fromEntries( Object.entries( sources ).map( ( [ face, source ] ) => [ face, source.source ] ) ) as Record<EnclosureFaceName, string>, bounds, renderableCount };
 
+}
+
+function countRenderableMeshes(root: THREE.Object3D): number {
+	let count = 0;
+	root.traverse( ( object ) => { if ( object instanceof THREE.Mesh && object.userData.__visualizationHelper !== true && object.userData.__enclosureShell !== true ) count += 1; } );
+	return count;
 }
 
 function resolveLocalBounds(root: THREE.Object3D): THREE.Box3 {

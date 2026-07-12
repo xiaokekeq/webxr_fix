@@ -34,6 +34,23 @@ export interface LoadedModelRuntimeBundle {
 	modelDefinition: ModelCatalogItem;
 }
 
+const TEXTURE_KEYS = [ 'map', 'alphaMap', 'aoMap', 'bumpMap', 'displacementMap', 'emissiveMap', 'envMap', 'lightMap', 'metalnessMap', 'normalMap', 'roughnessMap', 'specularMap' ] as const;
+
+export function disposeModelRuntimeBundle(bundle: LoadedModelRuntimeBundle): void {
+
+	const geometries = new Set<THREE.BufferGeometry>(); const materials = new Set<THREE.Material>(); const textures = new Set<THREE.Texture>();
+	bundle.modelTemplate.traverse( ( object ) => {
+		if ( object instanceof THREE.Mesh === false ) return;
+		geometries.add( object.geometry );
+		( Array.isArray( object.material ) ? object.material : [ object.material ] ).forEach( ( material ) => materials.add( material ) );
+	} );
+	materials.forEach( ( material ) => { const textured = material as THREE.Material & Record<string, unknown>; TEXTURE_KEYS.forEach( ( key ) => { const texture = textured[ key ]; if ( texture instanceof THREE.Texture ) textures.add( texture ); } ); material.dispose(); } );
+	geometries.forEach( ( geometry ) => geometry.dispose() );
+	textures.forEach( ( texture ) => texture.dispose() );
+	bundle.modelTemplate.removeFromParent();
+
+}
+
 export async function loadModelRuntimeBundle(
 	modelDefinition: ModelCatalogItem,
 	setStatus: SetStatus

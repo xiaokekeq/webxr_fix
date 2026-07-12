@@ -6,8 +6,11 @@ export class SectionCapRuntime {
 	private currentRoot: THREE.Object3D | null = null;
 	private revision = 0;
 	private rebuildCount = 0;
+	private disposeCount = 0;
+	private lastDisposeReason = 'none';
 	private lastSignature = '';
 	private capRoot: THREE.Group | null = null;
+	private sourceModelUuid: string | null = null;
 
 	sync(root: THREE.Object3D | null, plane: THREE.Plane | null, force = false): void {
 		if ( root === null || plane === null ) { this.hide(); this.currentRoot = root; return; }
@@ -17,9 +20,9 @@ export class SectionCapRuntime {
 	}
 
 	hide(): void { if ( this.capRoot !== null ) this.capRoot.visible = false; this.lastSignature = ''; }
-	dispose(): void { this.removeCap(); this.currentRoot = null; this.lastSignature = ''; }
+	dispose(reason = 'dispose'): void { this.removeCap(); this.currentRoot = null; this.sourceModelUuid = null; this.lastSignature = ''; this.disposeCount += 1; this.lastDisposeReason = reason; }
 
-	getDebug() { return { sectionCapEnabled: this.capRoot !== null, sectionCapVisible: this.capRoot?.visible === true, sectionCapMeshCount: this.capRoot?.children.length ?? 0, sectionCapTriangleCount: this.capRoot?.children.reduce( ( total, child ) => total + ( child instanceof THREE.Mesh ? ( child.geometry.getIndex()?.count ?? child.geometry.getAttribute( 'position' ).count ) / 3 : 0 ), 0 ) ?? 0, sectionCapRevision: this.revision, sectionCapRebuildCount: this.rebuildCount }; }
+	getDebug() { return { sectionCapExists: this.capRoot !== null, sectionCapEnabled: this.capRoot !== null, sectionCapVisible: this.capRoot?.visible === true, sectionCapSourceModelUuid: this.sourceModelUuid, sectionCapDisposeCount: this.disposeCount, sectionCapLastDisposeReason: this.lastDisposeReason, sectionCapMeshCount: this.capRoot?.children.length ?? 0, sectionCapTriangleCount: this.capRoot?.children.reduce( ( total, child ) => total + ( child instanceof THREE.Mesh ? ( child.geometry.getIndex()?.count ?? child.geometry.getAttribute( 'position' ).count ) / 3 : 0 ), 0 ) ?? 0, sectionCapRevision: this.revision, sectionCapRebuildCount: this.rebuildCount }; }
 
 	private rebuild(root: THREE.Object3D, plane: THREE.Plane): void {
 		this.removeCap();
@@ -33,6 +36,7 @@ export class SectionCapRuntime {
 		const cap = new THREE.Mesh( geometry, material );
 		cap.name = '__section-cap'; cap.userData.__sectionCap = true; cap.userData.__visualizationHelper = true; cap.userData.__nonSelectableHelper = true;
 		this.capRoot = new THREE.Group(); this.capRoot.name = '__section-cap-root'; this.capRoot.userData.__sectionCap = true; this.capRoot.userData.__visualizationHelper = true; this.capRoot.add( cap ); root.add( this.capRoot );
+		this.sourceModelUuid = typeof root.userData.__enclosureSourceModelUuid === 'string' ? root.userData.__enclosureSourceModelUuid : root.uuid;
 		this.revision += 1; this.rebuildCount += 1;
 	}
 
