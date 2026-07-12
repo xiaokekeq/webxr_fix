@@ -16,6 +16,7 @@ const PORTAL_MIN_RESOLUTION = 384;
 const PORTAL_FOREGROUND_THRESHOLD_METERS = readPortalNumber( 'portalThreshold', 0.05 );
 const PORTAL_DEPTH_FEATHER_METERS = readPortalNumber( 'portalFeather', 0.025 );
 const PORTAL_BACKGROUND_ALPHA = THREE.MathUtils.clamp( readPortalNumber( 'portalBackgroundAlpha', 0.9 ), 0.85, 1 );
+const PORTAL_BACKGROUND_COLOR = new THREE.Color( readPortalColor( 'portalBackgroundColor', 0x06101a ) );
 const PORTAL_DEBUG_MODE = readPortalDebugMode();
 
 export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
@@ -49,6 +50,7 @@ uniform ivec2 uDepthTextureSize;
 uniform float uForegroundThresholdMeters;
 uniform float uDepthFeatherMeters;
 uniform float uPortalBackgroundAlpha;
+uniform vec3 uPortalBackgroundColor;
 uniform int uDebugMode;
 
 in vec2 vPortalUv;
@@ -105,7 +107,7 @@ void main() {
     return;
   }
   vec4 portalColor = texture(uPortalColorTexture, vPortalUv);
-  vec3 portalBackground = vec3(0.025, 0.055, 0.08);
+  vec3 portalBackground = uPortalBackgroundColor;
   vec3 visibleColor = mix(portalBackground, portalColor.rgb, portalColor.a);
   float baseAlpha = mix(uPortalBackgroundAlpha, 1.0, portalColor.a);
   if (uDebugMode == 2) {
@@ -152,6 +154,7 @@ export class UndergroundTopPortal {
 		uForegroundThresholdMeters: { value: number };
 		uDepthFeatherMeters: { value: number };
 		uPortalBackgroundAlpha: { value: number };
+		uPortalBackgroundColor: { value: THREE.Color };
 		uDebugMode: { value: number };
 	} | null = null;
 	private portalDirty = true;
@@ -168,6 +171,7 @@ export class UndergroundTopPortal {
 	private redrawCount = 0;
 	private lastRedrawTimestamp = 0;
 	private lastFrameError = '';
+	private cpuDepthDiagnostics = { enabled: false, available: false, stale: true, width: 0, height: 0, rawValueToMeters: 0 };
 	private state: PortalState = 'idle';
 	private failureReason = '';
 	private waitingReason = '';
@@ -218,6 +222,14 @@ export class UndergroundTopPortal {
 		this.setState( 'surface-ready' );
 		syncCpuDepthOcclusionUniforms( this.uniforms!, args.depthFrame );
 		if ( PORTAL_DEBUG_MODE !== 'full' || ( isArDebugEnabled() && readPortalFlag( 'portalDisableCpuDepth' ) ) ) this.uniforms!.uDepthOcclusionEnabled.value = false;
+		this.cpuDepthDiagnostics = {
+			enabled: this.uniforms!.uDepthOcclusionEnabled.value,
+			available: args.depthFrame.available,
+			stale: args.depthFrame.stale,
+			width: args.depthFrame.width,
+			height: args.depthFrame.height,
+			rawValueToMeters: args.depthFrame.rawValueToMeters
+		};
 		this.surface!.visible = true;
 		if ( this.portalDirty || ( this.contentDirty && PORTAL_DEBUG_MODE !== 'surface' ) ) {
 			this.syncRenderModelState();
@@ -278,6 +290,13 @@ export class UndergroundTopPortal {
 		this.failureReason = '';
 		this.waitingReason = reason;
 		this.setState( 'initializing' );
+
+	}
+
+	deactivate(): void {
+
+		this.hide();
+		this.setState( 'idle' );
 
 	}
 
@@ -482,6 +501,7 @@ export class UndergroundTopPortal {
 			uForegroundThresholdMeters: { value: PORTAL_FOREGROUND_THRESHOLD_METERS },
 			uDepthFeatherMeters: { value: PORTAL_DEPTH_FEATHER_METERS },
 			uPortalBackgroundAlpha: { value: PORTAL_BACKGROUND_ALPHA },
+			uPortalBackgroundColor: { value: PORTAL_BACKGROUND_COLOR },
 			uDebugMode: { value: PORTAL_DEBUG_MODE === 'surface' ? 1 : PORTAL_DEBUG_MODE === 'texture' ? 2 : 0 }
 		} );
 		return new THREE.ShaderMaterial( {
@@ -751,6 +771,14 @@ export class UndergroundTopPortal {
 			foregroundThresholdMeters: PORTAL_FOREGROUND_THRESHOLD_METERS,
 			depthFeatherMeters: PORTAL_DEPTH_FEATHER_METERS,
 			portalBackgroundAlpha: PORTAL_BACKGROUND_ALPHA,
+			portalBackgroundColor: `#${PORTAL_BACKGROUND_COLOR.getHexString()}`,
+			cpuDepthOcclusionEnabled: this.cpuDepthDiagnostics.enabled,
+			depthFrameAvailable: this.cpuDepthDiagnostics.available,
+			depthFrameStale: this.cpuDepthDiagnostics.stale,
+			depthTextureWidth: this.cpuDepthDiagnostics.width,
+			depthTextureHeight: this.cpuDepthDiagnostics.height,
+			rawValueToMeters: this.cpuDepthDiagnostics.rawValueToMeters,
+			maxPortalCornerDriftMeters: this.getMaxPortalCornerDrift(),
 			lastFrameError: this.lastFrameError || 'none'
 		};
 
@@ -779,6 +807,22 @@ export class UndergroundTopPortal {
 			this.cornerValues[ offset + 2 ] = z;
 		}
 		return changed;
+
+	}
+
+	private getMaxPortalCornerDrift(): number {
+
+		const position = this.surface?.geometry.getAttribute( 'position' );
+		if ( position === undefined || position === null ) return -1;
+		let maxDrift = 0;
+		for ( const [ cornerIndex, vertexIndex ] of [ [ 0, 0 ], [ 1, 1 ], [ 2, 2 ], [ 3, 5 ] ] ) {
+			const offset = cornerIndex * 3;
+			const dx = position.getX( vertexIndex ) - this.normal.x * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset ];
+			const dy = position.getY( vertexIndex ) - this.normal.y * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset + 1 ];
+			const dz = position.getZ( vertexIndex ) - this.normal.z * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset + 2 ];
+			maxDrift = Math.max( maxDrift, Math.hypot( dx, dy, dz ) );
+		}
+		return maxDrift;
 
 	}
 
@@ -862,6 +906,14 @@ function readPortalNumber(name: string, fallback: number): number {
 	if ( import.meta.env.DEV === false ) return fallback;
 	const value = Number( new URLSearchParams( window.location.search ).get( name ) );
 	return Number.isFinite( value ) && value >= 0 ? value : fallback;
+
+}
+
+function readPortalColor(name: string, fallback: number): number {
+
+	if ( typeof window === 'undefined' ) return fallback;
+	const value = new URLSearchParams( window.location.search ).get( name )?.replace( '#', '' ) ?? '';
+	return /^[0-9a-fA-F]{6}$/.test( value ) ? Number.parseInt( value, 16 ) : fallback;
 
 }
 

@@ -178,6 +178,11 @@ interface PortalActivationSnapshot {
 	worldCorners: readonly THREE.Vector3[];
 }
 
+interface PendingPortalAttempt {
+	id: number;
+	resolve: (result: UndergroundViewChangeResult) => void;
+}
+
 export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
@@ -337,7 +342,7 @@ export class ThreeEngine {
 	private portalFallbackReported = false;
 	private requestedUndergroundViewMode: UndergroundViewMode = DEFAULT_UNDERGROUND_DISPLAY_STATE.undergroundViewMode;
 	private portalClickPreviousEffectiveMode: UndergroundViewMode | null = null;
-	private pendingPortalResult: ((result: UndergroundViewChangeResult) => void) | null = null;
+	private pendingPortalAttempt: PendingPortalAttempt | null = null;
 	private portalActivationAttemptId = 0;
 	private placementRevision = 0;
 	private lastPlacementRootUuid: string | null = null;
@@ -874,7 +879,7 @@ export class ThreeEngine {
 				configuredControlPointCount: attempt?.configuredControlPointCount ?? 0,
 				modelLocalCornerCount: attempt?.modelLocalCornerCount ?? 0,
 				transformedCornerCount: attempt?.transformedCornerCount ?? 0,
-				pendingPortalRequest: this.pendingPortalResult !== null,
+				pendingPortalRequest: this.pendingPortalAttempt !== null,
 				currentPlacementRevision: this.placementRevision,
 				currentModelScopeSource: scope.source,
 				currentModelScopeFailureReason: scope.failureReason ?? 'none',
@@ -946,6 +951,7 @@ export class ThreeEngine {
 		window.removeEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
+		this.settlePendingPortalAttempt( false, 'disposed' );
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.materialStateRuntime.dispose();
 		this.sectionCutController.dispose();
@@ -1033,19 +1039,25 @@ export class ThreeEngine {
 
 	setUndergroundViewMode(mode: UndergroundViewMode): Promise<UndergroundViewChangeResult> {
 
-		this.pendingPortalResult?.( this.createUndergroundViewResult( false, 'superseded' ) );
-		this.pendingPortalResult = null;
-		if ( mode === 'portal' ) {
-			this.portalActivationAttemptId += 1;
-			this.portalFallbackReported = false;
-			this.portalClickPreviousEffectiveMode = this.store.getState().undergroundViewMode;
-			this.undergroundPortal.beginAttempt();
+		this.settlePendingPortalAttempt( false, 'superseded' );
+		if ( mode === 'real-space' ) {
+			this.requestedUndergroundViewMode = mode;
+			this.undergroundPortal.deactivate();
+			this.store.patch( { undergroundViewMode: mode } );
+			return Promise.resolve( this.createUndergroundViewResult( true ) );
 		}
+		const diagnostics = this.undergroundPortal.getDiagnostics();
+		if ( this.store.getState().undergroundViewMode === 'portal' && diagnostics.portalState === 'ready' ) {
+			this.requestedUndergroundViewMode = mode;
+			return Promise.resolve( this.createUndergroundViewResult( true ) );
+		}
+		this.portalActivationAttemptId += 1;
+		this.portalFallbackReported = false;
+		this.portalClickPreviousEffectiveMode = this.store.getState().undergroundViewMode;
+		this.undergroundPortal.beginAttempt();
 		this.requestedUndergroundViewMode = mode;
-		if ( mode === 'real-space' ) this.store.patch( { undergroundViewMode: mode } );
 		this.undergroundPortal.markDirty();
-		if ( mode === 'real-space' ) return Promise.resolve( this.createUndergroundViewResult( true ) );
-		return new Promise( ( resolve ) => { this.pendingPortalResult = resolve; } );
+		return new Promise( ( resolve ) => { this.pendingPortalAttempt = { id: this.portalActivationAttemptId, resolve }; } );
 
 	}
 
@@ -3972,8 +3984,7 @@ export class ThreeEngine {
 			this.portalFallbackReported = false;
 			if ( this.store.getState().undergroundViewMode !== 'portal' ) this.store.patch( { undergroundViewMode: 'portal' } );
 			this.logPortalClickResult();
-			this.pendingPortalResult?.( this.createUndergroundViewResult( true ) );
-			this.pendingPortalResult = null;
+			this.settlePendingPortalAttempt( true );
 		}
 		if ( portalStatus === 'failed' ) this.handleTerminalPortalFailure( String( this.undergroundPortal.getDiagnostics().portalFailureReason ) );
 		this.logPortalDiagnostics( depthFrame );
@@ -3989,8 +4000,16 @@ export class ThreeEngine {
 		this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
 		this.logPortalClickResult();
 		if ( import.meta.env.DEV ) console.assert( isEffectivelyVisible( this.resolveActiveEngineeringModelScope().undergroundRoot ), 'Portal fallback must restore effective underground model visibility.' );
-		this.pendingPortalResult?.( this.createUndergroundViewResult( false, reason ) );
-		this.pendingPortalResult = null;
+		this.settlePendingPortalAttempt( false, reason );
+
+	}
+
+	private settlePendingPortalAttempt(applied: boolean, failureReason?: string): void {
+
+		const pending = this.pendingPortalAttempt;
+		if ( pending === null ) return;
+		this.pendingPortalAttempt = null;
+		pending.resolve( this.createUndergroundViewResult( applied, failureReason ) );
 
 	}
 
@@ -4117,6 +4136,7 @@ export class ThreeEngine {
 
 		this.arSessionEndPending = false;
 		this.undergroundPortal.reset();
+		this.settlePendingPortalAttempt( false, 'xr-session-ended' );
 		this.placementRevision += 1;
 		this.lastPlacementRootUuid = null;
 		this.lastPortalActivationSnapshot = null;
