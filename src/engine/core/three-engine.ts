@@ -83,6 +83,7 @@ import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import { buildEnclosureShell } from '@/engine/visualization/enclosure-shell-builder.js';
 import { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosure-shell.js';
+import { SectionCapRuntime } from '@/engine/visualization/section-cap-runtime.js';
 import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
 import {
 	createArAnnotationLabelController,
@@ -261,6 +262,7 @@ export class ThreeEngine {
 	};
 	private readonly materialStateRuntime = new MaterialStateRuntime();
 	private readonly enclosureShell = new TexturedEnclosureShell();
+	private readonly sectionCapRuntime = new SectionCapRuntime();
 	private readonly sectionCutController;
 	private readonly annotationLabelsController;
 	private readonly annotationLayer = new AnnotationLayer();
@@ -382,6 +384,7 @@ export class ThreeEngine {
 			materialStateRuntime: this.materialStateRuntime,
 			sectionCutController: this.sectionCutController,
 			enclosureShell: this.enclosureShell,
+			sectionCapRuntime: this.sectionCapRuntime,
 			getUndergroundModelRoot: () => this.placementSession.getArPlacedModel(),
 			syncAttachmentInfoBoardVisibility: () => {
 				this.syncAttachmentInfoBoardVisibility();
@@ -630,6 +633,7 @@ export class ThreeEngine {
 				this.emit();
 			},
 			onRuntimeReset: () => {
+				this.enclosureShell.dispose();
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
 				this.registrationSolution = null;
@@ -840,6 +844,8 @@ export class ThreeEngine {
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.materialStateRuntime.dispose();
 		this.sectionCutController.dispose();
+		this.sectionCapRuntime.dispose();
+		this.enclosureShell.dispose();
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();
 		this.sceneBundle.renderer.dispose();

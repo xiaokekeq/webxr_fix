@@ -10,6 +10,7 @@ import type { LayerVisibilityController } from '@/engine/visualization/layer-vis
 import type { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
 import type { ArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import type { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosure-shell.js';
+import type { SectionCapRuntime } from '@/engine/visualization/section-cap-runtime.js';
 
 interface VisualizationStateRuntimeOptions {
 	store: RegistrationStore;
@@ -18,6 +19,7 @@ interface VisualizationStateRuntimeOptions {
 	materialStateRuntime: MaterialStateRuntime;
 	sectionCutController: ArSectionCutController;
 	enclosureShell: TexturedEnclosureShell;
+	sectionCapRuntime: SectionCapRuntime;
 	getUndergroundModelRoot(): THREE.Object3D | null;
 	syncAttachmentInfoBoardVisibility(): void;
 }
@@ -31,6 +33,7 @@ export class VisualizationStateRuntime {
 	private lastSectionValue: number | undefined;
 	private lastSectionMode: SectionCutPlaneMode | undefined;
 	private previousLayerVisibilitySignature = '';
+	private sectionPlane: THREE.Plane | null = null;
 
 	constructor(private readonly options: VisualizationStateRuntimeOptions) {}
 
@@ -44,6 +47,7 @@ export class VisualizationStateRuntime {
 		this.lastSectionValue = undefined;
 		this.lastSectionMode = undefined;
 		this.previousLayerVisibilitySignature = '';
+		this.sectionPlane = null;
 
 	}
 
@@ -62,11 +66,12 @@ export class VisualizationStateRuntime {
 		if ( sectionDirty ) {
 			this.options.sectionCutController.restore();
 			this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
-			const plane = sectionEnabled ? this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ) : null;
-			this.options.materialStateRuntime.applySection( plane );
+			this.sectionPlane = sectionEnabled ? this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ) : null;
+			this.options.materialStateRuntime.applySection( this.sectionPlane );
 		}
 		if ( materialDirty ) this.options.materialStateRuntime.applyMaterial( state.undergroundMaterialMode, state.transparentXrayValue );
 		this.options.enclosureShell.sync( undergroundRoot, state.undergroundInspectionTool );
+		this.options.sectionCapRuntime.sync( undergroundRoot, this.sectionPlane, sectionDirty );
 
 		this.lastRoot = undergroundRoot;
 		this.lastMaterialMode = state.undergroundMaterialMode;
@@ -97,6 +102,7 @@ export class VisualizationStateRuntime {
 		} );
 		const changed = changedObjectCount > 0 || visibilitySignature !== this.previousLayerVisibilitySignature;
 		this.previousLayerVisibilitySignature = visibilitySignature;
+		if ( changed ) this.options.sectionCapRuntime.sync( root, this.sectionPlane, true );
 		const nextPatch = {
 			layerNames: modelLayers.length > 0
 				? modelLayers.map( ( layer ) => layer.label )
@@ -113,6 +119,7 @@ export class VisualizationStateRuntime {
 
 		this.options.materialStateRuntime.restore();
 		this.options.sectionCutController.restore();
+		this.options.sectionCapRuntime.hide();
 
 	}
 

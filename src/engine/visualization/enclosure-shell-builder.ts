@@ -36,7 +36,7 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 function resolveLocalBounds(root: THREE.Object3D): THREE.Box3 {
 	const bounds = new THREE.Box3(); const inverseRoot = root.matrixWorld.clone().invert(); const relative = new THREE.Matrix4(); const point = new THREE.Vector3();
 	root.traverse( ( object ) => {
-		if ( object instanceof THREE.Mesh === false || object.userData.__visualizationHelper === true || object.userData.__enclosureShell === true || object.userData.__perimeterShell === true ) return;
+		if ( object instanceof THREE.Mesh === false || object.userData.__visualizationHelper === true || object.userData.__enclosureShell === true ) return;
 		if ( object.geometry.boundingBox === null ) object.geometry.computeBoundingBox();
 		if ( object.geometry.boundingBox === null ) return;
 		relative.multiplyMatrices( inverseRoot, object.matrixWorld );

@@ -109,4 +109,4 @@ function largestMaterial(root: THREE.Object3D): THREE.Material | null {
 	return result;
 }
 
-function isHelper(object: THREE.Object3D): boolean { return object.userData.__visualizationHelper === true || object.userData.__enclosureShell === true || object.userData.__perimeterShell === true; }
+function isHelper(object: THREE.Object3D): boolean { return object.userData.__visualizationHelper === true || object.userData.__enclosureShell === true; }
