@@ -176,6 +176,7 @@ interface PortalActivationSnapshot {
 	modelLocalCornerCount: number;
 	transformedCornerCount: number;
 	worldCorners: readonly THREE.Vector3[];
+	targetSurfaceCorners: readonly THREE.Vector3[];
 }
 
 interface PendingPortalAttempt {
@@ -401,7 +402,8 @@ export class ThreeEngine {
 			renderer: this.sceneBundle.renderer,
 			mainCamera: this.sceneBundle.renderer.xr.getCamera(),
 			model: this.sceneBundle.scene,
-			footprintCorners: [],
+			sourceModelCorners: [],
+			targetSurfaceCorners: [],
 			depthFrame: this.realDepthProvider.getCurrentFrame(),
 			enabled: false
 		};
@@ -3976,7 +3978,8 @@ export class ThreeEngine {
 		}
 		args.mainCamera = this.sceneBundle.renderer.xr.getCamera();
 		args.model = snapshot.undergroundRoot!;
-		args.footprintCorners = [ ...snapshot.worldCorners ];
+		args.sourceModelCorners = [ ...snapshot.worldCorners ];
+		args.targetSurfaceCorners = [ ...snapshot.targetSurfaceCorners ];
 		args.depthFrame = depthFrame;
 		args.enabled = true;
 		const portalStatus = this.undergroundPortal.update( args );
@@ -4048,7 +4051,8 @@ export class ThreeEngine {
 			configuredControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
 			modelLocalCornerCount: 0,
 			transformedCornerCount: 0,
-			worldCorners: [] as readonly THREE.Vector3[]
+			worldCorners: [] as readonly THREE.Vector3[],
+			targetSurfaceCorners: [] as readonly THREE.Vector3[]
 		};
 		if ( scope.placedRoot === null ) return { ...base, state: 'waiting', reason: 'waiting-for-placement' };
 		if ( scope.undergroundRoot === null ) return { ...base, state: 'failed', reason: scope.failureReason ?? 'not-underground' };
@@ -4057,11 +4061,14 @@ export class ThreeEngine {
 		const modelLocalCorners = controlPoints.slice( 0, 4 ).map( ( point ) => point.modelLocal ).filter( ( point ) => point !== undefined && Number.isFinite( point.x ) && Number.isFinite( point.y ) && Number.isFinite( point.z ) );
 		if ( modelLocalCorners.length !== 4 ) return { ...base, state: 'failed', reason: 'portal-footprint-model-local-missing', modelLocalCornerCount: modelLocalCorners.length };
 		scope.undergroundRoot.updateMatrixWorld( true );
+		const targetSolution = this.getActiveArFromEnuSolution();
+		if ( targetSolution === null ) return { ...base, state: 'waiting', reason: 'waiting-for-target-surface' };
 		const worldCorners = modelLocalCorners.map( ( point ) => point.clone().applyMatrix4( scope.undergroundRoot!.matrixWorld ) );
+		const targetSurfaceCorners = controlPoints.slice( 0, 4 ).map( ( point ) => point.worldEnu.clone().applyMatrix4( targetSolution.matrix ) );
 		if ( worldCorners.some( ( point ) => Number.isFinite( point.x ) === false || Number.isFinite( point.y ) === false || Number.isFinite( point.z ) === false ) ) {
 			return { ...base, state: 'failed', reason: 'portal-footprint-invalid', modelLocalCornerCount: 4, transformedCornerCount: worldCorners.length };
 		}
-		return { ...base, state: 'ready', reason: null, modelLocalCornerCount: 4, transformedCornerCount: worldCorners.length, worldCorners };
+		return { ...base, state: 'ready', reason: null, modelLocalCornerCount: 4, transformedCornerCount: worldCorners.length, worldCorners, targetSurfaceCorners };
 
 	}
 

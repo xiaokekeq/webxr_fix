@@ -142,7 +142,7 @@ export class UndergroundTopPortal {
 	private readonly bounds = new THREE.Box3();
 	private readonly boundsSize = new THREE.Vector3();
 	private readonly boundsCenter = new THREE.Vector3();
-	private readonly cornerValues = new Float32Array( 12 );
+	private readonly cornerValues = new Float32Array( 24 );
 	private readonly modelMatrixValues = new Float32Array( 16 );
 	private sourceModel: THREE.Object3D | null = null;
 	private sourceModelWasVisible = true;
@@ -171,6 +171,7 @@ export class UndergroundTopPortal {
 	private redrawCount = 0;
 	private lastRedrawTimestamp = 0;
 	private lastFrameError = '';
+	private maxSourceCornerNdcError = -1;
 	private cpuDepthDiagnostics = { enabled: false, available: false, stale: true, width: 0, height: 0, rawValueToMeters: 0 };
 	private state: PortalState = 'idle';
 	private failureReason = '';
@@ -190,7 +191,8 @@ export class UndergroundTopPortal {
 		renderer: THREE.WebGLRenderer;
 		mainCamera: THREE.Camera;
 		model: THREE.Object3D;
-		footprintCorners: THREE.Vector3[];
+		sourceModelCorners: THREE.Vector3[];
+		targetSurfaceCorners: THREE.Vector3[];
 		depthFrame: CpuDepthFrame;
 		enabled: boolean;
 	}): PortalState {
@@ -204,8 +206,10 @@ export class UndergroundTopPortal {
 			this.attemptId += 1;
 			this.setState( 'initializing' );
 		}
-		const corners = validateAndOrderCorners( args.footprintCorners );
-		if ( corners.ok === false ) return this.fail( corners.reason );
+		const sourceCorners = validateCorners( args.sourceModelCorners );
+		const targetCorners = validateCorners( args.targetSurfaceCorners );
+		if ( sourceCorners.ok === false ) return this.fail( sourceCorners.reason );
+		if ( targetCorners.ok === false ) return this.fail( targetCorners.reason );
 		this.bindSourceModel( args.model );
 		if ( PORTAL_DEBUG_MODE === 'surface' ) this.proxyState = 'not-required';
 		if ( PORTAL_DEBUG_MODE !== 'surface' ) {
@@ -213,7 +217,7 @@ export class UndergroundTopPortal {
 			const proxyFailure = this.ensureRenderProxy();
 			if ( proxyFailure !== null ) return this.fail( proxyFailure );
 		}
-		this.updateGeometry( args.renderer, corners.value );
+		if ( this.updateGeometry( args.renderer, sourceCorners.value, targetCorners.value ) === false ) return this.fail( 'portal-source-corner-calibration-failed' );
 		this.syncModelMatrix();
 		if ( this.ensureSurface() === false && PORTAL_DEBUG_MODE !== 'surface' ) {
 			return this.fail( this.renderTarget === null ? 'render-target-unavailable' : 'surface-unavailable' );
@@ -235,7 +239,7 @@ export class UndergroundTopPortal {
 			this.syncRenderModelState();
 			if ( PORTAL_DEBUG_MODE !== 'surface' && this.countStructuralRenderableMeshes() === 0 ) return this.fail( 'render-proxy-empty' );
 			this.setState( 'content-ready' );
-			this.logDirtyDiagnostics( corners.value, args.mainCamera );
+			this.logDirtyDiagnostics( targetCorners.value, args.mainCamera );
 			this.portalDirty = false;
 			if ( PORTAL_DEBUG_MODE !== 'surface' && this.contentDirty ) this.render( args.renderer );
 			else if ( PORTAL_DEBUG_MODE === 'surface' ) this.offscreenState = 'not-required';
@@ -445,28 +449,39 @@ export class UndergroundTopPortal {
 
 	}
 
-	private updateGeometry(renderer: THREE.WebGLRenderer, corners: THREE.Vector3[]): void {
+	private updateGeometry(renderer: THREE.WebGLRenderer, sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[]): boolean {
 
-		if ( this.copyChangedCorners( corners ) === false ) return;
-		const [ p0, p1, p2, p3 ] = corners;
-		this.axisU.copy( p1 ).sub( p0 ).normalize();
-		this.axisV.copy( p3 ).sub( p0 ).normalize();
-		this.normal.crossVectors( this.axisU, this.axisV ).normalize();
+		if ( this.copyChangedCorners( sourceCorners, targetCorners ) === false ) return true;
+		const [ s0, s1, , s3 ] = sourceCorners;
+		this.axisU.copy( s1 ).sub( s0 ).normalize();
+		this.normal.crossVectors( this.axisU, new THREE.Vector3().subVectors( s3, s0 ) ).normalize();
 		if ( this.normal.dot( this.worldUp ) < 0 ) this.normal.negate();
-		this.center.copy( p0 ).add( p1 ).add( p2 ).add( p3 ).multiplyScalar( 0.25 );
-		const width = 0.5 * ( p0.distanceTo( p1 ) + p3.distanceTo( p2 ) );
-		const height = 0.5 * ( p0.distanceTo( p3 ) + p1.distanceTo( p2 ) );
-		this.camera.left = - width / 2;
-		this.camera.right = width / 2;
-		this.camera.top = height / 2;
-		this.camera.bottom = - height / 2;
+		this.axisV.crossVectors( this.normal, this.axisU ).normalize();
+		this.axisU.crossVectors( this.axisV, this.normal ).normalize();
+		this.center.copy( s0 ).add( sourceCorners[ 1 ] ).add( sourceCorners[ 2 ] ).add( s3 ).multiplyScalar( 0.25 );
+		let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+		for ( const corner of sourceCorners ) {
+			const relative = new THREE.Vector3().subVectors( corner, this.center );
+			const u = relative.dot( this.axisU );
+			const v = relative.dot( this.axisV );
+			minU = Math.min( minU, u ); maxU = Math.max( maxU, u ); minV = Math.min( minV, v ); maxV = Math.max( maxV, v );
+		}
+		this.camera.left = minU; this.camera.right = maxU; this.camera.top = maxV; this.camera.bottom = minV;
 		this.camera.position.copy( this.center ).addScaledVector( this.normal, 1 );
-		this.camera.up.copy( this.axisV );
-		this.lookAtTarget.copy( this.center ).addScaledVector( this.normal, -1 );
-		this.camera.lookAt( this.lookAtTarget );
+		this.camera.matrix.makeBasis( this.axisU, this.axisV, this.normal ).setPosition( this.camera.position );
+		this.camera.matrix.decompose( this.camera.position, this.camera.quaternion, this.camera.scale );
+		this.camera.matrixAutoUpdate = true;
 		this.camera.updateProjectionMatrix();
 		this.camera.updateMatrixWorld( true );
+		const expectedNdc = [ new THREE.Vector2( -1, -1 ), new THREE.Vector2( 1, -1 ), new THREE.Vector2( 1, 1 ), new THREE.Vector2( -1, 1 ) ];
+		const maxNdcError = Math.max( ...sourceCorners.map( ( corner, index ) => {
+			const projected = corner.clone().project( this.camera );
+			return Math.hypot( projected.x - expectedNdc[ index ].x, projected.y - expectedNdc[ index ].y );
+		} ) );
+		this.maxSourceCornerNdcError = maxNdcError;
+		if ( maxNdcError > 1e-3 ) return false;
 
+		const [ p0, p1, p2, p3 ] = targetCorners;
 		const geometry = new THREE.BufferGeometry();
 		geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [
 			p0.x + this.normal.x * PORTAL_SURFACE_LIFT_METERS, p0.y + this.normal.y * PORTAL_SURFACE_LIFT_METERS, p0.z + this.normal.z * PORTAL_SURFACE_LIFT_METERS,
@@ -488,9 +503,10 @@ export class UndergroundTopPortal {
 		} else {
 			this.surface.geometry = geometry;
 		}
-		this.resizeRenderTarget( renderer, width, height );
+		this.resizeRenderTarget( renderer, maxU - minU, maxV - minV );
 		this.portalDirty = true;
 		this.markContentDirty();
+		return true;
 
 	}
 
@@ -779,6 +795,7 @@ export class UndergroundTopPortal {
 			depthTextureHeight: this.cpuDepthDiagnostics.height,
 			rawValueToMeters: this.cpuDepthDiagnostics.rawValueToMeters,
 			maxPortalCornerDriftMeters: this.getMaxPortalCornerDrift(),
+			maxSourceCornerNdcError: this.maxSourceCornerNdcError,
 			lastFrameError: this.lastFrameError || 'none'
 		};
 
@@ -792,12 +809,12 @@ export class UndergroundTopPortal {
 
 	}
 
-	private copyChangedCorners(corners: THREE.Vector3[]): boolean {
+	private copyChangedCorners(sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[]): boolean {
 
 		let changed = false;
-		for ( let index = 0; index < 4; index += 1 ) {
+		for ( const [ group, corners ] of [ [ 0, sourceCorners ], [ 1, targetCorners ] ] as const ) for ( let index = 0; index < 4; index += 1 ) {
 			const point = corners[ index ];
-			const offset = index * 3;
+			const offset = group * 12 + index * 3;
 			const x = Math.fround( point.x );
 			const y = Math.fround( point.y );
 			const z = Math.fround( point.z );
@@ -816,7 +833,7 @@ export class UndergroundTopPortal {
 		if ( position === undefined || position === null ) return -1;
 		let maxDrift = 0;
 		for ( const [ cornerIndex, vertexIndex ] of [ [ 0, 0 ], [ 1, 1 ], [ 2, 2 ], [ 3, 5 ] ] ) {
-			const offset = cornerIndex * 3;
+			const offset = 12 + cornerIndex * 3;
 			const dx = position.getX( vertexIndex ) - this.normal.x * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset ];
 			const dy = position.getY( vertexIndex ) - this.normal.y * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset + 1 ];
 			const dz = position.getZ( vertexIndex ) - this.normal.z * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset + 2 ];
@@ -858,24 +875,18 @@ function countRenderableMeshesIn(root: THREE.Object3D): number {
 
 }
 
-function validateAndOrderCorners(corners: THREE.Vector3[]): { ok: true; value: THREE.Vector3[] } | { ok: false; reason: string } {
+function validateCorners(corners: THREE.Vector3[]): { ok: true; value: THREE.Vector3[] } | { ok: false; reason: string } {
 
 	if ( corners.length !== 4 ) return { ok: false, reason: 'missing-control-points' };
 	if ( corners.some( ( point ) => [ point.x, point.y, point.z ].some( ( value ) => Number.isFinite( value ) === false ) ) ) return { ok: false, reason: 'non-finite-corners' };
 	for ( let first = 0; first < 4; first += 1 ) for ( let second = first + 1; second < 4; second += 1 ) {
 		if ( corners[ first ].distanceToSquared( corners[ second ] ) < 1e-6 ) return { ok: false, reason: 'duplicate-corners' };
 	}
-	const center = corners.reduce( ( sum, point ) => sum.add( point ), new THREE.Vector3() ).multiplyScalar( 0.25 );
 	const normal = new THREE.Vector3().crossVectors( new THREE.Vector3().subVectors( corners[ 1 ], corners[ 0 ] ), new THREE.Vector3().subVectors( corners[ 3 ], corners[ 0 ] ) );
 	if ( normal.lengthSq() < 1e-8 ) return { ok: false, reason: 'invalid-normal' };
 	normal.normalize();
-	const axisU = new THREE.Vector3().subVectors( corners[ 1 ], corners[ 0 ] ).normalize();
-	const axisV = new THREE.Vector3().crossVectors( normal, axisU ).normalize();
-	const ordered = [ ...corners ].sort( ( a, b ) => Math.atan2( new THREE.Vector3().subVectors( a, center ).dot( axisV ), new THREE.Vector3().subVectors( a, center ).dot( axisU ) ) - Math.atan2( new THREE.Vector3().subVectors( b, center ).dot( axisV ), new THREE.Vector3().subVectors( b, center ).dot( axisU ) ) );
-	let area = 0;
-	for ( let index = 0; index < 4; index += 1 ) area += new THREE.Vector3().subVectors( ordered[ index ], center ).cross( new THREE.Vector3().subVectors( ordered[ ( index + 1 ) % 4 ], center ) ).length() * 0.5;
-	if ( area < 1e-4 || ordered.some( ( point, index ) => point.distanceTo( ordered[ ( index + 1 ) % 4 ] ) < 0.01 ) ) return { ok: false, reason: 'degenerate-footprint' };
-	return { ok: true, value: ordered };
+	if ( corners[ 1 ].distanceTo( corners[ 0 ] ) < 0.01 || corners[ 3 ].distanceTo( corners[ 0 ] ) < 0.01 ) return { ok: false, reason: 'degenerate-footprint' };
+	return { ok: true, value: corners };
 
 }
 
