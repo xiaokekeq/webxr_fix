@@ -22,6 +22,7 @@ const PORTAL_DEBUG_MODE = readPortalDebugMode();
 const PORTAL_ELEVATION_LAYER = 31;
 const PORTAL_ELEVATION_STYLE = { shallowColor: new THREE.Color( 0xffb35c ), deepColor: new THREE.Color( 0x2467b3 ), overlayOpacity: 0.35, contourOpacity: 0.75, contourIntervalMeters: 0.25, contourWidthMeters: 0.02 };
 const PORTAL_ELEVATION_RANGE_EPSILON = 0.001;
+const PORTAL_MATRIX_EPSILON = 1e-6;
 
 export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
 type GeometryCalibrationState = 'dirty' | 'calibrating' | 'ready' | 'failed';
@@ -193,6 +194,12 @@ export class UndergroundTopPortal {
 	private elevationRange: PortalElevationRange = { minSignedHeightMeters: 0, maxSignedHeightMeters: 0, minDepthMeters: 0, maxDepthMeters: 0, depthRangeMeters: 0, sampleCount: 0, aboveSurfaceSampleCount: 0, belowSurfaceSampleCount: 0, onSurfaceSampleCount: 0, valid: false };
 	private elevationFallbackReason = 'none';
 	private elevationDirty = true;
+	private lastBaseDirtyReason = 'initial';
+	private lastElevationDirtyReason = 'initial';
+	private lastGeometryDirtyReason = 'initial';
+	private baseDirtyCount = 1;
+	private elevationDirtyCount = 1;
+	private geometryDirtyCount = 1;
 	private elevationRedrawCount = 0;
 	private lastElevationRedrawTimestamp = 0;
 	private uniforms: CpuDepthOcclusionUniforms & {
@@ -292,13 +299,13 @@ export class UndergroundTopPortal {
 			rawValueToMeters: args.depthFrame.rawValueToMeters
 		};
 		this.surface!.visible = true;
-		if ( this.portalDirty || ( this.contentDirty && PORTAL_DEBUG_MODE !== 'surface' ) ) {
-			this.syncRenderModelState();
+		if ( this.portalDirty || this.contentDirty || this.elevationDirty ) {
+			if ( this.contentDirty ) this.syncRenderModelState();
 			if ( PORTAL_DEBUG_MODE !== 'surface' && this.countStructuralRenderableMeshes() === 0 ) return this.fail( 'render-proxy-empty' );
 			this.setState( 'content-ready' );
 			this.logDirtyDiagnostics( targetCorners.value, args.mainCamera );
 			this.portalDirty = false;
-			if ( PORTAL_DEBUG_MODE !== 'surface' && this.contentDirty ) this.render( args.renderer );
+			if ( PORTAL_DEBUG_MODE !== 'surface' && ( this.contentDirty || this.elevationDirty ) ) this.render( args.renderer );
 			else if ( PORTAL_DEBUG_MODE === 'surface' ) this.offscreenState = 'not-required';
 		}
 		if ( PORTAL_DEBUG_MODE !== 'surface' && this.offscreenState === 'ready' && this.sourceModel !== null ) this.sourceModel.visible = false;
@@ -330,7 +337,6 @@ export class UndergroundTopPortal {
 
 	markDirty(): void {
 
-		this.portalDirty = true;
 		this.markContentDirty();
 
 	}
@@ -392,8 +398,7 @@ export class UndergroundTopPortal {
 		this.surfaceTargetCornerValues.fill( Number.NaN );
 		this.geometryCalibrationState = 'dirty';
 		this.modelMatrixValues.fill( Number.NaN );
-		this.portalDirty = true;
-		this.markContentDirty();
+		this.markGeometryDirty( 'geometry-changed' );
 		this.state = 'idle';
 		this.failureReason = '';
 		this.proxyState = 'missing';
@@ -502,7 +507,7 @@ export class UndergroundTopPortal {
 			this.proxyBuildSuccessCount += 1;
 			this.lastProxyBuildFailureReason = '';
 			this.portalDirty = true;
-			this.elevationDirty = true;
+			this.markElevationDirty( 'proxy-created' );
 			this.markContentDirty();
 			return null;
 		} catch ( error ) {
@@ -592,8 +597,7 @@ export class UndergroundTopPortal {
 		this.commitCornerCache( sourceCorners, targetCorners );
 		this.commitSurfaceTargetCorners( [ p0, p1, p2, p3 ] );
 		this.geometryCalibrationState = 'ready';
-		this.portalDirty = true;
-		this.markContentDirty();
+		this.markGeometryDirty( 'geometry-changed' );
 		return null;
 
 	}
@@ -668,10 +672,8 @@ export class UndergroundTopPortal {
 		this.elevationTarget = nextElevationTarget;
 		if ( this.uniforms !== null ) this.uniforms.uPortalColorTexture.value = this.renderTarget.texture;
 		if ( this.uniforms !== null ) this.uniforms.uPortalElevationTexture.value = this.elevationTarget.texture;
-		this.elevationDirty = true;
-		this.portalDirty = true;
-		this.elevationDirty = true;
-		this.markContentDirty();
+		this.markElevationDirty( 'render-target-resized' );
+		this.markGeometryDirty( 'proxy-matrix-changed' );
 		return true;
 
 	}
@@ -736,8 +738,6 @@ export class UndergroundTopPortal {
 				renderObject.material = source.material;
 			}
 		} );
-		this.elevationDirty = true;
-
 	}
 
 	private countStructuralRenderableMeshes(): number {
@@ -830,12 +830,14 @@ export class UndergroundTopPortal {
 			this.offscreenState = 'rendering';
 			renderer.xr.enabled = false;
 			renderer.autoClear = false;
-			renderer.setRenderTarget( this.renderTarget );
-			renderer.setViewport( 0, 0, this.renderTarget.width, this.renderTarget.height );
 			renderer.setScissorTest( false );
 			renderer.setClearColor( 0x000000, 0 );
-			renderer.clear( true, true, true );
-			renderer.render( this.renderScene, this.camera );
+			if ( this.contentDirty ) {
+				renderer.setRenderTarget( this.renderTarget );
+				renderer.setViewport( 0, 0, this.renderTarget.width, this.renderTarget.height );
+				renderer.clear( true, true, true );
+				renderer.render( this.renderScene, this.camera );
+			}
 			this.renderElevation( renderer );
 			this.contentDirty = false;
 			this.lastRenderedRevision = this.offscreenRevision;
@@ -911,6 +913,14 @@ export class UndergroundTopPortal {
 			offscreenRenderingSkippedReason: PORTAL_DEBUG_MODE === 'surface' ? 'surface-debug-mode' : 'none',
 			offscreenState: this.offscreenState,
 			contentDirty: this.contentDirty,
+			baseContentDirty: this.contentDirty,
+			elevationContentDirty: this.elevationDirty,
+			lastBaseDirtyReason: this.lastBaseDirtyReason,
+			lastElevationDirtyReason: this.lastElevationDirtyReason,
+			lastGeometryDirtyReason: this.lastGeometryDirtyReason,
+			baseDirtyCount: this.baseDirtyCount,
+			elevationDirtyCount: this.elevationDirtyCount,
+			geometryDirtyCount: this.geometryDirtyCount,
 			offscreenRevision: this.offscreenRevision,
 			lastRenderedRevision: this.lastRenderedRevision,
 			lastOffscreenFailureReason: this.lastOffscreenFailureReason || 'none',
@@ -998,9 +1008,39 @@ export class UndergroundTopPortal {
 
 	private markContentDirty(): void {
 
-		this.contentDirty = true;
-		this.offscreenRevision += 1;
+		if ( this.contentDirty === false ) {
+			this.contentDirty = true;
+			this.baseDirtyCount += 1;
+			this.lastBaseDirtyReason = 'manual-invalidate';
+			this.offscreenRevision += 1;
+		}
+		if ( this.elevationDirty === false ) {
+			this.elevationDirty = true;
+			this.elevationDirtyCount += 1;
+			this.lastElevationDirtyReason = 'manual-invalidate';
+		}
 		if ( PORTAL_DEBUG_MODE !== 'surface' ) this.offscreenState = 'pending';
+
+	}
+
+	private markGeometryDirty(reason: 'geometry-changed' | 'proxy-matrix-changed'): void {
+
+		if ( this.portalDirty === false ) {
+			this.portalDirty = true;
+			this.geometryDirtyCount += 1;
+			this.lastGeometryDirtyReason = reason;
+		}
+		this.markContentDirty();
+
+	}
+
+	private markElevationDirty(reason: 'proxy-created' | 'render-target-resized' | 'manual-invalidate'): void {
+
+		if ( this.elevationDirty ) return;
+		this.elevationDirty = true;
+		this.elevationDirtyCount += 1;
+		this.lastElevationDirtyReason = reason;
+		this.offscreenRevision += 1;
 
 	}
 
@@ -1075,7 +1115,7 @@ export class UndergroundTopPortal {
 		let changed = false;
 		for ( let index = 0; index < 16; index += 1 ) {
 			const value = Math.fround( elements[ index ] );
-			if ( this.modelMatrixValues[ index ] !== value ) changed = true;
+			if ( Number.isFinite( this.modelMatrixValues[ index ] ) === false || Math.abs( this.modelMatrixValues[ index ] - value ) > PORTAL_MATRIX_EPSILON ) changed = true;
 			this.modelMatrixValues[ index ] = value;
 		}
 		return changed;
