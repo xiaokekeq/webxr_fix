@@ -133,12 +133,12 @@ void main() {
 
 const elevationFragmentShader = /* glsl */`
 precision highp float;
-uniform vec3 uPortalPlaneCenter, uPortalSurfaceUpNormal, uShallowColor, uDeepColor;
+uniform vec3 uTargetSurfacePlaneCenter, uPortalSurfaceUpNormal, uShallowColor, uDeepColor;
 uniform float uMinDepthMeters, uMaxDepthMeters, uOverlayOpacity, uContourOpacity, uContourIntervalMeters, uContourWidthMeters;
 in vec3 vWorldPosition;
 out vec4 outColor;
 void main() {
-  float depthMeters = max(0.0, -dot(vWorldPosition - uPortalPlaneCenter, uPortalSurfaceUpNormal));
+  float depthMeters = max(0.0, -dot(vWorldPosition - uTargetSurfacePlaneCenter, uPortalSurfaceUpNormal));
   float depth01 = clamp((depthMeters - uMinDepthMeters) / max(uMaxDepthMeters - uMinDepthMeters, 0.001), 0.0, 1.0);
   float contour = 0.0;
   if (uMaxDepthMeters - uMinDepthMeters > uContourIntervalMeters) {
@@ -167,7 +167,9 @@ export class UndergroundTopPortal {
 	private surfaceNormalWasFlipped = false;
 	private readonly axisU = new THREE.Vector3();
 	private readonly axisV = new THREE.Vector3();
-	private readonly center = new THREE.Vector3();
+	private readonly sourceCalibrationCenter = new THREE.Vector3();
+	private readonly targetSurfacePlaneCenter = new THREE.Vector3();
+	private targetSurfacePlanarityResidualMeters: number[] = [];
 	private readonly previousViewport = new THREE.Vector4();
 	private readonly previousScissor = new THREE.Vector4();
 	private readonly previousClearColor = new THREE.Color();
@@ -574,7 +576,11 @@ export class UndergroundTopPortal {
 		} else {
 			this.surface.geometry = geometry;
 		}
-		this.axisU.copy( axisU ); this.axisV.copy( axisV ); this.normal.copy( normal ); this.center.copy( center );
+		const targetCentroid = targetCorners.reduce( ( result, corner ) => result.add( corner ), new THREE.Vector3() ).multiplyScalar( 0.25 );
+		const averageTargetHeight = targetCorners.reduce( ( total, corner ) => total + corner.dot( surfaceUpNormal ), 0 ) * 0.25;
+		const targetSurfacePlaneCenter = targetCentroid.addScaledVector( surfaceUpNormal, averageTargetHeight - targetCentroid.dot( surfaceUpNormal ) );
+		const targetSurfacePlanarityResidualMeters = targetCorners.map( ( corner ) => corner.clone().sub( targetSurfacePlaneCenter ).dot( surfaceUpNormal ) );
+		this.axisU.copy( axisU ); this.axisV.copy( axisV ); this.normal.copy( normal ); this.sourceCalibrationCenter.copy( center ); this.targetSurfacePlaneCenter.copy( targetSurfacePlaneCenter ); this.targetSurfacePlanarityResidualMeters = targetSurfacePlanarityResidualMeters;
 		this.upReference.copy( normalizedUpReference ); this.candidateSurfaceNormal.copy( candidateSurfaceNormal ); this.surfaceUpNormal.copy( surfaceUpNormal ); this.surfaceNormalWasFlipped = surfaceNormalWasFlipped;
 		this.camera.copy( camera );
 		this.sourceCornerIds = normalized.map( ( corner ) => corner!.id );
@@ -622,7 +628,7 @@ export class UndergroundTopPortal {
 		if ( this.elevationMaterial !== null ) return this.elevationMaterial;
 		this.elevationMaterial = new THREE.ShaderMaterial( {
 			uniforms: {
-				uPortalPlaneCenter: { value: this.center.clone() }, uPortalSurfaceUpNormal: { value: this.surfaceUpNormal.clone() },
+				uTargetSurfacePlaneCenter: { value: this.targetSurfacePlaneCenter.clone() }, uPortalSurfaceUpNormal: { value: this.surfaceUpNormal.clone() },
 				uMinDepthMeters: { value: 0 }, uMaxDepthMeters: { value: 0 },
 				uShallowColor: { value: PORTAL_ELEVATION_STYLE.shallowColor }, uDeepColor: { value: PORTAL_ELEVATION_STYLE.deepColor },
 				uOverlayOpacity: { value: PORTAL_ELEVATION_STYLE.overlayOpacity }, uContourOpacity: { value: PORTAL_ELEVATION_STYLE.contourOpacity },
@@ -782,13 +788,13 @@ export class UndergroundTopPortal {
 		} );
 		const outside = ndcBounds.right < -1 || ndcBounds.left > 1 || ndcBounds.top < -1 || ndcBounds.bottom > 1;
 		const edgeLengths = corners.map( ( point, index ) => point.distanceTo( corners[ ( index + 1 ) % 4 ] ) );
-		const portalArea = corners.reduce( ( area, point, index ) => area + new THREE.Vector3().subVectors( point, this.center ).cross( new THREE.Vector3().subVectors( corners[ ( index + 1 ) % 4 ], this.center ) ).length() * 0.5, 0 );
+		const portalArea = corners.reduce( ( area, point, index ) => area + new THREE.Vector3().subVectors( point, this.sourceCalibrationCenter ).cross( new THREE.Vector3().subVectors( corners[ ( index + 1 ) % 4 ], this.sourceCalibrationCenter ) ).length() * 0.5, 0 );
 		mainCamera.updateMatrixWorld( true );
 		const frustum = new THREE.Frustum().setFromProjectionMatrix( new THREE.Matrix4().multiplyMatrices( mainCamera.projectionMatrix, mainCamera.matrixWorldInverse ) );
 		console.info( '[PortalDirtyDiagnostic]', {
 			corners: corners.map( vectorToObject ),
 			cornerOrder: [ 0, 1, 2, 3 ], edgeLengths, portalArea,
-			center: vectorToObject( this.center ), normal: vectorToObject( this.normal ),
+			sourceCalibrationCenter: vectorToObject( this.sourceCalibrationCenter ), targetSurfacePlaneCenter: vectorToObject( this.targetSurfacePlaneCenter ), normal: vectorToObject( this.normal ),
 			axisU: vectorToObject( this.axisU ), axisV: vectorToObject( this.axisV ),
 			camera: { left: this.camera.left, right: this.camera.right, top: this.camera.top, bottom: this.camera.bottom, near: this.camera.near, far: this.camera.far },
 			sourceModelMatrixWorld: this.sourceModel.matrixWorld.toArray(),
@@ -857,12 +863,12 @@ export class UndergroundTopPortal {
 	private renderElevation(renderer: THREE.WebGLRenderer): void {
 
 		if ( this.elevationTarget === null || this.renderModel === null || this.elevationDirty === false ) return;
-		this.elevationRange = getPortalElevationRange( this.renderModel, this.center, this.surfaceUpNormal );
+		this.elevationRange = getPortalElevationRange( this.renderModel, this.targetSurfacePlaneCenter, this.surfaceUpNormal );
 		const material = this.ensureElevationMaterial();
 		this.elevationFallbackReason = this.elevationRange.valid === false
 			? 'elevation-no-samples'
 			: this.elevationRange.belowSurfaceSampleCount === 0
-				? 'elevation-no-underground-samples'
+				? 'elevation-model-not-below-target-surface'
 				: this.elevationRange.depthRangeMeters < PORTAL_ELEVATION_RANGE_EPSILON ? 'zero-depth-range' : 'none';
 		if ( this.elevationFallbackReason !== 'none' ) {
 			renderer.setRenderTarget( this.elevationTarget );
@@ -870,7 +876,7 @@ export class UndergroundTopPortal {
 			this.elevationDirty = false;
 			return;
 		}
-		material.uniforms.uPortalPlaneCenter.value.copy( this.center );
+		material.uniforms.uTargetSurfacePlaneCenter.value.copy( this.targetSurfacePlaneCenter );
 		material.uniforms.uPortalSurfaceUpNormal.value.copy( this.surfaceUpNormal );
 		material.uniforms.uMinDepthMeters.value = this.elevationRange.minDepthMeters;
 		material.uniforms.uMaxDepthMeters.value = this.elevationRange.maxDepthMeters;
@@ -967,6 +973,12 @@ export class UndergroundTopPortal {
 			elevationRedrawCount: this.elevationRedrawCount,
 			lastElevationRedrawTimestamp: Math.round( this.lastElevationRedrawTimestamp ),
 			elevationRenderTarget: this.elevationTarget === null ? 'none' : `${this.elevationTarget.width}x${this.elevationTarget.height}`,
+			sourceCalibrationCenter: JSON.stringify( vectorToObject( this.sourceCalibrationCenter ) ),
+			targetSurfacePlaneCenter: JSON.stringify( vectorToObject( this.targetSurfacePlaneCenter ) ),
+			sourcePlaneOffsetFromTargetMeters: this.sourceCalibrationCenter.clone().sub( this.targetSurfacePlaneCenter ).dot( this.surfaceUpNormal ),
+			targetSurfacePlanarityResidualMeters: JSON.stringify( this.targetSurfacePlanarityResidualMeters ),
+			maxTargetSurfacePlanarityResidualMeters: Math.max( 0, ...this.targetSurfacePlanarityResidualMeters.map( Math.abs ) ),
+			rmsTargetSurfacePlanarityResidualMeters: Math.sqrt( this.targetSurfacePlanarityResidualMeters.reduce( ( total, value ) => total + value * value, 0 ) / Math.max( 1, this.targetSurfacePlanarityResidualMeters.length ) ),
 			upReference: JSON.stringify( vectorToObject( this.upReference ) ),
 			candidateSurfaceNormal: JSON.stringify( vectorToObject( this.candidateSurfaceNormal ) ),
 			surfaceUpNormal: JSON.stringify( vectorToObject( this.surfaceUpNormal ) ),
