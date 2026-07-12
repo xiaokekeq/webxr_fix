@@ -50,7 +50,9 @@ export function buildPerimeterShell(modelRoot: THREE.Object3D, surfaceUpNormal: 
 			a.fromBufferAttribute( position, ids[ 0 ] ).applyMatrix4( object.matrixWorld ); b.fromBufferAttribute( position, ids[ 1 ] ).applyMatrix4( object.matrixWorld ); c.fromBufferAttribute( position, ids[ 2 ] ).applyMatrix4( object.matrixWorld );
 			n.crossVectors( b.clone().sub( a ), c.clone().sub( a ) ).normalize(); center.addVectors( a, b ).add( c ).multiplyScalar( 1 / 3 );
 			const nearEdge = Math.min( Math.abs( center.dot( tangent ) - bounds.minU ), Math.abs( center.dot( tangent ) - bounds.maxU ), Math.abs( center.dot( bitangent ) - bounds.minV ), Math.abs( center.dot( bitangent ) - bounds.maxV ) ) <= tolerance;
-			if ( Math.abs( n.dot( up ) ) > 0.35 || nearEdge === false ) continue;
+			// Keep downward-facing outer triangles as the fifth (bottom) face, but
+			// never keep upward-facing triangles: the enclosure must stay top-open.
+			if ( ( n.dot( up ) > 0.35 || ( Math.abs( n.dot( up ) ) > 0.35 && n.dot( up ) > - 0.8 ) ) || nearEdge === false ) continue;
 			for ( const id of ids ) { const p = new THREE.Vector3().fromBufferAttribute( position, id ); out.push( p.x, p.y, p.z ); if ( normal !== undefined ) { const q = new THREE.Vector3().fromBufferAttribute( normal, id ).applyMatrix3( normalMatrix ).normalize(); outNormals.push( q.x, q.y, q.z ); } if ( uv !== undefined ) outUvs.push( uv.getX( id ), uv.getY( id ) ); }
 			triangleCount += 1;
 		}

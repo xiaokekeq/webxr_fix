@@ -66,7 +66,7 @@ export class VisualizationStateRuntime {
 			this.options.materialStateRuntime.applySection( plane );
 		}
 		if ( materialDirty ) this.options.materialStateRuntime.applyMaterial( state.undergroundMaterialMode, state.transparentXrayValue );
-		this.options.perimeterShellRuntime.sync( undergroundRoot, state.undergroundInspectionTool === 'layer-peeling' );
+		this.options.perimeterShellRuntime.sync( undergroundRoot, state.undergroundInspectionTool === 'layer-peeling' || state.undergroundInspectionTool === 'section-cut' );
 
 		this.lastRoot = undergroundRoot;
 		this.lastMaterialMode = state.undergroundMaterialMode;
