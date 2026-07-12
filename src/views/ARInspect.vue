@@ -148,16 +148,6 @@ const modelPlacementDebugCards = computed( () => {
 	const debug = engine.value.modelPlacementDebug;
 	return [
 		{
-			label: '地下显示',
-			value: `模式 ${debug.undergroundMode ?? '-'}；深度 ${formatMeters( debug.depthMeters )}；来源 ${formatModelHeightSource( debug.modelHeightSource )}`,
-			wide: true
-		},
-		{
-			label: '显示偏移',
-			value: `工程下沉 ${formatSignedMeters( debug.engineeringUndergroundOffsetY )}；透明度 ${formatOpacity( debug.xrayOpacity )}`,
-			wide: true
-		},
-		{
 			label: '工程误差',
 			value: `${formatHorizontalStatus( debug.engineeringHorizontalRms )}；水平 RMS ${formatMeters( debug.engineeringHorizontalRms )}；高度 Max ${formatMeters( debug.engineeringVerticalMax )}`,
 			wide: true
@@ -225,11 +215,6 @@ const modelPlacementDebugCardsExtended = computed( () => {
 	return [
 		...modelPlacementDebugCards.value,
 		{
-			label: 'depth semantics',
-			value: `source ${formatModelHeightSource( debug.modelHeightSource )}; axis ${formatDepthAxis( debug.modelHeightAxis )}; size ${formatMeters( debug.modelHeightX )}/${formatMeters( debug.modelHeightY )}/${formatMeters( debug.modelHeightZ )}; chosen ${formatMeters( debug.chosenModelHeight )}`,
-			wide: true
-		},
-		{
 			label: 'camera baseline',
 			value: `initial ${formatMeters( debug.cameraToModelDistanceInitial )}; current ${formatMeters( debug.cameraToModelDistanceCurrent ?? debug.cameraToModelDistance )}; delta ${formatMeters( debug.cameraToModelDistanceDelta )}`,
 			wide: true
@@ -239,49 +224,12 @@ const modelPlacementDebugCardsExtended = computed( () => {
 			value: `unexpected ${formatBoolean( debug.unexpectedArModelAnchorParent )}; camera ${debug.cameraParentChain ?? '-'}; reticle ${debug.reticleParentChain ?? '-'}`,
 			wide: true
 		},
-		{
-			label: 'surface centers',
-			value: `yellow ${formatVector3Compact( debug.yellowSurfaceCenterWorld )}; eng ${formatVector3Compact( debug.purpleEngineeringCenterWorld )}; underground ${formatVector3Compact( debug.undergroundExpectedCenterWorld )}`,
-			wide: true
-		},
-		{
-			label: 'surface world delta',
-			value: `yellow ${formatMeters( debug.yellowSurfaceDeltaXZ )}/${formatMeters( debug.yellowSurfaceDeltaY )}; eng ${formatMeters( debug.purpleEngineeringDeltaXZ )}/${formatMeters( debug.purpleEngineeringDeltaY )}; underground ${formatMeters( debug.undergroundExpectedDeltaXZ )}/${formatMeters( debug.undergroundExpectedDeltaY )}`,
-			wide: true
-		},
-		{
-			label: 'surface delta',
-			value: `eng-yellow ${formatMeters( debug.engineeringMinusYellowXZ )}/${formatMeters( debug.engineeringMinusYellowY )}; underground-yellow ${formatMeters( debug.undergroundMinusYellowXZ )}/${formatMeters( debug.undergroundMinusYellowY )}; underground-eng ${formatMeters( debug.undergroundMinusEngineeringXZ )}/${formatMeters( debug.undergroundMinusEngineeringY )}`,
-			wide: true
-		},
-		{
-			label: 'purple updates',
-			value: `yellow ${formatUpdateMeta( debug.yellowUpdateCount, debug.yellowLastUpdateReason )}; eng ${formatUpdateMeta( debug.purpleEngineeringUpdateCount, debug.purpleEngineeringLastUpdateReason )}; underground ${formatUpdateMeta( debug.undergroundExpectedUpdateCount, debug.undergroundExpectedLastUpdateReason )}; current ${formatUpdateMeta( debug.currentModelActualUpdateCount, debug.currentModelActualLastUpdateReason )}; frameLoop ${formatBoolean( debug.purpleDiagnosticsUpdatedInFrameLoop )}`,
-			wide: true
-		}
 	];
 } );
 
 const modelPlacementDebugGroups = computed( () => {
 	const debug = engine.value.modelPlacementDebug;
 	return [
-		{
-			title: '当前配置',
-			tone: 'normal',
-			items: [
-				{ label: 'Build / 更新时间', value: `${debug.buildCommit ?? '-'} / ${formatTimestamp( debug.updatedAt )}`, wide: true },
-				{ label: '地下模式', value: debug.undergroundMode ?? '-' },
-				{ label: '定位方式', value: formatUndergroundPlacementMode( debug.undergroundPlacementMode ), wide: true },
-				{ label: '模型高度来源 / 实际深度', value: `${formatModelHeightSource( debug.modelHeightSource )} / ${formatMeters( debug.depthMeters )}`, wide: true },
-				{ label: '模型高度 / 覆土 / 总下沉', value: `${formatMeters( debug.modelHeight )} / ${formatMeters( debug.coverDepthMeters )} / ${formatMeters( debug.totalBottomDepthMeters )}`, wide: true },
-				{ label: '工程地下偏移', value: formatSignedMeters( debug.engineeringUndergroundOffsetY ) },
-				{ label: 'RTK 地表高程', value: debug.surfaceElevationText ?? '-', wide: true },
-				{ label: '模型底部目标高程', value: debug.undergroundElevationText ?? '-', wide: true },
-				{ label: '模型尺寸 X/Y/Z', value: `${formatMeters( debug.modelSizeX ?? debug.modelHeightX )} / ${formatMeters( debug.modelSizeY ?? debug.modelHeightY )} / ${formatMeters( debug.modelSizeZ ?? debug.modelHeightZ )}`, wide: true },
-				{ label: 'height axis / chosen height', value: `${formatDepthAxis( debug.modelHeightAxis )} / ${formatMeters( debug.chosenModelHeight )}`, wide: true },
-				{ label: 'height - Y diff', value: formatMeters( debug.modelHeightToYDifferenceMeters ), wide: true }
-			]
-		},
 		{
 			title: 'World Lock',
 			tone: worldDeltaTone( Math.max( debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ ?? 0, debug.modelAnchorDeltaXZ ?? debug.arModelAnchorWorldDeltaXZ ?? 0, debug.placementAnchorDeltaXZ ?? debug.arPlacementAnchorWorldDeltaXZ ?? 0 ) ),
@@ -307,32 +255,11 @@ const modelPlacementDebugGroups = computed( () => {
 			]
 		},
 		{
-			title: '707 点位诊断',
-			tone: worldDeltaTone( Math.max( debug.currentModelActualWorldDeltaXZ ?? 0, debug.undergroundExpectedWorldDeltaXZ ?? 0, debug.undergroundMinusEngineeringXZ ?? 0 ) ),
-			items: [
-				{ label: '黄/工程紫/地下点漂移 XZ', value: `${formatMeters( debug.yellowWorldDeltaXZ )} / ${formatMeters( debug.purpleEngineeringWorldDeltaXZ )} / ${formatMeters( debug.undergroundExpectedWorldDeltaXZ )}`, wide: true },
-				{ label: '当前模型实际点漂移 XZ / Y', value: `${formatMeters( debug.currentModelActualWorldDeltaXZ )} / ${formatMeters( debug.currentModelActualWorldDeltaY )}`, wide: true },
-				{ label: '工程紫 - 黄色 XZ / Y', value: `${formatMeters( debug.engineeringMinusYellowXZ )} / ${formatMeters( debug.engineeringMinusYellowY )}`, wide: true },
-				{ label: '地下点 - 工程紫 XZ / Y', value: `${formatMeters( debug.undergroundMinusEngineeringXZ )} / ${formatMeters( debug.undergroundMinusEngineeringY )}`, wide: true },
-				{ label: '地下点 - 黄色 XZ / Y', value: `${formatMeters( debug.undergroundMinusYellowXZ )} / ${formatMeters( debug.undergroundMinusYellowY )}`, wide: true }
-			]
-		},
-		{
-			title: '屏幕视差',
-			tone: debug.parallaxStatus === 'real-world-movement' || debug.parallaxStatus === 'matrix-space-error' ? 'error' : debug.parallaxStatus === 'likely-parallax' ? 'warning' : 'normal',
-			items: [
-				{ label: '黄色屏幕漂移', value: formatPixels( debug.yellowScreenDeltaPx ) },
-				{ label: '地下点屏幕漂移', value: formatPixels( debug.undergroundExpectedScreenDeltaPx ) },
-				{ label: '黄-地下点屏幕距离 初始/当前/变化', value: `${formatPixels( debug.yellowToUndergroundScreenDistanceInitialPx )} / ${formatPixels( debug.yellowToUndergroundScreenDistanceCurrentPx )} / ${formatPixels( debug.yellowToUndergroundScreenDistanceDeltaPx )}`, wide: true },
-				{ label: '说明', value: '屏幕像素变化需结合 world delta 判断，不能单独判定模型移动。', wide: true }
-			]
-		},
-		{
 			title: '更新来源',
 			tone: 'normal',
 			items: [
 				{ label: '黄色 / 工程紫更新', value: `${formatUpdateMeta( debug.yellowUpdateCount, debug.yellowLastUpdateReason )} / ${formatUpdateMeta( debug.purpleEngineeringUpdateCount, debug.purpleEngineeringLastUpdateReason )}`, wide: true },
-				{ label: '地下点 / 当前实际点更新', value: `${formatUpdateMeta( debug.undergroundExpectedUpdateCount, debug.undergroundExpectedLastUpdateReason )} / ${formatUpdateMeta( debug.currentModelActualUpdateCount, debug.currentModelActualLastUpdateReason )}`, wide: true },
+				{ label: '当前实际点更新', value: formatUpdateMeta( debug.currentModelActualUpdateCount, debug.currentModelActualLastUpdateReason ), wide: true },
 				{ label: 'placementAnchor 更新', value: `${formatUpdateMeta( debug.placementAnchorUpdateCount, debug.lastPlacementAnchorUpdateReason )}; frame ${formatBoolean( debug.placementAnchorUpdatedFromFrameLoop )}; hit-test ${formatBoolean( debug.placementAnchorUpdatedFromHitTest )}; reticle ${formatBoolean( debug.placementAnchorUpdatedFromReticle )}`, wide: true },
 				{ label: '模型放置', value: `次数 ${debug.engineeringPlacementCallCount ?? 0}; 替换 ${debug.replacedModelCount ?? 0}; 原因 ${debug.lastPlacementReason ?? '-'}`, wide: true },
 				{ label: '结论', value: debug.conclusion ?? '-', wide: true }
@@ -679,15 +606,6 @@ async function copyModelPlacementDiagnostics(): Promise<void> {
 	const payload = {
 		buildCommit: debug.buildCommit ?? null,
 		sessionId: debug.sessionId ?? null,
-		undergroundPlacementMode: debug.undergroundPlacementMode ?? null,
-		modelHeightSource: debug.modelHeightSource ?? null,
-		depthMeters: debug.depthMeters ?? null,
-		modelHeight: debug.modelHeight ?? null,
-		coverDepthMeters: debug.coverDepthMeters ?? null,
-		totalBottomDepthMeters: debug.totalBottomDepthMeters ?? null,
-		engineeringUndergroundOffsetY: debug.engineeringUndergroundOffsetY ?? null,
-		surfaceElevationText: debug.surfaceElevationText ?? null,
-		undergroundElevationText: debug.undergroundElevationText ?? null,
 		cameraMovedDistance: debug.cameraMovedDistance ?? null,
 		placedModelDeltaXZ: debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ ?? null,
 		modelAnchorDeltaXZ: debug.modelAnchorDeltaXZ ?? debug.arModelAnchorWorldDeltaXZ ?? null,
@@ -700,16 +618,11 @@ async function copyModelPlacementDiagnostics(): Promise<void> {
 		arFromEnuMatrixChanged: debug.arFromEnuMatrixChanged ?? null,
 		engineeringMinusYellowXZ: debug.engineeringMinusYellowXZ ?? null,
 		engineeringMinusYellowY: debug.engineeringMinusYellowY ?? null,
-		undergroundMinusEngineeringXZ: debug.undergroundMinusEngineeringXZ ?? null,
-		undergroundMinusEngineeringY: debug.undergroundMinusEngineeringY ?? null,
 		yellowWorldDeltaXZ: debug.yellowWorldDeltaXZ ?? null,
 		purpleEngineeringWorldDeltaXZ: debug.purpleEngineeringWorldDeltaXZ ?? null,
-		undergroundExpectedWorldDeltaXZ: debug.undergroundExpectedWorldDeltaXZ ?? null,
 		currentModelActualWorldDeltaXZ: debug.currentModelActualWorldDeltaXZ ?? null,
-		yellowToUndergroundScreenDistanceDeltaPx: debug.yellowToUndergroundScreenDistanceDeltaPx ?? null,
 		yellowUpdateCount: debug.yellowUpdateCount ?? 0,
 		purpleEngineeringUpdateCount: debug.purpleEngineeringUpdateCount ?? 0,
-		undergroundExpectedUpdateCount: debug.undergroundExpectedUpdateCount ?? 0,
 		currentModelActualUpdateCount: debug.currentModelActualUpdateCount ?? 0,
 		placementAnchorUpdateCount: debug.placementAnchorUpdateCount ?? 0,
 		engineeringPlacementCallCount: debug.engineeringPlacementCallCount ?? 0,

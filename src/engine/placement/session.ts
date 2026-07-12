@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
-import { clearPlacedModel, placeModelWithMatrix, readPlaceableTemplateReport } from '@/engine/core/model.js';
+import { clearPlacedModel, placeModelWithMatrix } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import {
 	solveGroundPlaneRigidTransform,
@@ -18,10 +18,6 @@ import {
 import type { PropertySelectionController } from '@/engine/interaction/property-selection.js';
 
 type ArPlacementSource = 'marker' | 'unknown';
-type ModelHeightSource = 'override' | 'normalized-bbox-y' | 'placeable-report-y' | 'bbox-y' | 'y' | 'shortest-edge' | 'none' | 'invalid';
-
-const MODEL_HEIGHT_MISMATCH_LIMIT_METERS = 0.05;
-const loggedModelHeightAuditKeys = new Set<string>();
 
 interface TrackedArPlacementTransform {
 	source: ArPlacementSource;
@@ -525,18 +521,10 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return false;
 			}
 
-			const undergroundPlacement = deriveUndergroundRegistrationSolution( {
-				registrationSolution,
-				modelTemplate
-			} );
-			const effectiveRegistrationSolution = undergroundPlacement.registrationSolution;
+			const effectiveRegistrationSolution = registrationSolution;
 			const engineeringMatrix = composeModelRawLocalToArMatrix( {
 				arFromEnuSolution,
 				registrationSolution: effectiveRegistrationSolution
-			} );
-			logUndergroundPlacementAudit( {
-				registrationSolution,
-				undergroundPlacement
 			} );
 			resetArPlacementAnchorTransform( 'engineering-place-button' );
 			arPlacementBase = null;
@@ -557,12 +545,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				arFromEnuMatrix: arFromEnuSolution.matrix,
 				reason: 'engineering-place-button'
 			} );
-			logUndergroundPlacementDiagnostic( {
-				registrationSolution,
-				arFromEnuSolution,
-				engineeringMatrix,
-				undergroundPlacement
-			} );
 			trackArPlacement( resolvePlacementSourceFromArLocalization( arFromEnuSolution.source ) );
 			updateRegistrationStatusDetail( '状态：模型已按工程矩阵显示' );
 			updatePlacementSummary();
@@ -577,20 +559,11 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				engineeringMatrix: engineeringMatrix.toArray(),
 				visualMatrix: engineeringMatrix.toArray(),
 				modelRawLocalToArMatrix: engineeringMatrix.toArray(),
-				undergroundPlacementMode: undergroundPlacement.enabled ? 'rtk-derived-elevation' : 'surface',
-				undergroundDefaultMode: registrationSolution.undergroundDisplay?.defaultMode ?? null,
-				modelHeightSource: undergroundPlacement.modelHeightSource,
-				modelHeight: undergroundPlacement.modelHeightMeters,
-				modelHeightAxis: undergroundPlacement.modelHeightAxis,
-				modelHeightX: undergroundPlacement.modelSizeX,
-				modelHeightY: undergroundPlacement.modelSizeY,
-				modelHeightZ: undergroundPlacement.modelSizeZ,
-				chosenModelHeight: undergroundPlacement.modelHeightMeters,
-				modelHeightToYDifferenceMeters: undergroundPlacement.modelHeightToYDifferenceMeters,
-				coverDepthMeters: undergroundPlacement.coverDepthMeters,
-				totalBottomDepthMeters: undergroundPlacement.totalBottomDepthMeters,
-				depthMeters: undergroundPlacement.totalBottomDepthMeters,
-				warning: undergroundPlacement.warning ?? null,
+				registrationSolutionMode: 'direct-control-point-registration',
+				additionalVerticalOffsetMeters: 0,
+				undergroundPlacementEnabled: false,
+				controlTargetElevationRewriteEnabled: false,
+				box3PlacementAdjustmentEnabled: false,
 				createdAt: Date.now()
 			} );
 			setStatus( '模型已按工程矩阵显示，未使用 hit-test 决定最终位置。' );
@@ -652,200 +625,6 @@ function requiresCurrentSession(source: ArFromEnuSolution['source'] | undefined)
 
 }
 
-export function deriveUndergroundRegistrationSolution(args: {
-	registrationSolution: EngineeringRegistrationSolution;
-	modelTemplate: THREE.Group;
-}): {
-	registrationSolution: EngineeringRegistrationSolution;
-	enabled: boolean;
-	modelHeightMeters: number;
-	modelHeightAxis: 'y' | 'shortest-edge' | 'bbox-y' | null;
-	modelHeightSource: ModelHeightSource;
-	modelSizeX: number | null;
-	modelSizeY: number | null;
-	modelSizeZ: number | null;
-	modelHeightToYDifferenceMeters: number | null;
-	coverDepthMeters: number;
-	totalBottomDepthMeters: number;
-	warning?: string;
-	undergroundControlPoints: EngineeringControlPoint[];
-} {
-
-	const config = resolveUndergroundPlacementConfig( args.registrationSolution );
-	const enabled = config?.enabled === true;
-	const height = resolveEngineeringModelHeightMeters( {
-		undergroundPlacement: config,
-		modelTemplate: args.modelTemplate
-	} );
-	const coverDepthMeters = enabled ? height.coverDepthMeters : 0;
-	const totalBottomDepthMeters = enabled ? height.modelHeightMeters + coverDepthMeters : 0;
-	const undergroundControlPoints = args.registrationSolution.controlPoints.map( ( point ) => ( {
-		...point,
-		modelLocal: point.modelLocal.clone(),
-		// ENU is x=east, y=north, z=up; arFromEnu later maps ENU up to AR/Three y.
-		worldEnu: point.worldEnu.clone().setZ( point.worldEnu.z - totalBottomDepthMeters )
-	} ) );
-
-	if ( enabled === false ) {
-		return {
-			registrationSolution: args.registrationSolution,
-			enabled,
-			modelHeightMeters: 0,
-			modelHeightAxis: null,
-			modelHeightSource: 'none',
-			modelSizeX: height.modelSizeX,
-			modelSizeY: height.modelSizeY,
-			modelSizeZ: height.modelSizeZ,
-			modelHeightToYDifferenceMeters: height.modelHeightToYDifferenceMeters,
-			coverDepthMeters,
-			totalBottomDepthMeters,
-			warning: height.warning,
-			undergroundControlPoints
-		};
-	}
-
-	const modelToSite = solveGroundPlaneRigidTransform(
-		undergroundControlPoints.map( ( point ) => point.modelLocal ),
-		undergroundControlPoints.map( ( point ) => point.worldEnu )
-	);
-
-	return {
-		registrationSolution: {
-			...args.registrationSolution,
-			controlPoints: undergroundControlPoints,
-			modelToSite,
-			rootSiteEnu: modelToSite.translation.clone()
-		},
-		enabled,
-		modelHeightMeters: height.modelHeightMeters,
-		modelHeightAxis: height.modelHeightAxis,
-		modelHeightSource: height.modelHeightSource,
-		modelSizeX: height.modelSizeX,
-		modelSizeY: height.modelSizeY,
-		modelSizeZ: height.modelSizeZ,
-		modelHeightToYDifferenceMeters: height.modelHeightToYDifferenceMeters,
-		coverDepthMeters,
-		totalBottomDepthMeters,
-		warning: height.warning,
-		undergroundControlPoints
-	};
-
-}
-
-function resolveUndergroundPlacementConfig(
-	registrationSolution: EngineeringRegistrationSolution
-): EngineeringRegistrationSolution['undergroundPlacement'] {
-
-	const verticalPlacement = registrationSolution.verticalPlacement;
-	if ( verticalPlacement === undefined ) {
-		return registrationSolution.undergroundPlacement;
-	}
-
-	if ( verticalPlacement.groundRelation !== 'underground' ) {
-		return undefined;
-	}
-
-	return {
-		enabled: true,
-		reference: 'rtk-surface',
-		modelReference: 'bottom',
-		depthMode: 'model-height',
-		modelHeightAxis: verticalPlacement.modelHeightAxis ?? 'bbox-y',
-		modelHeightMetersOverride: verticalPlacement.modelHeightMetersOverride ?? null,
-		coverDepthMeters: verticalPlacement.coverDepthMeters ?? 0
-	};
-
-}
-
-function resolveEngineeringModelHeightMeters(args: {
-	undergroundPlacement: EngineeringRegistrationSolution['undergroundPlacement'];
-	modelTemplate: THREE.Group;
-}): {
-	modelHeightMeters: number;
-	modelHeightAxis: 'y' | 'shortest-edge' | 'bbox-y';
-	modelHeightSource: ModelHeightSource;
-	modelSizeX: number | null;
-	modelSizeY: number | null;
-	modelSizeZ: number | null;
-	modelHeightToYDifferenceMeters: number | null;
-	coverDepthMeters: number;
-	warning?: string;
-} {
-
-	const config = args.undergroundPlacement;
-	const axis = config?.modelHeightAxis ?? 'bbox-y';
-	const coverDepthMeters = Math.max( 0, config?.coverDepthMeters ?? 0 );
-	const measured = resolveTemplateHeightMeters( args.modelTemplate, axis );
-	const hasOverride = typeof config?.modelHeightMetersOverride === 'number'
-		&& Number.isFinite( config.modelHeightMetersOverride )
-		&& config.modelHeightMetersOverride > 0;
-	if ( hasOverride ) {
-		return {
-			modelHeightMeters: config.modelHeightMetersOverride ?? 0,
-			modelHeightAxis: axis,
-			modelHeightSource: 'override',
-			modelSizeX: Number.isFinite( measured.x ) ? measured.x : null,
-			modelSizeY: Number.isFinite( measured.y ) ? measured.y : null,
-			modelSizeZ: Number.isFinite( measured.z ) ? measured.z : null,
-			modelHeightToYDifferenceMeters: Number.isFinite( measured.y )
-				? Number( Math.abs( ( config.modelHeightMetersOverride ?? 0 ) - measured.y ).toFixed( 6 ) )
-				: null,
-			coverDepthMeters
-		};
-	}
-
-	const maxFinalSize = Math.max( measured.x, measured.y, measured.z );
-	const heightToYDifferenceMeters = Number.isFinite( measured.y )
-		? Math.abs( measured.chosenModelHeight - measured.y )
-		: Number.NaN;
-	const invalidReason = Number.isFinite( measured.chosenModelHeight ) === false || measured.chosenModelHeight < 0
-		? 'model bbox height is invalid; underground engineering depth fell back to 0'
-		: measured.chosenModelHeight > maxFinalSize + MODEL_HEIGHT_MISMATCH_LIMIT_METERS
-			? 'chosen model height exceeds final model size; underground engineering depth fell back to 0'
-			: axis === 'bbox-y' && heightToYDifferenceMeters > MODEL_HEIGHT_MISMATCH_LIMIT_METERS
-				? 'bbox-y differs from final model Y size; underground engineering depth fell back to 0'
-				: null;
-
-	if ( invalidReason !== null ) {
-		console.error( '[InvalidEngineeringModelHeight]', {
-			modelHeightAxis: axis,
-			chosenModelHeight: measured.chosenModelHeight,
-			finalSize: {
-				x: measured.x,
-				y: measured.y,
-				z: measured.z
-			},
-			heightToYDifferenceMeters,
-			reason: invalidReason
-		} );
-		return {
-			modelHeightMeters: 0,
-			modelHeightAxis: axis,
-			modelHeightSource: 'invalid',
-			modelSizeX: Number.isFinite( measured.x ) ? measured.x : null,
-			modelSizeY: Number.isFinite( measured.y ) ? measured.y : null,
-			modelSizeZ: Number.isFinite( measured.z ) ? measured.z : null,
-			modelHeightToYDifferenceMeters: Number.isFinite( heightToYDifferenceMeters )
-				? Number( heightToYDifferenceMeters.toFixed( 6 ) )
-				: null,
-			coverDepthMeters,
-			warning: invalidReason
-		};
-	}
-
-	return {
-		modelHeightMeters: measured.chosenModelHeight,
-		modelHeightAxis: axis,
-		modelHeightSource: measured.source,
-		modelSizeX: measured.x,
-		modelSizeY: measured.y,
-		modelSizeZ: measured.z,
-		modelHeightToYDifferenceMeters: Number( heightToYDifferenceMeters.toFixed( 6 ) ),
-		coverDepthMeters
-	};
-
-}
-
 function applyModelInstanceUserData(
 	root: THREE.Object3D,
 	instance: {
@@ -858,257 +637,6 @@ function applyModelInstanceUserData(
 	root.userData.modelInstanceId = instance.id;
 	root.userData.modelInstanceName = instance.name;
 	root.userData.modelRole = instance.role;
-
-}
-
-function resolveTemplateHeightMeters(
-	modelTemplate: THREE.Group,
-	axis: 'y' | 'shortest-edge' | 'bbox-y'
-): {
-	axis: 'y' | 'shortest-edge' | 'bbox-y';
-	x: number;
-	y: number;
-	z: number;
-	chosenModelHeight: number;
-	source: ModelHeightSource;
-} {
-
-	const report = readPlaceableTemplateReport( modelTemplate );
-	if ( report !== null ) {
-		const x = report.finalSize.x;
-		const y = report.finalSize.y;
-		const z = report.finalSize.z;
-		const legacyBounds = new THREE.Box3().setFromObject( modelTemplate );
-		const legacySize = legacyBounds.getSize( new THREE.Vector3() );
-		const chosenModelHeight = axis === 'shortest-edge'
-			? Math.min( x, y, z )
-			: y;
-		const source = axis === 'bbox-y'
-			? 'normalized-bbox-y'
-			: axis === 'y'
-				? 'placeable-report-y'
-				: 'shortest-edge';
-		logModelHeightSpaceAudit( {
-			modelTemplate,
-			report,
-			legacySize,
-			axis,
-			chosenModelHeight,
-			source
-		} );
-		if (
-			axis === 'bbox-y'
-			&& Number.isFinite( legacySize.y )
-			&& Math.abs( legacySize.y - y ) > MODEL_HEIGHT_MISMATCH_LIMIT_METERS
-		) {
-			console.error( '[ModelHeightDimensionMismatch]', {
-				bboxY: Number( legacySize.y.toFixed( 6 ) ),
-				reportFinalSizeY: Number( y.toFixed( 6 ) ),
-				difference: Number( Math.abs( legacySize.y - y ).toFixed( 6 ) ),
-				modelInstanceId: modelTemplate.userData.modelInstanceId ?? modelTemplate.name ?? null,
-				modelContentRootName: modelTemplate.children[ 0 ]?.name ?? modelTemplate.name ?? null,
-				note: 'legacy setFromObject(modelTemplate) is not used for underground depth'
-			} );
-		}
-		return {
-			axis,
-			x,
-			y,
-			z,
-			chosenModelHeight,
-			source
-		};
-	}
-
-	const bounds = new THREE.Box3().setFromObject( modelTemplate );
-	const size = bounds.getSize( new THREE.Vector3() );
-	if ( bounds.isEmpty() ) {
-		return {
-			axis,
-			x: Number.NaN,
-			y: Number.NaN,
-			z: Number.NaN,
-			chosenModelHeight: Number.NaN,
-			source: 'invalid'
-		};
-	}
-	return {
-		axis,
-		x: size.x,
-		y: size.y,
-		z: size.z,
-		chosenModelHeight: axis === 'shortest-edge' ? Math.min( size.x, size.y, size.z ) : size.y,
-		source: axis
-	};
-
-}
-
-function logModelHeightSpaceAudit(args: {
-	modelTemplate: THREE.Object3D;
-	report: NonNullable<ReturnType<typeof readPlaceableTemplateReport>>;
-	legacySize: THREE.Vector3;
-	axis: 'y' | 'shortest-edge' | 'bbox-y';
-	chosenModelHeight: number;
-	source: ModelHeightSource;
-}): void {
-
-	const key = [
-		args.modelTemplate.uuid,
-		args.axis,
-		args.chosenModelHeight.toFixed( 3 ),
-		args.report.finalSize.y.toFixed( 3 )
-	].join( ':' );
-	if ( loggedModelHeightAuditKeys.has( key ) ) {
-		return;
-	}
-	loggedModelHeightAuditKeys.add( key );
-
-	console.info( '[ModelHeightSpaceAudit]', {
-		rawGeometrySize: vector3ToObject( args.report.originalSize ),
-		normalizedTemplateSize: vector3ToObject( args.report.finalSize ),
-		finalEngineeringSize: vector3ToObject( args.report.finalSize ),
-		bboxTargetObjectName: args.modelTemplate.name || '(unnamed model template)',
-		bboxComputedBeforeNormalization: false,
-		bboxComputedAfterNormalization: true,
-		bboxIncludesDebugObjects: false,
-		bboxIncludesLabels: false,
-		bboxIncludesFootprint: false,
-		bboxIncludesMultipleInstances: false,
-		legacySetFromObjectSize: vector3ToObject( args.legacySize ),
-		chosenHeight: Number( args.chosenModelHeight.toFixed( 6 ) ),
-		expectedHeight: Number( args.report.finalSize.y.toFixed( 6 ) ),
-		modelHeightAxis: args.axis,
-		modelHeightSource: args.source,
-		rootCause: Math.abs( args.legacySize.y - args.report.finalSize.y ) > MODEL_HEIGHT_MISMATCH_LIMIT_METERS
-			? 'legacy setFromObject(modelTemplate) used a contaminated world-space bbox; underground depth now uses normalized finalSize.y'
-			: 'height uses normalized placeable template dimensions'
-	} );
-
-}
-
-function logUndergroundPlacementDiagnostic(args: {
-	registrationSolution: EngineeringRegistrationSolution;
-	arFromEnuSolution: ArFromEnuSolution;
-	engineeringMatrix: THREE.Matrix4;
-	undergroundPlacement: ReturnType<typeof deriveUndergroundRegistrationSolution>;
-}): void {
-
-	const {
-		registrationSolution,
-		arFromEnuSolution,
-		engineeringMatrix,
-		undergroundPlacement
-	} = args;
-	const engineeringHorizontalErrors: number[] = [];
-	const engineeringVerticalErrors: number[] = [];
-	const surfaceProjectionErrors: number[] = [];
-	const bottomDepthErrors: number[] = [];
-	const points = registrationSolution.controlPoints.slice( 0, 4 ).map( ( surfacePoint, index ) => {
-		const undergroundPoint = undergroundPlacement.undergroundControlPoints[ index ] ?? surfacePoint;
-		const surfaceAr = surfacePoint.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
-		const expectedUndergroundAr = undergroundPoint.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
-		const engineeringActualAr = undergroundPoint.modelLocal.clone().applyMatrix4( engineeringMatrix );
-		const horizontalErrorXZEngineering = horizontalErrorXZ( expectedUndergroundAr, engineeringActualAr );
-		const verticalErrorYEngineering = Math.abs( expectedUndergroundAr.y - engineeringActualAr.y );
-		const measuredBottomDepth = surfaceAr.y - expectedUndergroundAr.y;
-		const bottomDepthError = Math.abs( measuredBottomDepth - undergroundPlacement.totalBottomDepthMeters );
-		engineeringHorizontalErrors.push( horizontalErrorXZEngineering );
-		engineeringVerticalErrors.push( verticalErrorYEngineering );
-		surfaceProjectionErrors.push( horizontalErrorXZ( surfaceAr, engineeringActualAr ) );
-		bottomDepthErrors.push( bottomDepthError );
-		return {
-			controlPointId: surfacePoint.id,
-			surfaceAr: vector3ToObject( surfaceAr ),
-			expectedUndergroundAr: vector3ToObject( expectedUndergroundAr ),
-			engineeringActualAr: vector3ToObject( engineeringActualAr ),
-			horizontalErrorXZEngineering: Number( horizontalErrorXZEngineering.toFixed( 6 ) ),
-			verticalErrorYEngineering: Number( verticalErrorYEngineering.toFixed( 6 ) ),
-			surfaceProjectionHorizontalError: Number( horizontalErrorXZ( surfaceAr, engineeringActualAr ).toFixed( 6 ) ),
-			measuredBottomDepth: Number( measuredBottomDepth.toFixed( 6 ) ),
-			bottomDepthError: Number( bottomDepthError.toFixed( 6 ) )
-		};
-	} );
-
-	console.info( '[UndergroundPlacementDiagnostic]', {
-		modelId: registrationSolution.modelId,
-		placementDepthSource: undergroundPlacement.enabled ? 'rtk-derived-elevation' : 'surface',
-		defaultMode: registrationSolution.undergroundDisplay?.defaultMode ?? null,
-		modelHeightSource: undergroundPlacement.modelHeightSource,
-		modelHeightAxis: undergroundPlacement.modelHeightAxis,
-		modelHeight: Number( undergroundPlacement.modelHeightMeters.toFixed( 6 ) ),
-		modelSizeX: undergroundPlacement.modelSizeX,
-		modelSizeY: undergroundPlacement.modelSizeY,
-		modelSizeZ: undergroundPlacement.modelSizeZ,
-		modelHeightToYDifferenceMeters: undergroundPlacement.modelHeightToYDifferenceMeters,
-		coverDepthMeters: Number( undergroundPlacement.coverDepthMeters.toFixed( 6 ) ),
-		totalBottomDepthMeters: Number( undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
-		depthMeters: Number( undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
-		engineeringUndergroundOffsetY: Number( ( - undergroundPlacement.totalBottomDepthMeters ).toFixed( 6 ) ),
-		engineeringMatrix: engineeringMatrix.toArray(),
-		undergroundEngineeringHorizontalRms: Number( computeRms( engineeringHorizontalErrors ).toFixed( 6 ) ),
-		undergroundEngineeringVerticalMax: Number( Math.max( ...engineeringVerticalErrors, 0 ).toFixed( 6 ) ),
-		surfaceProjectionHorizontalRms: Number( computeRms( surfaceProjectionErrors ).toFixed( 6 ) ),
-		expectedBottomDepth: Number( undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
-		bottomDepthErrorMax: Number( Math.max( ...bottomDepthErrors, 0 ).toFixed( 6 ) ),
-		warning: undergroundPlacement.warning ?? null,
-		points,
-		note: 'engineeringMatrix uses RTK surface elevations minus model height and cover depth; no display matrix offset is applied'
-	} );
-
-}
-
-function logUndergroundPlacementAudit(args: {
-	registrationSolution: EngineeringRegistrationSolution;
-	undergroundPlacement: ReturnType<typeof deriveUndergroundRegistrationSolution>;
-}): void {
-
-	const surfacePoints = args.registrationSolution.controlPoints.slice( 0, 4 );
-	const undergroundPoints = args.undergroundPlacement.undergroundControlPoints.slice( 0, 4 );
-	console.info( '[UndergroundPlacementAudit]', {
-		surfaceTargetIds: surfacePoints.map( ( point ) => point.id ),
-		modelLocalReference: 'config.controlPoints modelLocal after pivot/unitScale',
-		modelLocalPointsAreBottomPoints: true,
-		surfaceWorldEnuMeansRtkGround: true,
-		currentModelToEnuSource: args.undergroundPlacement.enabled
-			? 'derived from modelLocal bottom points to RTK-surface-minus-depth targets'
-			: 'configured surface control points',
-		currentEngineeringMatrixFormula: args.undergroundPlacement.enabled
-			? 'arFromEnu * undergroundModelToEnu'
-			: 'arFromEnu * modelToEnu',
-		currentVisualMatrixFormula: 'none; engineeringMatrix is the only placement matrix',
-		currentYellowFootprintSource: 'original surface controlPoint.worldEnu -> arFromEnu',
-		canUseBottomReference: true,
-		legacyOffsetConfigFields: [],
-		surfaceElevations: surfacePoints.map( ( point ) => ( {
-			id: point.id,
-			up: Number( point.worldEnu.z.toFixed( 6 ) )
-		} ) ),
-		undergroundElevations: undergroundPoints.map( ( point ) => ( {
-			id: point.id,
-			up: Number( point.worldEnu.z.toFixed( 6 ) )
-		} ) ),
-		modelHeightMeters: Number( args.undergroundPlacement.modelHeightMeters.toFixed( 6 ) ),
-		coverDepthMeters: Number( args.undergroundPlacement.coverDepthMeters.toFixed( 6 ) ),
-		totalBottomDepthMeters: Number( args.undergroundPlacement.totalBottomDepthMeters.toFixed( 6 ) ),
-		risks: args.undergroundPlacement.enabled
-			? []
-			: [ 'undergroundPlacement disabled; model uses surface engineering targets' ]
-	} );
-
-}
-
-function horizontalErrorXZ(a: THREE.Vector3, b: THREE.Vector3): number {
-
-	return Math.hypot( a.x - b.x, a.z - b.z );
-
-}
-
-function computeRms(values: number[]): number {
-
-	if ( values.length === 0 ) {
-		return 0;
-	}
-	return Math.sqrt( values.reduce( ( sum, value ) => sum + value * value, 0 ) / values.length );
 
 }
 

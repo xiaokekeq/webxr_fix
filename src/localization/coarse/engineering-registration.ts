@@ -3,9 +3,7 @@ import type {
 	DemoModelConfig,
 	DemoModelControlPointCorrespondence,
 	DemoModelRegistrationMode,
-	UndergroundPlacementConfig,
 	UndergroundDisplayConfig,
-	ModelVerticalPlacementConfig,
 	ModelGroundClassificationConfig,
 	ModelDisplayConfig,
 	ModelInstanceConfig
@@ -49,9 +47,7 @@ export interface EngineeringRegistrationSolution {
 	modelUnitScale: number;
 	placementAnchorModelLocal?: THREE.Vector3;
 	placementAnchorMeaning?: string;
-	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
-	verticalPlacement?: ModelVerticalPlacementConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
 	modelInstances?: ModelInstanceConfig[];
@@ -130,9 +126,7 @@ export function solveEngineeringRegistration(
 		modelUnitScale,
 		placementAnchorModelLocal: tupleToVector3( config.placementAnchorModelLocal ),
 		placementAnchorMeaning: config.placementAnchorMeaning,
-		undergroundPlacement: config.undergroundPlacement,
 		undergroundDisplay: config.undergroundDisplay,
-		verticalPlacement: config.verticalPlacement,
 		groundClassification: config.groundClassification,
 		display: config.display,
 		modelInstances: config.modelInstances

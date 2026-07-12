@@ -235,15 +235,6 @@
     0
   ],
   "placementAnchorMeaning": "site-origin-ground-reference",
-  "undergroundPlacement": {
-    "enabled": true,
-    "reference": "rtk-surface",
-    "modelReference": "bottom",
-    "depthMode": "model-height",
-    "modelHeightAxis": "bbox-y",
-    "modelHeightMetersOverride": null,
-    "coverDepthMeters": 0
-  },
   "undergroundDisplay": {
     "defaultMode": "x-ray",
     "xrayOpacity": 0.5,
@@ -254,14 +245,6 @@
       "id": "dz1207",
       "name": "dz1207",
       "role": "primary",
-      "verticalPlacement": {
-        "groundRelation": "underground",
-        "surfaceReference": "rtk-surface-control-points",
-        "referencePlane": "bbox-top",
-        "coverDepthMeters": 0,
-        "modelHeightAxis": "bbox-y",
-        "modelHeightMetersOverride": null
-      },
       "groundClassification": {
         "mode": "whole-model"
       },

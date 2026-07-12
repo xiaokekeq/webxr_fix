@@ -81,22 +81,8 @@ interface RawMarkerEngineeringConfig extends Omit<MarkerEngineeringConfig, 'enu'
 }
 
 export type DemoModelRegistrationMode = 'rigid-ground-plane';
-export type UndergroundModelHeightAxis = 'y' | 'shortest-edge' | 'bbox-y';
-export type ModelGroundRelation = 'above-ground' | 'underground' | 'mixed' | 'absolute-engineering';
 export type GroundClassificationMode = 'whole-model' | 'node-groups' | 'clip-by-ground-plane';
-export type ModelReferencePlane = 'bbox-bottom' | 'bbox-top' | 'local-ground-plane' | 'control-point-plane' | 'none';
-export type ModelSurfaceReference = 'rtk-surface-control-points' | 'absolute-enu';
 export type AboveGroundDisplayMode = 'normal-ar' | 'hidden';
-
-export interface ModelVerticalPlacementConfig {
-	groundRelation: ModelGroundRelation;
-	surfaceReference: ModelSurfaceReference;
-	referencePlane: ModelReferencePlane;
-	localGroundY?: number;
-	coverDepthMeters?: number;
-	modelHeightAxis?: UndergroundModelHeightAxis;
-	modelHeightMetersOverride?: number | null;
-}
 
 export interface ModelGroundClassificationConfig {
 	mode: GroundClassificationMode;
@@ -116,19 +102,8 @@ export interface ModelInstanceConfig {
 	id: string;
 	name: string;
 	role?: string;
-	verticalPlacement: ModelVerticalPlacementConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display: ModelDisplayConfig;
-}
-
-export interface UndergroundPlacementConfig {
-	enabled: boolean;
-	reference: 'rtk-surface';
-	modelReference: 'bottom';
-	depthMode: 'model-height';
-	modelHeightAxis: UndergroundModelHeightAxis;
-	modelHeightMetersOverride?: number | null;
-	coverDepthMeters?: number;
 }
 export interface UndergroundDisplayConfig {
 	defaultMode?: 'true-depth' | 'x-ray' | 'lifted-preview';
@@ -158,9 +133,7 @@ export interface DemoModelConfig {
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
-	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
-	verticalPlacement?: ModelVerticalPlacementConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
 	modelInstances: ModelInstanceConfig[];
@@ -229,9 +202,7 @@ interface LocalDebugModelConfig {
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
-	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
-	verticalPlacement?: ModelVerticalPlacementConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
 	modelInstances?: ModelInstanceConfig[];
@@ -243,7 +214,7 @@ interface LocalDebugModelConfig {
 	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundPlacement' | 'undergroundDisplay' | 'verticalPlacement' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	controlPoints: Record<string, {
@@ -258,9 +229,7 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	placementAnchorEnu?: [ number, number, number ];
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
-	undergroundPlacement?: UndergroundPlacementConfig;
 	undergroundDisplay?: UndergroundDisplayConfig;
-	verticalPlacement?: ModelVerticalPlacementConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
 	modelInstances?: ModelInstanceConfig[];
@@ -389,7 +358,6 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.modelId );
 	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints );
-	reportLegacyUndergroundPlacementConfig( config );
 
 	return {
 		modelId: config.modelId,
@@ -406,12 +374,10 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
-		undergroundPlacement: normalizeUndergroundPlacementConfig( config.undergroundPlacement ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
-		verticalPlacement: normalizeVerticalPlacementConfig( config.verticalPlacement, config.undergroundPlacement ),
 		groundClassification: normalizeGroundClassificationConfig( config.groundClassification ),
-		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay, config.undergroundPlacement ),
-		modelInstances: normalizeModelInstances( config.modelInstances, config.modelId, config.undergroundPlacement, config.undergroundDisplay, config.verticalPlacement, config.groundClassification, config.display ),
+		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay ),
+		modelInstances: normalizeModelInstances( config.modelInstances, config.modelId, config.undergroundDisplay, config.groundClassification, config.display ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
@@ -436,7 +402,6 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.siteId );
 	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints );
-	reportLegacyUndergroundPlacementConfig( config );
 
 	return {
 		modelId: config.siteId,
@@ -459,12 +424,10 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
-		undergroundPlacement: normalizeUndergroundPlacementConfig( config.undergroundPlacement ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
-		verticalPlacement: normalizeVerticalPlacementConfig( config.verticalPlacement, config.undergroundPlacement ),
 		groundClassification: normalizeGroundClassificationConfig( config.groundClassification ),
-		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay, config.undergroundPlacement ),
-		modelInstances: normalizeModelInstances( config.modelInstances, config.siteId, config.undergroundPlacement, config.undergroundDisplay, config.verticalPlacement, config.groundClassification, config.display ),
+		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay ),
+		modelInstances: normalizeModelInstances( config.modelInstances, config.siteId, config.undergroundDisplay, config.groundClassification, config.display ),
 		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
 		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
 		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
@@ -1149,9 +1112,7 @@ function hasControlPointEnu(value: unknown): boolean {
 function normalizeModelInstances(
 	value: ModelInstanceConfig[] | undefined,
 	fallbackModelId: string,
-	legacyUndergroundPlacement: UndergroundPlacementConfig | undefined,
 	legacyUndergroundDisplay: UndergroundDisplayConfig | undefined,
-	verticalPlacement: ModelVerticalPlacementConfig | undefined,
 	groundClassification: ModelGroundClassificationConfig | undefined,
 	display: ModelDisplayConfig | undefined
 ): ModelInstanceConfig[] {
@@ -1165,9 +1126,8 @@ function normalizeModelInstances(
 				id: instance.id.trim(),
 				name: typeof instance.name === 'string' && instance.name.trim().length > 0 ? instance.name.trim() : instance.id.trim(),
 				role: typeof instance.role === 'string' ? instance.role : 'primary',
-				verticalPlacement: normalizeVerticalPlacementConfig( instance.verticalPlacement, legacyUndergroundPlacement ),
 				groundClassification: normalizeGroundClassificationConfig( instance.groundClassification ),
-				display: normalizeModelDisplayConfig( instance.display, legacyUndergroundDisplay, legacyUndergroundPlacement )
+				display: normalizeModelDisplayConfig( instance.display, legacyUndergroundDisplay )
 			} ];
 		} );
 	}
@@ -1176,51 +1136,9 @@ function normalizeModelInstances(
 		id: fallbackModelId,
 		name: fallbackModelId,
 		role: 'primary',
-		verticalPlacement: normalizeVerticalPlacementConfig( verticalPlacement, legacyUndergroundPlacement ),
 		groundClassification: normalizeGroundClassificationConfig( groundClassification ),
-		display: normalizeModelDisplayConfig( display, legacyUndergroundDisplay, legacyUndergroundPlacement )
+		display: normalizeModelDisplayConfig( display, legacyUndergroundDisplay )
 	} ];
-
-}
-
-function normalizeVerticalPlacementConfig(
-	value: ModelVerticalPlacementConfig | undefined,
-	legacyUndergroundPlacement: UndergroundPlacementConfig | undefined
-): ModelVerticalPlacementConfig {
-
-	if ( value !== undefined ) {
-		return {
-			groundRelation: normalizeGroundRelation( value.groundRelation ),
-			surfaceReference: value.surfaceReference === 'absolute-enu' ? 'absolute-enu' : 'rtk-surface-control-points',
-			referencePlane: normalizeReferencePlane( value.referencePlane, value.groundRelation ),
-			localGroundY: typeof value.localGroundY === 'number' && Number.isFinite( value.localGroundY ) ? value.localGroundY : undefined,
-			coverDepthMeters: typeof value.coverDepthMeters === 'number' && Number.isFinite( value.coverDepthMeters ) ? Math.max( 0, value.coverDepthMeters ) : 0,
-			modelHeightAxis: value.modelHeightAxis === 'y' || value.modelHeightAxis === 'shortest-edge' ? value.modelHeightAxis : 'bbox-y',
-			modelHeightMetersOverride: typeof value.modelHeightMetersOverride === 'number' && Number.isFinite( value.modelHeightMetersOverride ) && value.modelHeightMetersOverride > 0
-				? value.modelHeightMetersOverride
-				: null
-		};
-	}
-
-	if ( legacyUndergroundPlacement?.enabled === true ) {
-		return {
-			groundRelation: 'underground',
-			surfaceReference: 'rtk-surface-control-points',
-			referencePlane: 'bbox-top',
-			coverDepthMeters: legacyUndergroundPlacement.coverDepthMeters ?? 0,
-			modelHeightAxis: legacyUndergroundPlacement.modelHeightAxis ?? 'bbox-y',
-			modelHeightMetersOverride: legacyUndergroundPlacement.modelHeightMetersOverride ?? null
-		};
-	}
-
-	return {
-		groundRelation: 'above-ground',
-		surfaceReference: 'rtk-surface-control-points',
-		referencePlane: 'bbox-bottom',
-		coverDepthMeters: 0,
-		modelHeightAxis: 'bbox-y',
-		modelHeightMetersOverride: null
-	};
 
 }
 
@@ -1253,14 +1171,12 @@ function normalizeGroundClassificationConfig(value: ModelGroundClassificationCon
 
 function normalizeModelDisplayConfig(
 	value: ModelDisplayConfig | undefined,
-	legacyUndergroundDisplay: UndergroundDisplayConfig | undefined,
-	legacyUndergroundPlacement: UndergroundPlacementConfig | undefined
+	legacyUndergroundDisplay: UndergroundDisplayConfig | undefined
 ): ModelDisplayConfig {
 
-	const underground = legacyUndergroundPlacement?.enabled === true;
 	return {
 		aboveGroundMode: value?.aboveGroundMode === 'hidden' ? 'hidden' : 'normal-ar',
-		realWorldOcclusion: value?.realWorldOcclusion ?? underground,
+		realWorldOcclusion: value?.realWorldOcclusion ?? false,
 		opacity: typeof value?.opacity === 'number' && Number.isFinite( value.opacity )
 			? Math.min( 1, Math.max( 0, value.opacity ) )
 			: legacyUndergroundDisplay?.xrayOpacity,
@@ -1269,72 +1185,8 @@ function normalizeModelDisplayConfig(
 
 }
 
-function normalizeGroundRelation(value: unknown): ModelGroundRelation {
-	return value === 'underground' || value === 'mixed' || value === 'absolute-engineering' ? value : 'above-ground';
-}
-
-function normalizeReferencePlane(value: unknown, relation: unknown): ModelReferencePlane {
-	if (
-		value === 'bbox-bottom'
-		|| value === 'bbox-top'
-		|| value === 'local-ground-plane'
-		|| value === 'control-point-plane'
-		|| value === 'none'
-	) {
-		return value;
-	}
-	return relation === 'underground' ? 'bbox-top' : relation === 'absolute-engineering' ? 'none' : 'bbox-bottom';
-}
-
 function isNonEmptyString(value: unknown): value is string {
 	return typeof value === 'string' && value.trim().length > 0;
-}
-
-function normalizeUndergroundPlacementConfig(value: UndergroundPlacementConfig | undefined): UndergroundPlacementConfig | undefined {
-
-	if ( typeof value !== 'object' || value === null || value.enabled !== true ) {
-		return undefined;
-	}
-
-	return {
-		enabled: true,
-		reference: 'rtk-surface',
-		modelReference: 'bottom',
-		depthMode: 'model-height',
-		modelHeightAxis: value.modelHeightAxis === 'y' || value.modelHeightAxis === 'shortest-edge'
-			? value.modelHeightAxis
-			: 'bbox-y',
-		modelHeightMetersOverride: typeof value.modelHeightMetersOverride === 'number' && Number.isFinite( value.modelHeightMetersOverride ) && value.modelHeightMetersOverride > 0
-			? value.modelHeightMetersOverride
-			: null,
-		coverDepthMeters: typeof value.coverDepthMeters === 'number' && Number.isFinite( value.coverDepthMeters )
-			? Math.max( 0, value.coverDepthMeters )
-			: 0
-	};
-
-}
-
-function reportLegacyUndergroundPlacementConfig(config: unknown): void {
-
-	if ( typeof config !== 'object' || config === null ) {
-		return;
-	}
-	const record = config as Record<string, unknown>;
-	const undergroundDisplay = record.undergroundDisplay as Record<string, unknown> | undefined;
-	const legacyFields = [
-		'visualGroundOffsetMeters',
-		'visualPlacementMode',
-		...( undergroundDisplay?.buriedDepthMeters !== undefined ? [ 'undergroundDisplay.buriedDepthMeters' ] : [] ),
-		...( undergroundDisplay?.modelHeightAxis !== undefined ? [ 'undergroundDisplay.modelHeightAxis' ] : [] )
-	].filter( ( key ) => key.includes( '.' ) || record[ key ] !== undefined );
-
-	if ( legacyFields.length > 0 ) {
-		arError( 'LegacyUndergroundPlacementConfigDetected', {
-			legacyFields,
-			reason: 'underground depth must be derived through undergroundPlacement only'
-		} );
-	}
-
 }
 
 function normalizeUndergroundDisplayConfig(value: UndergroundDisplayConfig | undefined): UndergroundDisplayConfig | undefined {

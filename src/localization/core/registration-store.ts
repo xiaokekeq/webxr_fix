@@ -119,17 +119,6 @@ export interface ModelPlacementDebugState {
 	buildCommit?: string | null;
 	updatedAt?: number;
 	diagnosticSampleCount?: number;
-	undergroundPlacementMode?: 'surface' | 'rtk-derived-elevation';
-	undergroundMode?: string;
-	modelHeightSource?: 'override' | 'normalized-bbox-y' | 'placeable-report-y' | 'bbox-y' | 'y' | 'shortest-edge' | 'none' | 'invalid';
-	modelHeight?: number | null;
-	coverDepthMeters?: number;
-	totalBottomDepthMeters?: number;
-	engineeringUndergroundOffsetY?: number;
-	surfaceElevationText?: string;
-	undergroundElevationText?: string;
-	depthMeters?: number;
-	xrayOpacity?: number;
 	engineeringHorizontalRms?: number;
 	engineeringVerticalMax?: number;
 	surfaceProjectionHorizontalRms?: number;
@@ -213,13 +202,10 @@ export interface ModelPlacementDebugState {
 	cameraCurrentWorld?: DebugVector3;
 	yellowSurfaceCenterWorld?: { x: number; y: number; z: number };
 	purpleEngineeringCenterWorld?: { x: number; y: number; z: number };
-	undergroundExpectedCenterWorld?: { x: number; y: number; z: number };
 	yellowSurfaceDeltaXZ?: number;
 	yellowSurfaceDeltaY?: number;
 	purpleEngineeringDeltaXZ?: number;
 	purpleEngineeringDeltaY?: number;
-	undergroundExpectedDeltaXZ?: number;
-	undergroundExpectedDeltaY?: number;
 	yellowCenterInitialWorld?: DebugVector3;
 	yellowCenterCurrentWorld?: DebugVector3;
 	yellowWorldDeltaXZ?: number;
@@ -232,32 +218,18 @@ export interface ModelPlacementDebugState {
 	purpleEngineeringWorldDeltaXZ?: number;
 	purpleEngineeringWorldDeltaY?: number;
 	purpleEngineeringScreenDeltaPx?: number;
-	undergroundExpectedCenterInitialWorld?: DebugVector3;
-	undergroundExpectedCenterCurrentWorld?: DebugVector3;
-	undergroundExpectedWorldDeltaXZ?: number;
-	undergroundExpectedWorldDeltaY?: number;
-	undergroundExpectedScreenDeltaPx?: number;
 	currentModelActualCenterWorld?: DebugVector3;
 	currentModelActualWorldDeltaXZ?: number;
 	currentModelActualWorldDeltaY?: number;
 	yellowUpdateCount?: number;
 	purpleEngineeringUpdateCount?: number;
-	undergroundExpectedUpdateCount?: number;
 	currentModelActualUpdateCount?: number;
 	yellowLastUpdateReason?: string;
 	purpleEngineeringLastUpdateReason?: string;
-	undergroundExpectedLastUpdateReason?: string;
 	currentModelActualLastUpdateReason?: string;
 	purpleDiagnosticsUpdatedInFrameLoop?: boolean;
 	engineeringMinusYellowXZ?: number;
 	engineeringMinusYellowY?: number;
-	undergroundMinusYellowXZ?: number;
-	undergroundMinusYellowY?: number;
-	undergroundMinusEngineeringXZ?: number;
-	undergroundMinusEngineeringY?: number;
-	yellowToUndergroundScreenDistanceInitialPx?: number;
-	yellowToUndergroundScreenDistanceCurrentPx?: number;
-	yellowToUndergroundScreenDistanceDeltaPx?: number;
 	engineeringMatrixTranslationDelta?: number;
 	placedModelMatrixTranslationDelta?: number;
 	engineeringMatrixElements?: number[];
@@ -618,9 +590,6 @@ export function createDefaultFootprintDiagnosticsState(): FootprintDiagnosticsSt
 export function createDefaultModelPlacementDebugState(): ModelPlacementDebugState {
 
 	return {
-		modelHeightSource: 'none',
-		modelHeight: null,
-		depthMeters: 0,
 		isWorldLocked: null,
 		worldLockStatus: 'unknown',
 		engineeringPlacementCallCount: 0,
