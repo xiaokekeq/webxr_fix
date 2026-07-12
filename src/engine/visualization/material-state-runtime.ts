@@ -124,6 +124,6 @@ export class MaterialStateRuntime {
 
 function shouldAffectMesh(mesh: THREE.Mesh): boolean {
 
-	return mesh.userData.__nonSelectableHelper !== true && mesh.userData.__excludeFromLayerIndex !== true && mesh.userData.__visualizationHelper !== true;
+	return mesh.userData.__nonSelectableHelper !== true && mesh.userData.__visualizationHelper !== true && ( mesh.userData.__perimeterShell === true || mesh.userData.__excludeFromLayerIndex !== true );
 
 }

@@ -81,6 +81,8 @@ import { MaterialStateRuntime } from '@/engine/visualization/material-state-runt
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
+import { buildPerimeterShell } from '@/engine/visualization/perimeter-shell-builder.js';
+import { PerimeterShellRuntime } from '@/engine/visualization/perimeter-shell-runtime.js';
 import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
 import {
 	createArAnnotationLabelController,
@@ -258,6 +260,7 @@ export class ThreeEngine {
 		showModelBoundingBox: readDebugLayerFlag( 'VITE_SHOW_MODEL_BOUNDING_BOX', false )
 	};
 	private readonly materialStateRuntime = new MaterialStateRuntime();
+	private readonly perimeterShellRuntime = new PerimeterShellRuntime();
 	private readonly sectionCutController;
 	private readonly annotationLabelsController;
 	private readonly annotationLayer = new AnnotationLayer();
@@ -378,6 +381,7 @@ export class ThreeEngine {
 			layerVisibility: this.layerVisibility,
 			materialStateRuntime: this.materialStateRuntime,
 			sectionCutController: this.sectionCutController,
+			perimeterShellRuntime: this.perimeterShellRuntime,
 			getUndergroundModelRoot: () => this.placementSession.getArPlacedModel(),
 			syncAttachmentInfoBoardVisibility: () => {
 				this.syncAttachmentInfoBoardVisibility();
@@ -661,6 +665,7 @@ export class ThreeEngine {
 				this.pipesByName = bundle.pipesByName;
 				this.demoModelConfig = bundle.demoModelConfig;
 				this.modelTemplate = bundle.modelTemplate;
+				this.perimeterShellRuntime.register( buildPerimeterShell( bundle.modelTemplate, new THREE.Vector3( 0, 1, 0 ) ), 'model-loaded' );
 				this.registrationSolution = bundle.registrationSolution;
 				this.logGroundAwareArAudit( bundle.demoModelConfig );
 				this.annotationLayer.setAnnotations(

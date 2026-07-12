@@ -9,6 +9,7 @@ import type { PlacementSession } from '@/engine/placement/session.js';
 import type { LayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
 import type { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
 import type { ArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
+import type { PerimeterShellRuntime } from '@/engine/visualization/perimeter-shell-runtime.js';
 
 interface VisualizationStateRuntimeOptions {
 	store: RegistrationStore;
@@ -16,6 +17,7 @@ interface VisualizationStateRuntimeOptions {
 	layerVisibility: LayerVisibilityController;
 	materialStateRuntime: MaterialStateRuntime;
 	sectionCutController: ArSectionCutController;
+	perimeterShellRuntime: PerimeterShellRuntime;
 	getUndergroundModelRoot(): THREE.Object3D | null;
 	syncAttachmentInfoBoardVisibility(): void;
 }
@@ -64,6 +66,7 @@ export class VisualizationStateRuntime {
 			this.options.materialStateRuntime.applySection( plane );
 		}
 		if ( materialDirty ) this.options.materialStateRuntime.applyMaterial( state.undergroundMaterialMode, state.transparentXrayValue );
+		this.options.perimeterShellRuntime.sync( undergroundRoot, state.undergroundInspectionTool === 'layer-peeling' );
 
 		this.lastRoot = undergroundRoot;
 		this.lastMaterialMode = state.undergroundMaterialMode;
