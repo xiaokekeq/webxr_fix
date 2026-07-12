@@ -404,6 +404,7 @@ export class ThreeEngine {
 			model: this.sceneBundle.scene,
 			sourceModelCorners: [],
 			targetSurfaceCorners: [],
+			surfaceUpNormal: new THREE.Vector3( 0, 1, 0 ),
 			depthFrame: this.realDepthProvider.getCurrentFrame(),
 			enabled: false
 		};
@@ -3980,6 +3981,7 @@ export class ThreeEngine {
 		args.model = snapshot.undergroundRoot!;
 		args.sourceModelCorners = [ ...snapshot.worldCorners ];
 		args.targetSurfaceCorners = [ ...snapshot.targetSurfaceCorners ];
+		args.surfaceUpNormal.set( 0, 0, 1 ).transformDirection( this.activeMarkerArFromEnuSolution!.matrix );
 		args.depthFrame = depthFrame;
 		args.enabled = true;
 		const portalStatus = this.undergroundPortal.update( args );

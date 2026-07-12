@@ -21,6 +21,7 @@ const PORTAL_BACKGROUND_COLOR = new THREE.Color( readPortalColor( 'portalBackgro
 const PORTAL_DEBUG_MODE = readPortalDebugMode();
 const PORTAL_ELEVATION_LAYER = 31;
 const PORTAL_ELEVATION_STYLE = { shallowColor: new THREE.Color( 0xffb35c ), deepColor: new THREE.Color( 0x2467b3 ), overlayOpacity: 0.35, contourOpacity: 0.75, contourIntervalMeters: 0.25, contourWidthMeters: 0.02 };
+const PORTAL_ELEVATION_RANGE_EPSILON = 0.001;
 
 export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
 type GeometryCalibrationState = 'dirty' | 'calibrating' | 'ready' | 'failed';
@@ -132,12 +133,12 @@ void main() {
 
 const elevationFragmentShader = /* glsl */`
 precision highp float;
-uniform vec3 uPortalPlaneCenter, uPortalPlaneNormal, uShallowColor, uDeepColor;
+uniform vec3 uPortalPlaneCenter, uPortalSurfaceUpNormal, uShallowColor, uDeepColor;
 uniform float uMinDepthMeters, uMaxDepthMeters, uOverlayOpacity, uContourOpacity, uContourIntervalMeters, uContourWidthMeters;
 in vec3 vWorldPosition;
 out vec4 outColor;
 void main() {
-  float depthMeters = max(0.0, -dot(vWorldPosition - uPortalPlaneCenter, uPortalPlaneNormal));
+  float depthMeters = max(0.0, -dot(vWorldPosition - uPortalPlaneCenter, uPortalSurfaceUpNormal));
   float depth01 = clamp((depthMeters - uMinDepthMeters) / max(uMaxDepthMeters - uMinDepthMeters, 0.001), 0.0, 1.0);
   float contour = 0.0;
   if (uMaxDepthMeters - uMinDepthMeters > uContourIntervalMeters) {
@@ -160,6 +161,10 @@ export class UndergroundTopPortal {
 	private readonly portalRaycaster = new THREE.Raycaster();
 	private readonly proxyToSource = new Map<THREE.Object3D, THREE.Object3D>();
 	private readonly normal = new THREE.Vector3( 0, 1, 0 );
+	private readonly surfaceUpNormal = new THREE.Vector3( 0, 1, 0 );
+	private readonly upReference = new THREE.Vector3( 0, 1, 0 );
+	private readonly candidateSurfaceNormal = new THREE.Vector3();
+	private surfaceNormalWasFlipped = false;
 	private readonly axisU = new THREE.Vector3();
 	private readonly axisV = new THREE.Vector3();
 	private readonly center = new THREE.Vector3();
@@ -173,6 +178,7 @@ export class UndergroundTopPortal {
 	private readonly boundsSize = new THREE.Vector3();
 	private readonly boundsCenter = new THREE.Vector3();
 	private readonly cornerValues = new Float32Array( 24 );
+	private readonly surfaceTargetCornerValues = new Float32Array( 12 );
 	private readonly modelMatrixValues = new Float32Array( 16 );
 	private sourceModel: THREE.Object3D | null = null;
 	private sourceModelWasVisible = true;
@@ -182,7 +188,8 @@ export class UndergroundTopPortal {
 	private elevationTarget: THREE.WebGLRenderTarget | null = null;
 	private elevationMaterial: THREE.ShaderMaterial | null = null;
 	private readonly elevationCamera = new THREE.OrthographicCamera();
-	private elevationRange: PortalElevationRange = { minSignedHeightMeters: 0, maxSignedHeightMeters: 0, minDepthMeters: 0, maxDepthMeters: 0, depthRangeMeters: 0, valid: false };
+	private elevationRange: PortalElevationRange = { minSignedHeightMeters: 0, maxSignedHeightMeters: 0, minDepthMeters: 0, maxDepthMeters: 0, depthRangeMeters: 0, sampleCount: 0, aboveSurfaceSampleCount: 0, belowSurfaceSampleCount: 0, onSurfaceSampleCount: 0, valid: false };
+	private elevationFallbackReason = 'none';
 	private elevationDirty = true;
 	private elevationRedrawCount = 0;
 	private lastElevationRedrawTimestamp = 0;
@@ -239,6 +246,7 @@ export class UndergroundTopPortal {
 		model: THREE.Object3D;
 		sourceModelCorners: THREE.Vector3[];
 		targetSurfaceCorners: THREE.Vector3[];
+		surfaceUpNormal: THREE.Vector3;
 		depthFrame: CpuDepthFrame;
 		enabled: boolean;
 	}): PortalState {
@@ -263,7 +271,7 @@ export class UndergroundTopPortal {
 			const proxyFailure = this.ensureRenderProxy();
 			if ( proxyFailure !== null ) return this.fail( proxyFailure );
 		}
-		const geometryFailure = this.updateGeometry( args.renderer, sourceCorners.value, targetCorners.value );
+		const geometryFailure = this.updateGeometry( args.renderer, sourceCorners.value, targetCorners.value, args.surfaceUpNormal );
 		if ( geometryFailure !== null ) return this.fail( geometryFailure );
 		this.syncModelMatrix();
 		if ( this.ensureSurface() === false && PORTAL_DEBUG_MODE !== 'surface' ) {
@@ -379,6 +387,7 @@ export class UndergroundTopPortal {
 		this.elevationMaterial = null;
 		this.uniforms = null;
 		this.cornerValues.fill( Number.NaN );
+		this.surfaceTargetCornerValues.fill( Number.NaN );
 		this.geometryCalibrationState = 'dirty';
 		this.modelMatrixValues.fill( Number.NaN );
 		this.portalDirty = true;
@@ -505,7 +514,7 @@ export class UndergroundTopPortal {
 
 	}
 
-	private updateGeometry(renderer: THREE.WebGLRenderer, sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[]): string | null {
+	private updateGeometry(renderer: THREE.WebGLRenderer, sourceCorners: THREE.Vector3[], targetCorners: THREE.Vector3[], upReference: THREE.Vector3): string | null {
 
 		if ( this.hasCornerChanges( sourceCorners, targetCorners ) === false && this.geometryCalibrationState === 'ready' ) return null;
 		this.geometryCalibrationState = 'calibrating';
@@ -513,6 +522,11 @@ export class UndergroundTopPortal {
 		const center = correspondences.reduce( ( result, corner ) => result.add( corner.sourceWorld ), new THREE.Vector3() ).multiplyScalar( 0.25 );
 		const axisU = new THREE.Vector3().subVectors( sourceCorners[ 1 ], sourceCorners[ 0 ] ).normalize();
 		const normal = new THREE.Vector3().crossVectors( axisU, new THREE.Vector3().subVectors( sourceCorners[ 3 ], sourceCorners[ 0 ] ) ).normalize();
+		const candidateSurfaceNormal = normal.clone();
+		const surfaceUpNormal = candidateSurfaceNormal.clone();
+		const normalizedUpReference = upReference.clone().normalize();
+		const surfaceNormalWasFlipped = surfaceUpNormal.dot( normalizedUpReference ) < 0;
+		if ( surfaceNormalWasFlipped ) surfaceUpNormal.negate();
 		const windingWasReversed = normal.dot( this.worldUp ) < 0;
 		if ( windingWasReversed ) normal.negate();
 		const axisV = new THREE.Vector3().crossVectors( normal, axisU ).normalize();
@@ -561,6 +575,7 @@ export class UndergroundTopPortal {
 			this.surface.geometry = geometry;
 		}
 		this.axisU.copy( axisU ); this.axisV.copy( axisV ); this.normal.copy( normal ); this.center.copy( center );
+		this.upReference.copy( normalizedUpReference ); this.candidateSurfaceNormal.copy( candidateSurfaceNormal ); this.surfaceUpNormal.copy( surfaceUpNormal ); this.surfaceNormalWasFlipped = surfaceNormalWasFlipped;
 		this.camera.copy( camera );
 		this.sourceCornerIds = normalized.map( ( corner ) => corner!.id );
 		this.originalCornerIds = correspondences.map( ( corner ) => corner.id );
@@ -569,6 +584,7 @@ export class UndergroundTopPortal {
 		this.sourceCornerNdc = sourceCornerNdc;
 		this.maxSourceCornerNdcError = maxNdcError;
 		this.commitCornerCache( sourceCorners, targetCorners );
+		this.commitSurfaceTargetCorners( [ p0, p1, p2, p3 ] );
 		this.geometryCalibrationState = 'ready';
 		this.portalDirty = true;
 		this.markContentDirty();
@@ -606,7 +622,7 @@ export class UndergroundTopPortal {
 		if ( this.elevationMaterial !== null ) return this.elevationMaterial;
 		this.elevationMaterial = new THREE.ShaderMaterial( {
 			uniforms: {
-				uPortalPlaneCenter: { value: this.center.clone() }, uPortalPlaneNormal: { value: this.normal.clone() },
+				uPortalPlaneCenter: { value: this.center.clone() }, uPortalSurfaceUpNormal: { value: this.surfaceUpNormal.clone() },
 				uMinDepthMeters: { value: 0 }, uMaxDepthMeters: { value: 0 },
 				uShallowColor: { value: PORTAL_ELEVATION_STYLE.shallowColor }, uDeepColor: { value: PORTAL_ELEVATION_STYLE.deepColor },
 				uOverlayOpacity: { value: PORTAL_ELEVATION_STYLE.overlayOpacity }, uContourOpacity: { value: PORTAL_ELEVATION_STYLE.contourOpacity },
@@ -841,11 +857,21 @@ export class UndergroundTopPortal {
 	private renderElevation(renderer: THREE.WebGLRenderer): void {
 
 		if ( this.elevationTarget === null || this.renderModel === null || this.elevationDirty === false ) return;
-		this.elevationRange = getPortalElevationRange( this.renderModel, this.center, this.normal );
-		if ( this.elevationRange.valid === false ) return;
+		this.elevationRange = getPortalElevationRange( this.renderModel, this.center, this.surfaceUpNormal );
 		const material = this.ensureElevationMaterial();
+		this.elevationFallbackReason = this.elevationRange.valid === false
+			? 'elevation-no-samples'
+			: this.elevationRange.belowSurfaceSampleCount === 0
+				? 'elevation-no-underground-samples'
+				: this.elevationRange.depthRangeMeters < PORTAL_ELEVATION_RANGE_EPSILON ? 'zero-depth-range' : 'none';
+		if ( this.elevationFallbackReason !== 'none' ) {
+			renderer.setRenderTarget( this.elevationTarget );
+			renderer.clear( true, true, true );
+			this.elevationDirty = false;
+			return;
+		}
 		material.uniforms.uPortalPlaneCenter.value.copy( this.center );
-		material.uniforms.uPortalPlaneNormal.value.copy( this.normal );
+		material.uniforms.uPortalSurfaceUpNormal.value.copy( this.surfaceUpNormal );
 		material.uniforms.uMinDepthMeters.value = this.elevationRange.minDepthMeters;
 		material.uniforms.uMaxDepthMeters.value = this.elevationRange.maxDepthMeters;
 		this.elevationCamera.copy( this.camera );
@@ -914,7 +940,8 @@ export class UndergroundTopPortal {
 			depthTextureWidth: this.cpuDepthDiagnostics.width,
 			depthTextureHeight: this.cpuDepthDiagnostics.height,
 			rawValueToMeters: this.cpuDepthDiagnostics.rawValueToMeters,
-			maxPortalCornerDriftMeters: this.getMaxPortalCornerDrift(),
+			maxSourceTargetResidualMeters: this.getMaxSourceTargetResidual(),
+			maxSurfaceTargetCornerDriftMeters: this.getMaxSurfaceTargetCornerDrift(),
 			maxSourceCornerNdcError: this.maxSourceCornerNdcError,
 			geometryCalibrationState: this.geometryCalibrationState,
 			sourceCornerIds: JSON.stringify( this.sourceCornerIds ),
@@ -940,6 +967,18 @@ export class UndergroundTopPortal {
 			elevationRedrawCount: this.elevationRedrawCount,
 			lastElevationRedrawTimestamp: Math.round( this.lastElevationRedrawTimestamp ),
 			elevationRenderTarget: this.elevationTarget === null ? 'none' : `${this.elevationTarget.width}x${this.elevationTarget.height}`,
+			upReference: JSON.stringify( vectorToObject( this.upReference ) ),
+			candidateSurfaceNormal: JSON.stringify( vectorToObject( this.candidateSurfaceNormal ) ),
+			surfaceUpNormal: JSON.stringify( vectorToObject( this.surfaceUpNormal ) ),
+			surfaceUpDotReference: this.surfaceUpNormal.dot( this.upReference ),
+			surfaceNormalWasFlipped: this.surfaceNormalWasFlipped,
+			elevationSampleCount: this.elevationRange.sampleCount,
+			aboveSurfaceSampleCount: this.elevationRange.aboveSurfaceSampleCount,
+			belowSurfaceSampleCount: this.elevationRange.belowSurfaceSampleCount,
+			onSurfaceSampleCount: this.elevationRange.onSurfaceSampleCount,
+			belowSurfaceRatio: this.elevationRange.sampleCount === 0 ? 0 : this.elevationRange.belowSurfaceSampleCount / this.elevationRange.sampleCount,
+			elevationRangeUsable: this.elevationFallbackReason === 'none',
+			elevationFallbackReason: this.elevationFallbackReason,
 			lastFrameError: this.lastFrameError || 'none'
 		};
 
@@ -986,19 +1025,36 @@ export class UndergroundTopPortal {
 
 	}
 
-	private getMaxPortalCornerDrift(): number {
+	private commitSurfaceTargetCorners(corners: THREE.Vector3[]): void {
+
+		for ( let index = 0; index < 4; index += 1 ) this.surfaceTargetCornerValues.set( [ corners[ index ].x, corners[ index ].y, corners[ index ].z ], index * 3 );
+
+	}
+
+	private getMaxSurfaceTargetCornerDrift(): number {
 
 		const position = this.surface?.geometry.getAttribute( 'position' );
 		if ( position === undefined || position === null ) return -1;
 		let maxDrift = 0;
 		for ( const [ cornerIndex, vertexIndex ] of [ [ 0, 0 ], [ 1, 1 ], [ 2, 2 ], [ 3, 5 ] ] ) {
-			const offset = 12 + cornerIndex * 3;
-			const dx = position.getX( vertexIndex ) - this.normal.x * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset ];
-			const dy = position.getY( vertexIndex ) - this.normal.y * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset + 1 ];
-			const dz = position.getZ( vertexIndex ) - this.normal.z * PORTAL_SURFACE_LIFT_METERS - this.cornerValues[ offset + 2 ];
+			const offset = cornerIndex * 3;
+			const dx = position.getX( vertexIndex ) - this.normal.x * PORTAL_SURFACE_LIFT_METERS - this.surfaceTargetCornerValues[ offset ];
+			const dy = position.getY( vertexIndex ) - this.normal.y * PORTAL_SURFACE_LIFT_METERS - this.surfaceTargetCornerValues[ offset + 1 ];
+			const dz = position.getZ( vertexIndex ) - this.normal.z * PORTAL_SURFACE_LIFT_METERS - this.surfaceTargetCornerValues[ offset + 2 ];
 			maxDrift = Math.max( maxDrift, Math.hypot( dx, dy, dz ) );
 		}
 		return maxDrift;
+
+	}
+
+	private getMaxSourceTargetResidual(): number {
+
+		let maxResidual = 0;
+		for ( let index = 0; index < 4; index += 1 ) {
+			const offset = index * 3;
+			maxResidual = Math.max( maxResidual, Math.hypot( this.cornerValues[ offset ] - this.cornerValues[ 12 + offset ], this.cornerValues[ offset + 1 ] - this.cornerValues[ 13 + offset ], this.cornerValues[ offset + 2 ] - this.cornerValues[ 14 + offset ] ) );
+		}
+		return maxResidual;
 
 	}
 
