@@ -154,6 +154,11 @@ export class UndergroundTopPortal {
 		uDebugMode: { value: number };
 	} | null = null;
 	private portalDirty = true;
+	private contentDirty = true;
+	private offscreenRevision = 0;
+	private lastRenderedRevision = -1;
+	private offscreenState: 'not-required' | 'pending' | 'rendering' | 'ready' | 'failed' = 'pending';
+	private lastOffscreenFailureReason = '';
 	private redrawCount = 0;
 	private lastRedrawTimestamp = 0;
 	private lastFrameError = '';
@@ -205,13 +210,14 @@ export class UndergroundTopPortal {
 		if ( PORTAL_DEBUG_MODE !== 'full' || ( isArDebugEnabled() && readPortalFlag( 'portalDisableCpuDepth' ) ) ) this.uniforms!.uDepthOcclusionEnabled.value = false;
 		if ( this.sourceModel !== null ) this.sourceModel.visible = false;
 		this.surface!.visible = true;
-		if ( this.portalDirty ) {
+		if ( this.portalDirty || ( this.contentDirty && PORTAL_DEBUG_MODE !== 'surface' ) ) {
 			this.syncRenderModelState();
 			if ( PORTAL_DEBUG_MODE !== 'surface' && this.countStructuralRenderableMeshes() === 0 ) return this.fail( 'no-renderable-mesh-structure' );
 			this.setState( 'content-ready' );
 			this.logDirtyDiagnostics( corners.value, args.mainCamera );
-			if ( PORTAL_DEBUG_MODE !== 'surface' ) this.render( args.renderer );
-			else this.portalDirty = false;
+			this.portalDirty = false;
+			if ( PORTAL_DEBUG_MODE !== 'surface' && this.contentDirty ) this.render( args.renderer );
+			else if ( PORTAL_DEBUG_MODE === 'surface' ) this.offscreenState = 'not-required';
 		}
 		return this.setState( 'ready' );
 
@@ -243,6 +249,9 @@ export class UndergroundTopPortal {
 	markDirty(): void {
 
 		this.portalDirty = true;
+		this.contentDirty = true;
+		this.offscreenState = 'pending';
+		this.markContentDirty();
 
 	}
 
@@ -251,6 +260,7 @@ export class UndergroundTopPortal {
 		this.attemptId += 1;
 		this.setState( 'initializing' );
 		this.portalDirty = true;
+		this.markContentDirty();
 
 	}
 
@@ -271,6 +281,7 @@ export class UndergroundTopPortal {
 		this.cornerValues.fill( Number.NaN );
 		this.modelMatrixValues.fill( Number.NaN );
 		this.portalDirty = true;
+		this.markContentDirty();
 		this.state = 'idle';
 		this.failureReason = '';
 
@@ -398,6 +409,7 @@ export class UndergroundTopPortal {
 		}
 		this.resizeRenderTarget( renderer, width, height );
 		this.portalDirty = true;
+		this.markContentDirty();
 
 	}
 
@@ -448,6 +460,7 @@ export class UndergroundTopPortal {
 		this.renderTarget = nextTarget;
 		if ( this.uniforms !== null ) this.uniforms.uPortalColorTexture.value = this.renderTarget.texture;
 		this.portalDirty = true;
+		this.markContentDirty();
 
 	}
 
@@ -490,6 +503,7 @@ export class UndergroundTopPortal {
 		this.camera.far = Math.max( 50, this.camera.position.distanceTo( this.boundsCenter ) + this.boundsSize.length() + 10 );
 		this.camera.updateProjectionMatrix();
 		this.portalDirty = true;
+		this.markContentDirty();
 
 	}
 
@@ -518,6 +532,26 @@ export class UndergroundTopPortal {
 		this.renderModel?.traverse( ( object ) => {
 			if ( isRenderablePortalMesh( object ) ) count += 1;
 		} );
+		return count;
+
+	}
+
+	private countVisibleRenderableMeshes(): number {
+
+		let count = 0;
+		this.renderModel?.traverseVisible( ( object ) => {
+			if ( isRenderablePortalMesh( object ) ) count += 1;
+		} );
+		return count;
+
+	}
+
+	private countRenderableMeshes(root: THREE.Object3D | null, visibleOnly: boolean): number {
+
+		let count = 0;
+		const visit = ( object: THREE.Object3D ) => { if ( isRenderablePortalMesh( object ) ) count += 1; };
+		if ( visibleOnly ) root?.traverseVisible( visit );
+		else root?.traverse( visit );
 		return count;
 
 	}
@@ -577,7 +611,9 @@ export class UndergroundTopPortal {
 		renderer.getViewport( this.previousViewport );
 		renderer.getScissor( this.previousScissor );
 		const previousScissorTest = renderer.getScissorTest();
+		const previousOverrideMaterial = this.renderScene.overrideMaterial;
 		try {
+			this.offscreenState = 'rendering';
 			renderer.xr.enabled = false;
 			renderer.autoClear = false;
 			renderer.setRenderTarget( this.renderTarget );
@@ -586,11 +622,15 @@ export class UndergroundTopPortal {
 			renderer.setClearColor( 0x000000, 0 );
 			renderer.clear( true, true, true );
 			renderer.render( this.renderScene, this.camera );
-			this.portalDirty = false;
+			this.contentDirty = false;
+			this.lastRenderedRevision = this.offscreenRevision;
+			this.offscreenState = 'ready';
 			this.redrawCount += 1;
 			this.lastRedrawTimestamp = performance.now();
 		} catch ( error ) {
 			this.lastFrameError = error instanceof Error ? error.message : String( error );
+			this.lastOffscreenFailureReason = this.lastFrameError;
+			this.offscreenState = 'failed';
 			throw error;
 		} finally {
 			renderer.setRenderTarget( previousTarget );
@@ -600,12 +640,16 @@ export class UndergroundTopPortal {
 			renderer.setViewport( this.previousViewport );
 			renderer.setScissor( this.previousScissor );
 			renderer.setScissorTest( previousScissorTest );
+			this.renderScene.overrideMaterial = previousOverrideMaterial;
 		}
 
 	}
 
 	getDiagnostics(): Record<string, string | number | boolean> {
 
+		const proxyBounds = this.renderModel === null ? null : new THREE.Box3().setFromObject( this.renderModel );
+		const proxyNdc = proxyBounds === null || proxyBounds.isEmpty() ? null : projectBoxToNdc( proxyBounds, this.camera );
+		const matrixError = this.sourceModel === null || this.renderModel === null ? -1 : this.sourceModel.matrixWorld.elements.reduce( ( max, value, index ) => Math.max( max, Math.abs( value - this.renderModel!.matrixWorld.elements[ index ] ) ), 0 );
 		return {
 			portalState: this.state,
 			portalFailureReason: this.failureReason || 'none',
@@ -613,6 +657,23 @@ export class UndergroundTopPortal {
 			debugMode: PORTAL_DEBUG_MODE,
 			surfaceVisible: this.surface?.visible === true,
 			dirty: this.portalDirty,
+			offscreenRenderingRequired: PORTAL_DEBUG_MODE !== 'surface',
+			offscreenRenderingSkippedReason: PORTAL_DEBUG_MODE === 'surface' ? 'surface-debug-mode' : 'none',
+			offscreenState: this.offscreenState,
+			contentDirty: this.contentDirty,
+			offscreenRevision: this.offscreenRevision,
+			lastRenderedRevision: this.lastRenderedRevision,
+			lastOffscreenFailureReason: this.lastOffscreenFailureReason || 'none',
+			renderProxyExists: this.renderModel !== null,
+			proxyStructuralRenderableCount: this.countStructuralRenderableMeshes(),
+			proxyVisibleRenderableCount: this.countVisibleRenderableMeshes(),
+			renderProxyVisible: this.renderModel?.visible === true,
+			sourceStructuralRenderableCount: this.countRenderableMeshes( this.sourceModel, false ),
+			sourceVisibleRenderableCount: this.countRenderableMeshes( this.sourceModel, true ),
+			renderProxyParentPath: this.renderModel?.parent?.name || this.renderModel?.parent?.type || 'none',
+			matrixWorldMaxAbsError: matrixError,
+			portalModelNdcBounds: proxyNdc === null ? 'none' : JSON.stringify( proxyNdc ),
+			modelIntersectsCameraFootprint: proxyNdc !== null && !( proxyNdc.right < -1 || proxyNdc.left > 1 || proxyNdc.top < -1 || proxyNdc.bottom > 1 ),
 			redrawCount: this.redrawCount,
 			lastRedrawTimestamp: Math.round( this.lastRedrawTimestamp ),
 			renderTarget: this.renderTarget === null ? 'none' : `${this.renderTarget.width}x${this.renderTarget.height}`,
@@ -622,6 +683,14 @@ export class UndergroundTopPortal {
 			portalBackgroundAlpha: PORTAL_BACKGROUND_ALPHA,
 			lastFrameError: this.lastFrameError || 'none'
 		};
+
+	}
+
+	private markContentDirty(): void {
+
+		this.contentDirty = true;
+		this.offscreenRevision += 1;
+		if ( PORTAL_DEBUG_MODE !== 'surface' ) this.offscreenState = 'pending';
 
 	}
 
