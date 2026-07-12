@@ -23,6 +23,7 @@ const PORTAL_ELEVATION_RANGE_EPSILON = 0.001;
 const PORTAL_MATRIX_EPSILON = 1e-6;
 const ORTHOGRAPHIC_OVERLAY_PADDING = 0.04;
 const ORTHOGRAPHIC_ELEVATION_DEBUG = readPortalFlag( 'orthographicElevationDebug' );
+const ORTHOGRAPHIC_DEBUG_MODE = readOrthographicDebugMode();
 
 export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
 type GeometryCalibrationState = 'dirty' | 'calibrating' | 'ready' | 'failed';
@@ -49,6 +50,7 @@ precision highp float;
 precision highp int;
 
 uniform sampler2D uPortalColorTexture;
+uniform sampler2D uOrthographicCoverageTexture;
 uniform bool uDepthOcclusionEnabled;
 uniform highp usampler2D uRealDepthTexture;
 uniform float uRawValueToMeters;
@@ -112,9 +114,12 @@ void main() {
     return;
   }
   vec4 portalColor = texture(uPortalColorTexture, vPortalUv);
-  if (portalColor.a <= 0.001) discard;
+  float modelCoverage = texture(uOrthographicCoverageTexture, vPortalUv).r;
+  if (uDebugMode == 2) { outColor = vec4(vec3(modelCoverage), modelCoverage); return; }
+  if (uDebugMode == 1) { outColor = vec4(portalColor.rgb, 1.0); return; }
+  if (modelCoverage <= 0.01) discard;
   vec3 visibleColor = portalColor.rgb;
-  float finalAlpha = portalColor.a * (uDebugMode == 2 ? 1.0 : 1.0 - foregroundMask());
+  float finalAlpha = modelCoverage * (1.0 - foregroundMask());
   if (finalAlpha < 0.01) discard;
   outColor = vec4(visibleColor, finalAlpha);
 }`;
@@ -192,6 +197,8 @@ export class UndergroundTopPortal {
 	private renderModel: THREE.Object3D | null = null;
 	private surface: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> | null = null;
 	private renderTarget: THREE.WebGLRenderTarget | null = null;
+	private coverageTarget: THREE.WebGLRenderTarget | null = null;
+	private readonly coverageMaterial = new THREE.MeshBasicMaterial( { color: 0xffffff, transparent: false, opacity: 1, blending: THREE.NoBlending, depthTest: true, depthWrite: true, side: THREE.DoubleSide } );
 	private elevationTarget: THREE.WebGLRenderTarget | null = null;
 	private elevationMaterial: THREE.ShaderMaterial | null = null;
 	private readonly elevationCamera = new THREE.OrthographicCamera();
@@ -214,6 +221,7 @@ export class UndergroundTopPortal {
 	private lastElevationRedrawTimestamp = 0;
 	private uniforms: CpuDepthOcclusionUniforms & {
 		uPortalColorTexture: { value: THREE.Texture | null };
+		uOrthographicCoverageTexture: { value: THREE.Texture | null };
 		uForegroundThresholdMeters: { value: number };
 		uDepthFeatherMeters: { value: number };
 		uDebugMode: { value: number };
@@ -232,6 +240,10 @@ export class UndergroundTopPortal {
 	private redrawCount = 0;
 	private lastRedrawTimestamp = 0;
 	private lastFrameError = '';
+	private colorNonZeroPixelCount = 0;
+	private colorAlphaPixelCount = 0;
+	private maskPixelCount = 0;
+	private renderTargetPixelSampleCount = 0;
 	private maxSourceCornerNdcError = -1;
 	private sourceCornerNdc: THREE.Vector2[] = [];
 	private sourceCornerIds: string[] = [];
@@ -298,7 +310,7 @@ export class UndergroundTopPortal {
 		if ( this.surface === null || this.uniforms === null ) return this.fail( 'surface-unavailable' );
 		this.setState( 'surface-ready' );
 		syncCpuDepthOcclusionUniforms( this.uniforms!, args.depthFrame );
-		if ( PORTAL_DEBUG_MODE !== 'full' || ( isArDebugEnabled() && readPortalFlag( 'portalDisableCpuDepth' ) ) ) this.uniforms!.uDepthOcclusionEnabled.value = false;
+		this.uniforms!.uDepthOcclusionEnabled.value = false;
 		this.cpuDepthDiagnostics = {
 			enabled: this.uniforms!.uDepthOcclusionEnabled.value,
 			available: args.depthFrame.available,
@@ -417,6 +429,8 @@ export class UndergroundTopPortal {
 		this.surface = null;
 		this.renderTarget?.dispose();
 		this.renderTarget = null;
+		this.coverageTarget?.dispose();
+		this.coverageTarget = null;
 		this.elevationTarget?.dispose();
 		this.elevationTarget = null;
 		this.elevationMaterial?.dispose();
@@ -437,6 +451,7 @@ export class UndergroundTopPortal {
 	dispose(): void {
 
 		this.reset();
+		this.coverageMaterial.dispose();
 
 	}
 
@@ -636,9 +651,10 @@ export class UndergroundTopPortal {
 
 		this.uniforms = Object.assign( createCpuDepthOcclusionUniforms(), {
 			uPortalColorTexture: { value: this.renderTarget?.texture ?? null },
+			uOrthographicCoverageTexture: { value: this.coverageTarget?.texture ?? null },
 			uForegroundThresholdMeters: { value: PORTAL_FOREGROUND_THRESHOLD_METERS },
 			uDepthFeatherMeters: { value: PORTAL_DEPTH_FEATHER_METERS },
-			uDebugMode: { value: PORTAL_DEBUG_MODE === 'surface' ? 1 : PORTAL_DEBUG_MODE === 'texture' ? 2 : 0 }
+			uDebugMode: { value: ORTHOGRAPHIC_DEBUG_MODE === 'color' || PORTAL_DEBUG_MODE === 'texture' ? 1 : ORTHOGRAPHIC_DEBUG_MODE === 'mask' ? 2 : 0 }
 		} );
 		return new THREE.ShaderMaterial( {
 			uniforms: this.uniforms,
@@ -691,13 +707,18 @@ export class UndergroundTopPortal {
 		if ( this.renderTarget?.width === targetWidth && this.renderTarget.height === targetHeight ) return true;
 		const nextTarget = this.createRenderTarget( renderer, targetWidth, targetHeight );
 		if ( nextTarget === null ) return false;
+		const nextCoverageTarget = this.createRenderTarget( renderer, nextTarget.width, nextTarget.height );
+		if ( nextCoverageTarget === null ) { nextTarget.dispose(); return false; }
 		const nextElevationTarget = this.createRenderTarget( renderer, nextTarget.width, nextTarget.height );
-		if ( nextElevationTarget === null ) { nextTarget.dispose(); return false; }
+		if ( nextElevationTarget === null ) { nextTarget.dispose(); nextCoverageTarget.dispose(); return false; }
 		this.renderTarget?.dispose();
 		this.renderTarget = nextTarget;
+		this.coverageTarget?.dispose();
+		this.coverageTarget = nextCoverageTarget;
 		this.elevationTarget?.dispose();
 		this.elevationTarget = nextElevationTarget;
 		if ( this.uniforms !== null ) this.uniforms.uPortalColorTexture.value = this.renderTarget.texture;
+		if ( this.uniforms !== null ) this.uniforms.uOrthographicCoverageTexture.value = this.coverageTarget.texture;
 		this.markElevationDirty( 'render-target-resized' );
 		this.markGeometryDirty( 'proxy-matrix-changed' );
 		return true;
@@ -916,6 +937,15 @@ export class UndergroundTopPortal {
 				renderer.setViewport( 0, 0, this.renderTarget.width, this.renderTarget.height );
 				renderer.clear( true, true, true );
 				renderer.render( this.renderScene, this.camera );
+				if ( this.coverageTarget !== null ) {
+					renderer.setRenderTarget( this.coverageTarget );
+					renderer.setViewport( 0, 0, this.coverageTarget.width, this.coverageTarget.height );
+					renderer.clear( true, true, true );
+					this.renderScene.overrideMaterial = this.coverageMaterial;
+					renderer.render( this.renderScene, this.camera );
+					this.renderScene.overrideMaterial = previousOverrideMaterial;
+				}
+				this.sampleOffscreenTargets( renderer );
 			}
 			this.renderElevation( renderer );
 			this.contentDirty = false;
@@ -939,6 +969,28 @@ export class UndergroundTopPortal {
 			renderer.setScissorTest( previousScissorTest );
 			this.renderScene.overrideMaterial = previousOverrideMaterial;
 		}
+
+	}
+
+	private sampleOffscreenTargets(renderer: THREE.WebGLRenderer): void {
+
+		if ( isArDebugEnabled() === false || this.renderTarget === null || this.coverageTarget === null ) return;
+		const pixelCount = this.renderTarget.width * this.renderTarget.height;
+		const colorPixels = new Uint8Array( pixelCount * 4 );
+		const coveragePixels = new Uint8Array( pixelCount * 4 );
+		renderer.readRenderTargetPixels( this.renderTarget, 0, 0, this.renderTarget.width, this.renderTarget.height, colorPixels );
+		renderer.readRenderTargetPixels( this.coverageTarget, 0, 0, this.coverageTarget.width, this.coverageTarget.height, coveragePixels );
+		let colorNonZero = 0, colorAlpha = 0, mask = 0;
+		for ( let index = 0; index < pixelCount; index += 1 ) {
+			const offset = index * 4;
+			if ( colorPixels[ offset ] !== 0 || colorPixels[ offset + 1 ] !== 0 || colorPixels[ offset + 2 ] !== 0 ) colorNonZero += 1;
+			if ( colorPixels[ offset + 3 ] !== 0 ) colorAlpha += 1;
+			if ( coveragePixels[ offset ] !== 0 ) mask += 1;
+		}
+		this.colorNonZeroPixelCount = colorNonZero;
+		this.colorAlphaPixelCount = colorAlpha;
+		this.maskPixelCount = mask;
+		this.renderTargetPixelSampleCount = pixelCount;
 
 	}
 
@@ -1058,6 +1110,21 @@ export class UndergroundTopPortal {
 			orthographicZoom: this.camera.zoom,
 			cameraNear: this.camera.near,
 			cameraFar: this.camera.far,
+			orthographicDebugMode: ORTHOGRAPHIC_DEBUG_MODE,
+			offscreenVisibleMeshCount: this.countVisibleRenderableMeshes(),
+			offscreenRenderableMeshCount: this.countStructuralRenderableMeshes(),
+			orthographicModelNdcBounds: proxyNdc === null ? 'none' : JSON.stringify( proxyNdc ),
+			orthographicModelIntersectsFrustum: proxyNdc !== null && !( proxyNdc.right < -1 || proxyNdc.left > 1 || proxyNdc.top < -1 || proxyNdc.bottom > 1 ),
+			orthographicCameraPosition: JSON.stringify( vectorToObject( this.camera.position ) ),
+			orthographicCameraTarget: JSON.stringify( vectorToObject( this.overlayWorldCenter ) ),
+			coverageRenderTarget: this.coverageTarget === null ? 'none' : `${this.coverageTarget.width}x${this.coverageTarget.height}`,
+			colorNonZeroPixelCount: this.colorNonZeroPixelCount,
+			colorNonZeroPixelRatio: this.renderTargetPixelSampleCount === 0 ? 0 : this.colorNonZeroPixelCount / this.renderTargetPixelSampleCount,
+			colorAlphaPixelCount: this.colorAlphaPixelCount,
+			colorAlphaCoverageRatio: this.renderTargetPixelSampleCount === 0 ? 0 : this.colorAlphaPixelCount / this.renderTargetPixelSampleCount,
+			maskPixelCount: this.maskPixelCount,
+			maskCoverageRatio: this.renderTargetPixelSampleCount === 0 ? 0 : this.maskPixelCount / this.renderTargetPixelSampleCount,
+			renderTargetPixelSampleCount: this.renderTargetPixelSampleCount,
 			cpuDepthOcclusionEnabled: this.cpuDepthDiagnostics.enabled,
 			depthFrameAvailable: this.cpuDepthDiagnostics.available,
 			depthFrameStale: this.cpuDepthDiagnostics.stale,
@@ -1297,17 +1364,17 @@ function readPortalNumber(name: string, fallback: number): number {
 
 }
 
-function readPortalColor(name: string, fallback: number): number {
-
-	if ( typeof window === 'undefined' ) return fallback;
-	const value = new URLSearchParams( window.location.search ).get( name )?.replace( '#', '' ) ?? '';
-	return /^[0-9a-fA-F]{6}$/.test( value ) ? Number.parseInt( value, 16 ) : fallback;
-
-}
-
 function readPortalFlag(name: string): boolean {
 
 	return typeof window !== 'undefined' && new URLSearchParams( window.location.search ).get( name ) === '1';
+
+}
+
+function readOrthographicDebugMode(): 'color' | 'mask' | 'composite' {
+
+	if ( typeof window === 'undefined' ) return 'composite';
+	const mode = new URLSearchParams( window.location.search ).get( 'orthographicDebug' );
+	return mode === 'color' || mode === 'mask' ? mode : 'composite';
 
 }
 
