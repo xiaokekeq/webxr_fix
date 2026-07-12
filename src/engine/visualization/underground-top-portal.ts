@@ -168,6 +168,7 @@ export class UndergroundTopPortal {
 	private lastFrameError = '';
 	private state: PortalState = 'idle';
 	private failureReason = '';
+	private waitingReason = '';
 	private attemptId = 0;
 
 	constructor(private readonly scene: THREE.Scene) {
@@ -182,11 +183,10 @@ export class UndergroundTopPortal {
 	update(args: {
 		renderer: THREE.WebGLRenderer;
 		mainCamera: THREE.Camera;
-		model: THREE.Object3D | null;
+		model: THREE.Object3D;
 		footprintCorners: THREE.Vector3[];
 		depthFrame: CpuDepthFrame;
 		enabled: boolean;
-		modelUnavailableReason?: string;
 	}): PortalState {
 
 		if ( args.enabled === false ) {
@@ -200,9 +200,7 @@ export class UndergroundTopPortal {
 		}
 		const corners = validateAndOrderCorners( args.footprintCorners );
 		if ( corners.ok === false ) return this.fail( corners.reason );
-		if ( args.model === null && PORTAL_DEBUG_MODE !== 'surface' ) return this.fail( args.modelUnavailableReason ?? 'missing-model' );
-
-		if ( args.model !== null ) this.bindSourceModel( args.model );
+		this.bindSourceModel( args.model );
 		if ( PORTAL_DEBUG_MODE === 'surface' ) this.proxyState = 'not-required';
 		if ( PORTAL_DEBUG_MODE !== 'surface' ) {
 			if ( this.countRenderableMeshes( this.sourceModel, false ) === 0 ) return this.fail( 'no-renderable-model-structure' );
@@ -210,7 +208,7 @@ export class UndergroundTopPortal {
 			if ( proxyFailure !== null ) return this.fail( proxyFailure );
 		}
 		this.updateGeometry( args.renderer, corners.value );
-		if ( args.model !== null ) this.syncModelMatrix();
+		this.syncModelMatrix();
 		if ( this.ensureSurface() === false && PORTAL_DEBUG_MODE !== 'surface' ) {
 			return this.fail( this.renderTarget === null ? 'render-target-unavailable' : 'surface-unavailable' );
 		}
@@ -272,6 +270,23 @@ export class UndergroundTopPortal {
 
 	}
 
+	setWaiting(reason: string): void {
+
+		this.restoreSourceVisibility();
+		if ( this.surface !== null ) this.surface.visible = false;
+		this.failureReason = '';
+		this.waitingReason = reason;
+		this.setState( 'initializing' );
+
+	}
+
+	setPrerequisiteFailure(reason: string): PortalState {
+
+		if ( this.state === 'failed' && this.failureReason === reason ) return 'failed';
+		return this.fail( reason );
+
+	}
+
 	reset(): void {
 
 		this.restoreSourceVisibility();
@@ -315,6 +330,7 @@ export class UndergroundTopPortal {
 		if ( this.state !== state && isArDebugEnabled() ) console.info( '[PortalLifecycle]', { state, failureReason: this.failureReason || 'none', attemptId: this.attemptId } );
 		this.state = state;
 		if ( state !== 'failed' ) this.failureReason = '';
+		if ( state !== 'initializing' ) this.waitingReason = '';
 		return state;
 
 	}
@@ -688,6 +704,7 @@ export class UndergroundTopPortal {
 		return {
 			portalState: this.state,
 			portalFailureReason: this.failureReason || 'none',
+			portalWaitingReason: this.waitingReason || 'none',
 			lastPortalAttemptId: this.attemptId,
 			debugMode: PORTAL_DEBUG_MODE,
 			surfaceVisible: this.surface?.visible === true,

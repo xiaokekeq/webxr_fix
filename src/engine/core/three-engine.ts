@@ -161,6 +161,23 @@ interface PortalModelScope {
 	failureReason: 'model-not-placed' | 'not-underground' | null;
 }
 
+interface PortalActivationSnapshot {
+	attemptId: number;
+	sessionId: string | null;
+	placementRevision: number;
+	footprintRevision: number;
+	timestamp: number;
+	state: 'waiting' | 'ready' | 'failed';
+	reason: string | null;
+	modelScopeSource: PortalModelScope['source'];
+	placedRoot: THREE.Object3D | null;
+	undergroundRoot: THREE.Object3D | null;
+	configuredControlPointCount: number;
+	modelLocalCornerCount: number;
+	transformedCornerCount: number;
+	worldCorners: readonly THREE.Vector3[];
+}
+
 export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
@@ -321,8 +338,10 @@ export class ThreeEngine {
 	private requestedUndergroundViewMode: UndergroundViewMode = DEFAULT_UNDERGROUND_DISPLAY_STATE.undergroundViewMode;
 	private portalClickPreviousEffectiveMode: UndergroundViewMode | null = null;
 	private pendingPortalResult: ((result: UndergroundViewChangeResult) => void) | null = null;
-	private readonly footprintCornersAr = [ new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3() ];
-	private readonly emptyFootprintCorners: THREE.Vector3[] = [];
+	private portalActivationAttemptId = 0;
+	private placementRevision = 0;
+	private lastPlacementRootUuid: string | null = null;
+	private lastPortalActivationSnapshot: PortalActivationSnapshot | null = null;
 	private readonly frameTaskErrorCounts = new Map<string, number>();
 	private readonly frameTaskLastErrorLogAt = new Map<string, number>();
 	private workflowMode: ArWorkflowMode = 'ar-inspection';
@@ -376,8 +395,8 @@ export class ThreeEngine {
 		this.portalUpdateArgs = {
 			renderer: this.sceneBundle.renderer,
 			mainCamera: this.sceneBundle.renderer.xr.getCamera(),
-			model: null,
-			footprintCorners: this.emptyFootprintCorners,
+			model: this.sceneBundle.scene,
+			footprintCorners: [],
 			depthFrame: this.realDepthProvider.getCurrentFrame(),
 			enabled: false
 		};
@@ -835,19 +854,35 @@ export class ThreeEngine {
 
 		const state = this.store.getState();
 		const scope = this.resolveActiveEngineeringModelScope();
+		const attempt = this.lastPortalActivationSnapshot;
 		return {
 			...state,
 			hasSelection: hasSelectedPipe( state ),
 			currentStatus: this.currentStatus,
 			portalDiagnostics: {
 				...this.undergroundPortal.getDiagnostics(),
-				modelScopeSource: scope.source,
-				modelScopeFailureReason: scope.failureReason ?? 'none',
-				placedModelExists: scope.placedRoot !== null,
-				undergroundRootExists: scope.undergroundRoot !== null,
-				placedModelUuid: scope.placedRoot?.uuid ?? 'none',
-				undergroundRootUuid: scope.undergroundRoot?.uuid ?? 'none',
-				undergroundRootParentPath: getObjectParentPath( scope.undergroundRoot )
+				attemptId: attempt?.attemptId ?? 0,
+				attemptSessionId: attempt?.sessionId ?? 'none',
+				attemptPrerequisiteState: attempt?.state ?? 'none',
+				attemptPrerequisiteReason: attempt?.reason ?? 'none',
+				attemptPlacementRevision: attempt?.placementRevision ?? 0,
+				attemptFootprintRevision: attempt?.footprintRevision ?? 0,
+				attemptModelScopeSource: attempt?.modelScopeSource ?? 'none',
+				attemptPlacedModelExists: attempt?.placedRoot !== null,
+				attemptUndergroundRootExists: attempt?.undergroundRoot !== null,
+				attemptModelUuid: attempt?.undergroundRoot?.uuid ?? 'none',
+				configuredControlPointCount: attempt?.configuredControlPointCount ?? 0,
+				modelLocalCornerCount: attempt?.modelLocalCornerCount ?? 0,
+				transformedCornerCount: attempt?.transformedCornerCount ?? 0,
+				pendingPortalRequest: this.pendingPortalResult !== null,
+				currentPlacementRevision: this.placementRevision,
+				currentModelScopeSource: scope.source,
+				currentModelScopeFailureReason: scope.failureReason ?? 'none',
+				currentPlacedModelExists: scope.placedRoot !== null,
+				currentUndergroundRootExists: scope.undergroundRoot !== null,
+				currentPlacedModelUuid: scope.placedRoot?.uuid ?? 'none',
+				currentUndergroundRootUuid: scope.undergroundRoot?.uuid ?? 'none',
+				currentUndergroundRootParentPath: getObjectParentPath( scope.undergroundRoot )
 			}
 		};
 
@@ -1001,6 +1036,7 @@ export class ThreeEngine {
 		this.pendingPortalResult?.( this.createUndergroundViewResult( false, 'superseded' ) );
 		this.pendingPortalResult = null;
 		if ( mode === 'portal' ) {
+			this.portalActivationAttemptId += 1;
 			this.portalFallbackReported = false;
 			this.portalClickPreviousEffectiveMode = this.store.getState().undergroundViewMode;
 			this.undergroundPortal.beginAttempt();
@@ -3905,13 +3941,32 @@ export class ThreeEngine {
 	private updateUndergroundPortal(): void {
 		const depthFrame = this.realDepthProvider.getCurrentFrame();
 		const args = this.portalUpdateArgs!;
-		const scope = this.resolveActiveEngineeringModelScope();
+		if ( this.requestedUndergroundViewMode !== 'portal' ) {
+			args.enabled = false;
+			this.undergroundPortal.update( args );
+			return;
+		}
+		const snapshot = this.resolvePortalActivationSnapshot();
+		if (
+			this.lastPortalActivationSnapshot === null
+			|| this.lastPortalActivationSnapshot.attemptId !== snapshot.attemptId
+			|| ( this.lastPortalActivationSnapshot.state === 'waiting' && snapshot.state !== 'waiting' )
+		) this.lastPortalActivationSnapshot = snapshot;
+		if ( snapshot.state === 'waiting' ) {
+			this.undergroundPortal.setWaiting( snapshot.reason ?? 'waiting-for-placement' );
+			this.logPortalDiagnostics( depthFrame );
+			return;
+		}
+		if ( snapshot.state === 'failed' ) {
+			this.handleTerminalPortalFailure( snapshot.reason ?? 'portal-prerequisite-failed' );
+			this.logPortalDiagnostics( depthFrame );
+			return;
+		}
 		args.mainCamera = this.sceneBundle.renderer.xr.getCamera();
-		args.model = scope.undergroundRoot;
-		args.footprintCorners = this.getPortalFootprintCornersAr();
+		args.model = snapshot.undergroundRoot!;
+		args.footprintCorners = [ ...snapshot.worldCorners ];
 		args.depthFrame = depthFrame;
-		args.enabled = this.requestedUndergroundViewMode === 'portal';
-		args.modelUnavailableReason = scope.failureReason ?? 'missing-model';
+		args.enabled = true;
 		const portalStatus = this.undergroundPortal.update( args );
 		if ( portalStatus === 'ready' ) {
 			this.portalFallbackReported = false;
@@ -3920,17 +3975,22 @@ export class ThreeEngine {
 			this.pendingPortalResult?.( this.createUndergroundViewResult( true ) );
 			this.pendingPortalResult = null;
 		}
-		if ( portalStatus === 'failed' && this.portalFallbackReported === false ) {
-			this.portalFallbackReported = true;
-			this.store.patch( { undergroundViewMode: 'real-space', undergroundMaterialMode: 'xray' } );
-			const reason = String( this.undergroundPortal.getDiagnostics().portalFailureReason );
-			this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
-			this.logPortalClickResult();
-			if ( import.meta.env.DEV ) console.assert( isEffectivelyVisible( this.resolveActiveEngineeringModelScope().undergroundRoot ), 'Portal fallback must restore effective underground model visibility.' );
-			this.pendingPortalResult?.( this.createUndergroundViewResult( false ) );
-			this.pendingPortalResult = null;
-		}
+		if ( portalStatus === 'failed' ) this.handleTerminalPortalFailure( String( this.undergroundPortal.getDiagnostics().portalFailureReason ) );
 		this.logPortalDiagnostics( depthFrame );
+
+	}
+
+	private handleTerminalPortalFailure(reason: string): void {
+
+		this.undergroundPortal.setPrerequisiteFailure( reason );
+		if ( this.portalFallbackReported ) return;
+		this.portalFallbackReported = true;
+		this.store.patch( { undergroundViewMode: 'real-space', undergroundMaterialMode: 'xray' } );
+		this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
+		this.logPortalClickResult();
+		if ( import.meta.env.DEV ) console.assert( isEffectivelyVisible( this.resolveActiveEngineeringModelScope().undergroundRoot ), 'Portal fallback must restore effective underground model visibility.' );
+		this.pendingPortalResult?.( this.createUndergroundViewResult( false, reason ) );
+		this.pendingPortalResult = null;
 
 	}
 
@@ -3950,17 +4010,39 @@ export class ThreeEngine {
 
 	}
 
-	private getPortalFootprintCornersAr(): THREE.Vector3[] {
+	private resolvePortalActivationSnapshot(): PortalActivationSnapshot {
 
-		const undergroundRoot = this.resolveActiveEngineeringModelScope().undergroundRoot;
-		if ( this.registrationSolution === null || undergroundRoot === null || this.registrationSolution.controlPoints.length < 4 ) return this.emptyFootprintCorners;
-		undergroundRoot.updateMatrixWorld( true );
-		for ( let index = 0; index < 4; index += 1 ) {
-			this.footprintCornersAr[ index ]
-				.copy( this.registrationSolution.controlPoints[ index ].modelLocal )
-				.applyMatrix4( undergroundRoot.matrixWorld );
+		const scope = this.resolveActiveEngineeringModelScope();
+		if ( scope.placedRoot?.uuid !== this.lastPlacementRootUuid ) {
+			this.lastPlacementRootUuid = scope.placedRoot?.uuid ?? null;
+			this.placementRevision += 1;
 		}
-		return this.footprintCornersAr;
+		const base = {
+			attemptId: this.portalActivationAttemptId,
+			sessionId: this.currentArSessionId,
+			placementRevision: this.placementRevision,
+			footprintRevision: this.placementRevision,
+			timestamp: Date.now(),
+			modelScopeSource: scope.source,
+			placedRoot: scope.placedRoot,
+			undergroundRoot: scope.undergroundRoot,
+			configuredControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
+			modelLocalCornerCount: 0,
+			transformedCornerCount: 0,
+			worldCorners: [] as readonly THREE.Vector3[]
+		};
+		if ( scope.placedRoot === null ) return { ...base, state: 'waiting', reason: 'waiting-for-placement' };
+		if ( scope.undergroundRoot === null ) return { ...base, state: 'failed', reason: scope.failureReason ?? 'not-underground' };
+		const controlPoints = this.registrationSolution?.controlPoints;
+		if ( controlPoints === undefined || controlPoints.length < 4 ) return { ...base, state: 'failed', reason: 'portal-footprint-config-missing' };
+		const modelLocalCorners = controlPoints.slice( 0, 4 ).map( ( point ) => point.modelLocal ).filter( ( point ) => point !== undefined && Number.isFinite( point.x ) && Number.isFinite( point.y ) && Number.isFinite( point.z ) );
+		if ( modelLocalCorners.length !== 4 ) return { ...base, state: 'failed', reason: 'portal-footprint-model-local-missing', modelLocalCornerCount: modelLocalCorners.length };
+		scope.undergroundRoot.updateMatrixWorld( true );
+		const worldCorners = modelLocalCorners.map( ( point ) => point.clone().applyMatrix4( scope.undergroundRoot!.matrixWorld ) );
+		if ( worldCorners.some( ( point ) => Number.isFinite( point.x ) === false || Number.isFinite( point.y ) === false || Number.isFinite( point.z ) === false ) ) {
+			return { ...base, state: 'failed', reason: 'portal-footprint-invalid', modelLocalCornerCount: 4, transformedCornerCount: worldCorners.length };
+		}
+		return { ...base, state: 'ready', reason: null, modelLocalCornerCount: 4, transformedCornerCount: worldCorners.length, worldCorners };
 
 	}
 
@@ -4025,6 +4107,9 @@ export class ThreeEngine {
 		if ( result.depthGranted ) this.realDepthProvider.initialize( result.session );
 		else this.realDepthProvider.dispose();
 		this.sessionLifecycleRuntime.handleXRSessionStart();
+		this.placementRevision += 1;
+		this.lastPlacementRootUuid = null;
+		this.lastPortalActivationSnapshot = null;
 
 	}
 
@@ -4032,6 +4117,9 @@ export class ThreeEngine {
 
 		this.arSessionEndPending = false;
 		this.undergroundPortal.reset();
+		this.placementRevision += 1;
+		this.lastPlacementRootUuid = null;
+		this.lastPortalActivationSnapshot = null;
 		this.realDepthProvider.dispose();
 		this.arCoordinateService.clear( 'xr-session-end' );
 		this.annotationLayer.clear();
@@ -4045,6 +4133,9 @@ export class ThreeEngine {
 	private handlePlacementCompleted(): void {
 
 		this.sessionLifecycleRuntime.handlePlacementCompleted();
+		this.placementRevision += 1;
+		this.lastPlacementRootUuid = this.placementSession.getArPlacedModel()?.uuid ?? null;
+		this.undergroundPortal.markDirty();
 
 	}
 
