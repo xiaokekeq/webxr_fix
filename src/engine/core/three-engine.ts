@@ -154,8 +154,11 @@ interface EngineeringPlacementGuardResult {
 }
 
 interface PortalModelScope {
+	placedRoot: THREE.Object3D | null;
 	undergroundRoot: THREE.Object3D | null;
 	surfaceRoot: THREE.Object3D | null;
+	source: 'ar-placed-model' | 'whole-model-underground' | 'classified-subtree' | 'none';
+	failureReason: 'model-not-placed' | 'not-underground' | null;
 }
 
 export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
@@ -417,7 +420,7 @@ export class ThreeEngine {
 			layerVisibility: this.layerVisibility,
 			materialStateRuntime: this.materialStateRuntime,
 			sectionCutController: this.sectionCutController,
-			getUndergroundModelRoot: () => this.getPortalModelScope().undergroundRoot,
+			getUndergroundModelRoot: () => this.resolveActiveEngineeringModelScope().undergroundRoot,
 			syncAttachmentInfoBoardVisibility: () => {
 				this.syncAttachmentInfoBoardVisibility();
 			}
@@ -770,14 +773,14 @@ export class ThreeEngine {
 				this.safeFrameTask( 'real-depth', () => {
 					this.updateRealDepth( frame );
 				} );
-				this.safeFrameTask( 'underground-portal', () => {
-					this.updateUndergroundPortal();
-				} );
 				this.safeFrameTask( 'marker-hints', () => {
 					this.inspectionMarkerWorkflow.syncHints();
 				} );
 				this.safeFrameTask( 'placement-anchor', () => {
 					this.placementSession.updateArPlacementAnchor( frame );
+				} );
+				this.safeFrameTask( 'underground-portal', () => {
+					this.updateUndergroundPortal();
 				} );
 				this.safeFrameTask( 'session-phase', () => {
 					this.syncArSessionPhase();
@@ -831,11 +834,21 @@ export class ThreeEngine {
 	getState(): ThreeEngineSnapshot {
 
 		const state = this.store.getState();
+		const scope = this.resolveActiveEngineeringModelScope();
 		return {
 			...state,
 			hasSelection: hasSelectedPipe( state ),
 			currentStatus: this.currentStatus,
-			portalDiagnostics: this.undergroundPortal.getDiagnostics()
+			portalDiagnostics: {
+				...this.undergroundPortal.getDiagnostics(),
+				modelScopeSource: scope.source,
+				modelScopeFailureReason: scope.failureReason ?? 'none',
+				placedModelExists: scope.placedRoot !== null,
+				undergroundRootExists: scope.undergroundRoot !== null,
+				placedModelUuid: scope.placedRoot?.uuid ?? 'none',
+				undergroundRootUuid: scope.undergroundRoot?.uuid ?? 'none',
+				undergroundRootParentPath: getObjectParentPath( scope.undergroundRoot )
+			}
 		};
 
 	}
@@ -3892,11 +3905,13 @@ export class ThreeEngine {
 	private updateUndergroundPortal(): void {
 		const depthFrame = this.realDepthProvider.getCurrentFrame();
 		const args = this.portalUpdateArgs!;
+		const scope = this.resolveActiveEngineeringModelScope();
 		args.mainCamera = this.sceneBundle.renderer.xr.getCamera();
-		args.model = this.getPortalModelScope().undergroundRoot;
+		args.model = scope.undergroundRoot;
 		args.footprintCorners = this.getPortalFootprintCornersAr();
 		args.depthFrame = depthFrame;
 		args.enabled = this.requestedUndergroundViewMode === 'portal';
+		args.modelUnavailableReason = scope.failureReason ?? 'missing-model';
 		const portalStatus = this.undergroundPortal.update( args );
 		if ( portalStatus === 'ready' ) {
 			this.portalFallbackReported = false;
@@ -3911,7 +3926,7 @@ export class ThreeEngine {
 			const reason = String( this.undergroundPortal.getDiagnostics().portalFailureReason );
 			this.setStatus( `Portal 初始化失败（${reason}），已回退到真实空间透明显示。` );
 			this.logPortalClickResult();
-			if ( import.meta.env.DEV ) console.assert( isEffectivelyVisible( this.getPortalModelScope().undergroundRoot ), 'Portal fallback must restore effective underground model visibility.' );
+			if ( import.meta.env.DEV ) console.assert( isEffectivelyVisible( this.resolveActiveEngineeringModelScope().undergroundRoot ), 'Portal fallback must restore effective underground model visibility.' );
 			this.pendingPortalResult?.( this.createUndergroundViewResult( false ) );
 			this.pendingPortalResult = null;
 		}
@@ -3937,7 +3952,7 @@ export class ThreeEngine {
 
 	private getPortalFootprintCornersAr(): THREE.Vector3[] {
 
-		const undergroundRoot = this.getPortalModelScope().undergroundRoot;
+		const undergroundRoot = this.resolveActiveEngineeringModelScope().undergroundRoot;
 		if ( this.registrationSolution === null || undergroundRoot === null || this.registrationSolution.controlPoints.length < 4 ) return this.emptyFootprintCorners;
 		undergroundRoot.updateMatrixWorld( true );
 		for ( let index = 0; index < 4; index += 1 ) {
@@ -3959,7 +3974,7 @@ export class ThreeEngine {
 
 	private getActualModelControlPointCornersAr(): THREE.Vector3[] {
 
-		const undergroundRoot = this.getPortalModelScope().undergroundRoot;
+		const undergroundRoot = this.resolveActiveEngineeringModelScope().undergroundRoot;
 		if ( this.registrationSolution === null || undergroundRoot === null ) return [];
 		undergroundRoot.updateMatrixWorld( true );
 		return this.registrationSolution.controlPoints.slice( 0, 4 )
@@ -3967,19 +3982,22 @@ export class ThreeEngine {
 
 	}
 
-	private getPortalModelScope(): PortalModelScope {
+	private resolveActiveEngineeringModelScope(): PortalModelScope {
 
-		const placedModel = this.placementSession.getArPlacedModel();
+		const placedRoot = this.placementSession.getArPlacedModel();
+		if ( placedRoot === null ) return { placedRoot: null, undergroundRoot: null, surfaceRoot: null, source: 'none', failureReason: 'model-not-placed' };
 		const instance = this.demoModelConfig?.modelInstances[ 0 ];
-		if ( placedModel === null || instance === undefined ) return { undergroundRoot: null, surfaceRoot: placedModel };
-		if ( instance.verticalPlacement.groundRelation === 'underground' ) return { undergroundRoot: placedModel, surfaceRoot: null };
-		if ( instance.verticalPlacement.groundRelation !== 'mixed' ) return { undergroundRoot: null, surfaceRoot: placedModel };
-		const names = instance.groundClassification?.mode === 'node-groups'
+		const names = instance?.verticalPlacement.groundRelation === 'mixed' && instance.groundClassification?.mode === 'node-groups'
 			? instance.groundClassification.belowGroundNodes ?? []
 			: [];
-		if ( names.length !== 1 ) return { undergroundRoot: null, surfaceRoot: placedModel };
-		const undergroundRoot = placedModel.getObjectByName( names[ 0 ] ) ?? null;
-		return { undergroundRoot, surfaceRoot: placedModel };
+		if ( names.length === 1 ) {
+			const undergroundRoot = placedRoot.getObjectByName( names[ 0 ] ) ?? null;
+			if ( undergroundRoot !== null ) return { placedRoot, undergroundRoot, surfaceRoot: placedRoot, source: 'classified-subtree', failureReason: null };
+		}
+		if ( instance?.verticalPlacement.groundRelation === 'underground' || this.demoModelConfig?.undergroundPlacement?.enabled === true ) {
+			return { placedRoot, undergroundRoot: placedRoot, surfaceRoot: null, source: 'whole-model-underground', failureReason: null };
+		}
+		return { placedRoot, undergroundRoot: null, surfaceRoot: placedRoot, source: 'ar-placed-model', failureReason: 'not-underground' };
 
 	}
 
@@ -4569,6 +4587,15 @@ export class ThreeEngine {
 		};
 
 	}
+
+}
+
+function getObjectParentPath(object: THREE.Object3D | null): string {
+
+	if ( object === null ) return 'none';
+	const names: string[] = [];
+	for ( let current: THREE.Object3D | null = object; current !== null; current = current.parent ) names.push( current.name || current.type );
+	return names.reverse().join( ' / ' );
 
 }
 

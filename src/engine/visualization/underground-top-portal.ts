@@ -177,6 +177,7 @@ export class UndergroundTopPortal {
 		footprintCorners: THREE.Vector3[];
 		depthFrame: CpuDepthFrame;
 		enabled: boolean;
+		modelUnavailableReason?: string;
 	}): PortalState {
 
 		if ( args.enabled === false ) {
@@ -188,13 +189,13 @@ export class UndergroundTopPortal {
 			this.attemptId += 1;
 			this.setState( 'initializing' );
 		}
-		if ( args.model === null ) return this.fail( 'missing-model' );
 		const corners = validateAndOrderCorners( args.footprintCorners );
 		if ( corners.ok === false ) return this.fail( corners.reason );
+		if ( args.model === null && PORTAL_DEBUG_MODE !== 'surface' ) return this.fail( args.modelUnavailableReason ?? 'missing-model' );
 
-		this.setSourceModel( args.model );
+		if ( args.model !== null ) this.setSourceModel( args.model );
 		this.updateGeometry( args.renderer, corners.value );
-		this.syncModelMatrix();
+		if ( args.model !== null ) this.syncModelMatrix();
 		if ( this.ensureSurface() === false && PORTAL_DEBUG_MODE !== 'surface' ) {
 			return this.fail( this.renderTarget === null ? 'render-target-unavailable' : 'surface-unavailable' );
 		}
@@ -202,7 +203,7 @@ export class UndergroundTopPortal {
 		this.setState( 'surface-ready' );
 		syncCpuDepthOcclusionUniforms( this.uniforms!, args.depthFrame );
 		if ( PORTAL_DEBUG_MODE !== 'full' || ( isArDebugEnabled() && readPortalFlag( 'portalDisableCpuDepth' ) ) ) this.uniforms!.uDepthOcclusionEnabled.value = false;
-		this.sourceModel!.visible = false;
+		if ( this.sourceModel !== null ) this.sourceModel.visible = false;
 		this.surface!.visible = true;
 		if ( this.portalDirty ) {
 			this.syncRenderModelState();
@@ -725,7 +726,7 @@ function readPortalFlag(name: string): boolean {
 
 function readPortalDebugMode(): 'surface' | 'texture' | 'full' {
 
-	if ( import.meta.env.DEV === false || typeof window === 'undefined' ) return 'full';
+	if ( typeof window === 'undefined' ) return 'full';
 	const mode = new URLSearchParams( window.location.search ).get( 'portalDebug' );
 	return mode === 'surface' || mode === 'texture' ? mode : 'full';
 
