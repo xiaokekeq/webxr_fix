@@ -16,13 +16,13 @@ const PORTAL_MAX_RESOLUTION = 1024;
 const PORTAL_MIN_RESOLUTION = 384;
 const PORTAL_FOREGROUND_THRESHOLD_METERS = readPortalNumber( 'portalThreshold', 0.05 );
 const PORTAL_DEPTH_FEATHER_METERS = readPortalNumber( 'portalFeather', 0.025 );
-const PORTAL_BACKGROUND_ALPHA = THREE.MathUtils.clamp( readPortalNumber( 'portalBackgroundAlpha', 0.9 ), 0.85, 1 );
-const PORTAL_BACKGROUND_COLOR = new THREE.Color( readPortalColor( 'portalBackgroundColor', 0x06101a ) );
 const PORTAL_DEBUG_MODE = readPortalDebugMode();
 const PORTAL_ELEVATION_LAYER = 31;
 const PORTAL_ELEVATION_STYLE = { shallowColor: new THREE.Color( 0xffb35c ), deepColor: new THREE.Color( 0x2467b3 ), overlayOpacity: 0.35, contourOpacity: 0.75, contourIntervalMeters: 0.25, contourWidthMeters: 0.02 };
 const PORTAL_ELEVATION_RANGE_EPSILON = 0.001;
 const PORTAL_MATRIX_EPSILON = 1e-6;
+const ORTHOGRAPHIC_OVERLAY_PADDING = 0.04;
+const ORTHOGRAPHIC_ELEVATION_DEBUG = readPortalFlag( 'orthographicElevationDebug' );
 
 export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
 type GeometryCalibrationState = 'dirty' | 'calibrating' | 'ready' | 'failed';
@@ -49,7 +49,6 @@ precision highp float;
 precision highp int;
 
 uniform sampler2D uPortalColorTexture;
-uniform sampler2D uPortalElevationTexture;
 uniform bool uDepthOcclusionEnabled;
 uniform highp usampler2D uRealDepthTexture;
 uniform float uRawValueToMeters;
@@ -57,8 +56,6 @@ uniform mat4 uNormDepthBufferFromNormView;
 uniform ivec2 uDepthTextureSize;
 uniform float uForegroundThresholdMeters;
 uniform float uDepthFeatherMeters;
-uniform float uPortalBackgroundAlpha;
-uniform vec3 uPortalBackgroundColor;
 uniform int uDebugMode;
 
 in vec2 vPortalUv;
@@ -115,12 +112,9 @@ void main() {
     return;
   }
   vec4 portalColor = texture(uPortalColorTexture, vPortalUv);
-  vec4 elevationOverlay = texture(uPortalElevationTexture, vPortalUv);
-  vec3 portalBackground = uPortalBackgroundColor;
-  vec3 modelColor = mix(portalColor.rgb, elevationOverlay.rgb, elevationOverlay.a);
-  vec3 visibleColor = mix(portalBackground, modelColor, portalColor.a);
-  float baseAlpha = mix(uPortalBackgroundAlpha, 1.0, portalColor.a);
-  float finalAlpha = baseAlpha * (uDebugMode == 2 ? 1.0 : 1.0 - foregroundMask());
+  if (portalColor.a <= 0.001) discard;
+  vec3 visibleColor = portalColor.rgb;
+  float finalAlpha = portalColor.a * (uDebugMode == 2 ? 1.0 : 1.0 - foregroundMask());
   if (finalAlpha < 0.01) discard;
   outColor = vec4(visibleColor, finalAlpha);
 }`;
@@ -180,6 +174,16 @@ export class UndergroundTopPortal {
 	private readonly bounds = new THREE.Box3();
 	private readonly boundsSize = new THREE.Vector3();
 	private readonly boundsCenter = new THREE.Vector3();
+	private readonly overlayWorldCenter = new THREE.Vector3();
+	private overlayWorldCorners: THREE.Vector3[] = [];
+	private modelPlanMinU = 0;
+	private modelPlanMaxU = 0;
+	private modelPlanMinV = 0;
+	private modelPlanMaxV = 0;
+	private modelPlanMinHeight = 0;
+	private modelPlanMaxHeight = 0;
+	private overlayRenderableMeshCount = 0;
+	private overlayPlanDirty = true;
 	private readonly cornerValues = new Float32Array( 24 );
 	private readonly surfaceTargetCornerValues = new Float32Array( 12 );
 	private readonly modelMatrixValues = new Float32Array( 16 );
@@ -210,11 +214,8 @@ export class UndergroundTopPortal {
 	private lastElevationRedrawTimestamp = 0;
 	private uniforms: CpuDepthOcclusionUniforms & {
 		uPortalColorTexture: { value: THREE.Texture | null };
-		uPortalElevationTexture: { value: THREE.Texture | null };
 		uForegroundThresholdMeters: { value: number };
 		uDepthFeatherMeters: { value: number };
-		uPortalBackgroundAlpha: { value: number };
-		uPortalBackgroundColor: { value: THREE.Color };
 		uDebugMode: { value: number };
 	} | null = null;
 	private portalDirty = true;
@@ -289,6 +290,8 @@ export class UndergroundTopPortal {
 		const geometryFailure = this.updateGeometry( args.renderer, sourceCorners.value, targetCorners.value, args.surfaceUpNormal );
 		if ( geometryFailure !== null ) return this.fail( geometryFailure );
 		this.syncModelMatrix();
+		const overlayFailure = this.fitOrthographicOverlayToModel( args.renderer );
+		if ( overlayFailure !== null ) return this.fail( overlayFailure );
 		if ( this.ensureSurface() === false && PORTAL_DEBUG_MODE !== 'surface' ) {
 			return this.fail( 'surface-unavailable' );
 		}
@@ -623,6 +626,7 @@ export class UndergroundTopPortal {
 		this.commitCornerCache( sourceCorners, targetCorners );
 		this.commitSurfaceTargetCorners( [ p0, p1, p2, p3 ] );
 		this.geometryCalibrationState = 'ready';
+		this.overlayPlanDirty = true;
 		this.markGeometryDirty( 'geometry-changed' );
 		return null;
 
@@ -632,11 +636,8 @@ export class UndergroundTopPortal {
 
 		this.uniforms = Object.assign( createCpuDepthOcclusionUniforms(), {
 			uPortalColorTexture: { value: this.renderTarget?.texture ?? null },
-			uPortalElevationTexture: { value: this.elevationTarget?.texture ?? null },
 			uForegroundThresholdMeters: { value: PORTAL_FOREGROUND_THRESHOLD_METERS },
 			uDepthFeatherMeters: { value: PORTAL_DEPTH_FEATHER_METERS },
-			uPortalBackgroundAlpha: { value: PORTAL_BACKGROUND_ALPHA },
-			uPortalBackgroundColor: { value: PORTAL_BACKGROUND_COLOR },
 			uDebugMode: { value: PORTAL_DEBUG_MODE === 'surface' ? 1 : PORTAL_DEBUG_MODE === 'texture' ? 2 : 0 }
 		} );
 		return new THREE.ShaderMaterial( {
@@ -697,7 +698,6 @@ export class UndergroundTopPortal {
 		this.elevationTarget?.dispose();
 		this.elevationTarget = nextElevationTarget;
 		if ( this.uniforms !== null ) this.uniforms.uPortalColorTexture.value = this.renderTarget.texture;
-		if ( this.uniforms !== null ) this.uniforms.uPortalElevationTexture.value = this.elevationTarget.texture;
 		this.markElevationDirty( 'render-target-resized' );
 		this.markGeometryDirty( 'proxy-matrix-changed' );
 		return true;
@@ -742,10 +742,63 @@ export class UndergroundTopPortal {
 		this.bounds.setFromObject( this.renderModel );
 		this.bounds.getSize( this.boundsSize );
 		this.bounds.getCenter( this.boundsCenter );
-		this.camera.far = Math.max( 50, this.camera.position.distanceTo( this.boundsCenter ) + this.boundsSize.length() + 10 );
-		this.camera.updateProjectionMatrix();
+		this.overlayPlanDirty = true;
 		this.portalDirty = true;
 		this.markContentDirty();
+
+	}
+
+	private fitOrthographicOverlayToModel(renderer: THREE.WebGLRenderer): string | null {
+
+		if ( this.overlayPlanDirty === false || this.renderModel === null || this.surface === null ) return null;
+		this.renderModel.updateMatrixWorld( true );
+		let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity, minHeight = Infinity, maxHeight = -Infinity, meshCount = 0;
+		const corner = new THREE.Vector3();
+		this.renderModel.traverse( ( object ) => {
+			if ( isRenderablePortalMesh( object ) === false ) return;
+			object.geometry.computeBoundingBox();
+			const box = object.geometry.boundingBox;
+			if ( box === null || box.isEmpty() ) return;
+			meshCount += 1;
+			for ( const x of [ box.min.x, box.max.x ] ) for ( const y of [ box.min.y, box.max.y ] ) for ( const z of [ box.min.z, box.max.z ] ) {
+				corner.set( x, y, z ).applyMatrix4( object.matrixWorld );
+				const u = corner.dot( this.axisU ), v = corner.dot( this.axisV ), height = corner.dot( this.surfaceUpNormal );
+				minU = Math.min( minU, u ); maxU = Math.max( maxU, u );
+				minV = Math.min( minV, v ); maxV = Math.max( maxV, v );
+				minHeight = Math.min( minHeight, height ); maxHeight = Math.max( maxHeight, height );
+			}
+		} );
+		const width = maxU - minU, height = maxV - minV;
+		if ( meshCount === 0 || Number.isFinite( width ) === false || Number.isFinite( height ) === false || width <= 1e-5 || height <= 1e-5 ) return 'orthographic-overlay-model-bounds-invalid';
+		if ( this.resizeRenderTarget( renderer, width, height ) === false ) return 'render-target-unavailable';
+		const paddedWidth = width * ( 1 + ORTHOGRAPHIC_OVERLAY_PADDING * 2 );
+		const paddedHeight = height * ( 1 + ORTHOGRAPHIC_OVERLAY_PADDING * 2 );
+		const surfaceHeight = this.targetSurfacePlaneCenter.dot( this.surfaceUpNormal );
+		const centerU = ( minU + maxU ) * 0.5, centerV = ( minV + maxV ) * 0.5;
+		this.overlayWorldCenter.copy( this.axisU ).multiplyScalar( centerU ).addScaledVector( this.axisV, centerV ).addScaledVector( this.surfaceUpNormal, surfaceHeight );
+		const halfU = paddedWidth * 0.5, halfV = paddedHeight * 0.5;
+		this.overlayWorldCorners = [
+			this.overlayWorldCenter.clone().addScaledVector( this.axisU, -halfU ).addScaledVector( this.axisV, -halfV ),
+			this.overlayWorldCenter.clone().addScaledVector( this.axisU, halfU ).addScaledVector( this.axisV, -halfV ),
+			this.overlayWorldCenter.clone().addScaledVector( this.axisU, halfU ).addScaledVector( this.axisV, halfV ),
+			this.overlayWorldCenter.clone().addScaledVector( this.axisU, -halfU ).addScaledVector( this.axisV, halfV )
+		].map( ( point ) => point.addScaledVector( this.surfaceUpNormal, PORTAL_SURFACE_LIFT_METERS ) );
+		const depth = Math.max( maxHeight - minHeight, 0.01 );
+		this.camera.left = -halfU; this.camera.right = halfU; this.camera.bottom = -halfV; this.camera.top = halfV; this.camera.zoom = 1;
+		this.camera.up.copy( this.axisV );
+		this.camera.position.copy( this.overlayWorldCenter ).addScaledVector( this.surfaceUpNormal, Math.max( 1, maxHeight - surfaceHeight + depth ) );
+		this.camera.near = 0.01; this.camera.far = this.camera.position.distanceTo( this.overlayWorldCenter ) + depth * 2 + 1;
+		this.camera.lookAt( this.overlayWorldCenter ); this.camera.updateProjectionMatrix(); this.camera.updateMatrixWorld( true );
+		const geometry = new THREE.BufferGeometry();
+		const [ p0, p1, p2, p3 ] = this.overlayWorldCorners;
+		geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [ p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p0.x, p0.y, p0.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z ], 3 ) );
+		geometry.setAttribute( 'uv', new THREE.Float32BufferAttribute( [ 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1 ], 2 ) );
+		this.surface.geometry.dispose(); this.surface.geometry = geometry;
+		this.modelPlanMinU = minU; this.modelPlanMaxU = maxU; this.modelPlanMinV = minV; this.modelPlanMaxV = maxV;
+		this.modelPlanMinHeight = minHeight; this.modelPlanMaxHeight = maxHeight; this.overlayRenderableMeshCount = meshCount;
+		this.overlayPlanDirty = false;
+		this.portalDirty = true; this.markContentDirty();
+		return null;
 
 	}
 
@@ -891,6 +944,7 @@ export class UndergroundTopPortal {
 
 	private renderElevation(renderer: THREE.WebGLRenderer): void {
 
+		if ( ORTHOGRAPHIC_ELEVATION_DEBUG === false ) { this.elevationDirty = false; return; }
 		if ( this.elevationTarget === null || this.renderModel === null || this.elevationDirty === false ) return;
 		this.elevationRange = getPortalElevationRange( this.renderModel, this.targetSurfacePlaneCenter, this.surfaceUpNormal );
 		const material = this.ensureElevationMaterial();
@@ -980,8 +1034,30 @@ export class UndergroundTopPortal {
 			msaaSamples: this.renderTarget?.samples ?? 0,
 			foregroundThresholdMeters: PORTAL_FOREGROUND_THRESHOLD_METERS,
 			depthFeatherMeters: PORTAL_DEPTH_FEATHER_METERS,
-			portalBackgroundAlpha: PORTAL_BACKGROUND_ALPHA,
-			portalBackgroundColor: `#${PORTAL_BACKGROUND_COLOR.getHexString()}`,
+			orthographicOverlayEnabled: true,
+			orthographicOverlayTransparentBackground: true,
+			orthographicOverlayPadding: ORTHOGRAPHIC_OVERLAY_PADDING,
+			orthographicElevationDebug: ORTHOGRAPHIC_ELEVATION_DEBUG,
+			modelPlanMinU: this.modelPlanMinU,
+			modelPlanMaxU: this.modelPlanMaxU,
+			modelPlanMinV: this.modelPlanMinV,
+			modelPlanMaxV: this.modelPlanMaxV,
+			modelPlanWidth: this.modelPlanMaxU - this.modelPlanMinU,
+			modelPlanHeight: this.modelPlanMaxV - this.modelPlanMinV,
+			modelViewportCoverageX: 1 / ( 1 + ORTHOGRAPHIC_OVERLAY_PADDING * 2 ),
+			modelViewportCoverageY: 1 / ( 1 + ORTHOGRAPHIC_OVERLAY_PADDING * 2 ),
+			modelPlanMinHeight: this.modelPlanMinHeight,
+			modelPlanMaxHeight: this.modelPlanMaxHeight,
+			overlayRenderableMeshCount: this.overlayRenderableMeshCount,
+			overlayWorldCenter: JSON.stringify( vectorToObject( this.overlayWorldCenter ) ),
+			overlayWorldCorners: JSON.stringify( this.overlayWorldCorners.map( vectorToObject ) ),
+			orthographicLeft: this.camera.left,
+			orthographicRight: this.camera.right,
+			orthographicTop: this.camera.top,
+			orthographicBottom: this.camera.bottom,
+			orthographicZoom: this.camera.zoom,
+			cameraNear: this.camera.near,
+			cameraFar: this.camera.far,
 			cpuDepthOcclusionEnabled: this.cpuDepthDiagnostics.enabled,
 			depthFrameAvailable: this.cpuDepthDiagnostics.available,
 			depthFrameStale: this.cpuDepthDiagnostics.stale,
@@ -1002,7 +1078,7 @@ export class UndergroundTopPortal {
 			expectedSourceCornerNdc: JSON.stringify( [ [ -1, -1 ], [ 1, -1 ], [ 1, 1 ], [ -1, 1 ] ] ),
 			renderTargetCreationAttemptCount: this.renderTargetCreationAttemptCount,
 			lastRenderTargetCreationError: this.lastRenderTargetCreationError || 'none',
-			elevationEnabled: true,
+			elevationEnabled: ORTHOGRAPHIC_ELEVATION_DEBUG,
 			elevationPassReady: this.elevationTarget !== null && this.elevationMaterial !== null,
 			minSignedHeightMeters: this.elevationRange.minSignedHeightMeters,
 			maxSignedHeightMeters: this.elevationRange.maxSignedHeightMeters,
