@@ -200,6 +200,12 @@ export class UndergroundTopPortal {
 	private baseDirtyCount = 1;
 	private elevationDirtyCount = 1;
 	private geometryDirtyCount = 1;
+	private invalidateLayerContentCallCount = 0;
+	private lastInvalidateLayerContentCaller = 'none';
+	private lastInvalidateLayerContentReason = 'none';
+	private lastInvalidateLayerContentTimestamp = 0;
+	private readonly invalidateLayerContentCallerCounts = new Map<string, number>();
+	private isOffscreenRendering = false;
 	private elevationRedrawCount = 0;
 	private lastElevationRedrawTimestamp = 0;
 	private uniforms: CpuDepthOcclusionUniforms & {
@@ -341,10 +347,16 @@ export class UndergroundTopPortal {
 
 	}
 
-	invalidateLayerContent(): void {
+	invalidateLayerContent(reason: 'layer-visibility-changed' | 'section-state-changed', caller: string): void {
 
-		this.markBaseDirty( 'layer-visibility-changed' );
-		this.markElevationDirty( 'layer-visibility-changed' );
+		if ( this.isOffscreenRendering ) return;
+		this.invalidateLayerContentCallCount += 1;
+		this.lastInvalidateLayerContentCaller = caller;
+		this.lastInvalidateLayerContentReason = reason;
+		this.lastInvalidateLayerContentTimestamp = performance.now();
+		this.invalidateLayerContentCallerCounts.set( caller, ( this.invalidateLayerContentCallerCounts.get( caller ) ?? 0 ) + 1 );
+		this.markBaseDirty( reason );
+		this.markElevationDirty( reason );
 
 	}
 
@@ -491,6 +503,7 @@ export class UndergroundTopPortal {
 		this.proxyBuildAttemptCount += 1;
 		let nextRenderModel: THREE.Object3D | null = null;
 		try {
+			this.isOffscreenRendering = true;
 			const build = buildPortalRenderProxy( this.sourceModel );
 			nextRenderModel = build.root;
 			nextRenderModel.visible = true;
@@ -863,6 +876,7 @@ export class UndergroundTopPortal {
 			this.offscreenState = 'failed';
 			throw error;
 		} finally {
+			this.isOffscreenRendering = false;
 			renderer.setRenderTarget( previousTarget );
 			renderer.xr.enabled = previousXrEnabled;
 			renderer.autoClear = previousAutoClear;
@@ -934,6 +948,11 @@ export class UndergroundTopPortal {
 			baseDirtyCount: this.baseDirtyCount,
 			elevationDirtyCount: this.elevationDirtyCount,
 			geometryDirtyCount: this.geometryDirtyCount,
+			invalidateLayerContentCallCount: this.invalidateLayerContentCallCount,
+			lastInvalidateLayerContentCaller: this.lastInvalidateLayerContentCaller,
+			lastInvalidateLayerContentReason: this.lastInvalidateLayerContentReason,
+			lastInvalidateLayerContentTimestamp: Math.round( this.lastInvalidateLayerContentTimestamp ),
+			invalidateLayerContentCallerCounts: JSON.stringify( Object.fromEntries( this.invalidateLayerContentCallerCounts ) ),
 			offscreenRevision: this.offscreenRevision,
 			lastRenderedRevision: this.lastRenderedRevision,
 			lastOffscreenFailureReason: this.lastOffscreenFailureReason || 'none',
@@ -1049,7 +1068,7 @@ export class UndergroundTopPortal {
 
 	}
 
-	private markElevationDirty(reason: 'proxy-created' | 'render-target-resized' | 'portal-reactivated' | 'layer-visibility-changed'): void {
+	private markElevationDirty(reason: 'proxy-created' | 'render-target-resized' | 'portal-reactivated' | 'layer-visibility-changed' | 'section-state-changed'): void {
 
 		if ( this.elevationDirty ) return;
 		this.elevationDirty = true;

@@ -572,7 +572,7 @@ export class ThreeEngine {
 			},
 			onPlacementBaseResolved: () => {},
 			applyModelLayerVisibility: () => {
-				this.applyModelLayerVisibility();
+				this.applyModelLayerVisibility( 'auto-placement' );
 			},
 			syncRegistrationChainDebug: () => {
 				this.syncRegistrationChainDebug();
@@ -653,8 +653,7 @@ export class ThreeEngine {
 			onSelectionCleared: () => {
 				this.clearAnnotationDetail();
 				this.visualizationStateRuntime.syncVisualizationState();
-				this.applyModelLayerVisibility();
-				this.undergroundPortal.invalidateLayerContent();
+				this.applyModelLayerVisibility( 'selection-cleared' );
 			},
 			handlePreSelectionRaycast: ( selection ) => {
 				if ( this.annotationLabelsController.hitDetailPanel( selection.raycaster ) ) {
@@ -922,7 +921,7 @@ export class ThreeEngine {
 			} );
 
 			await this.modelSession.initializeCatalog();
-			this.applyModelLayerVisibility();
+			this.applyModelLayerVisibility( 'initialization' );
 			this.syncSceneHost();
 			this.refreshSavedMarkerLocalizationResult( { silentStatus: true } );
 		} catch ( error ) {
@@ -1026,7 +1025,7 @@ export class ThreeEngine {
 			this.layerVisibility.setHiddenLayerCount(
 				mapLayerPeelingValue( clampedValue, this.layerVisibility.getState().length )
 			);
-			this.applyModelLayerVisibility();
+			this.applyModelLayerVisibility( 'layer-peeling-value-changed' );
 		}
 
 	}
@@ -1036,7 +1035,7 @@ export class ThreeEngine {
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().sectionCutValue === clampedValue ) return;
 		this.store.patch( { sectionCutValue: clampedValue } );
-		this.undergroundPortal.invalidateLayerContent();
+		this.undergroundPortal.invalidateLayerContent( 'section-state-changed', 'section-cut-changed' );
 
 	}
 
@@ -1090,7 +1089,7 @@ export class ThreeEngine {
 		if ( state.undergroundInspectionTool === tool ) return;
 		this.store.patch( { undergroundInspectionTool: tool } );
 		this.layerVisibility.setHiddenLayerCount( tool === 'layer-peeling' ? mapLayerPeelingValue( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0 );
-		this.applyModelLayerVisibility();
+		this.applyModelLayerVisibility( 'inspection-tool-changed' );
 
 	}
 
@@ -1368,7 +1367,7 @@ export class ThreeEngine {
 				currentSessionId: this.currentArSessionId
 			} );
 			if ( appliedToPlacedModel ) {
-				this.applyModelLayerVisibility();
+				this.applyModelLayerVisibility( 'auto-placement' );
 				this.arSessionStateRuntime.markPlacementCommitted( true );
 			}
 		}
@@ -4551,10 +4550,10 @@ export class ThreeEngine {
 
 	}
 
-	private applyModelLayerVisibility(): void {
+	private applyModelLayerVisibility(caller: 'auto-placement' | 'selection-cleared' | 'inspection-tool-changed' | 'layer-peeling-value-changed' | 'initialization' = 'initialization'): void {
 
-		this.visualizationStateRuntime.applyModelLayerVisibility();
-		this.undergroundPortal.invalidateLayerContent();
+		const result = this.visualizationStateRuntime.applyModelLayerVisibility();
+		if ( result.changed ) this.undergroundPortal.invalidateLayerContent( 'layer-visibility-changed', caller );
 
 	}
 

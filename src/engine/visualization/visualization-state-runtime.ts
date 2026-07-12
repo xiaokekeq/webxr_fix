@@ -28,6 +28,7 @@ export class VisualizationStateRuntime {
 	private lastSectionEnabled: boolean | undefined;
 	private lastSectionValue: number | undefined;
 	private lastSectionMode: SectionCutPlaneMode | undefined;
+	private previousLayerVisibilitySignature = '';
 
 	constructor(private readonly options: VisualizationStateRuntimeOptions) {}
 
@@ -40,6 +41,7 @@ export class VisualizationStateRuntime {
 		this.lastSectionEnabled = undefined;
 		this.lastSectionValue = undefined;
 		this.lastSectionMode = undefined;
+		this.previousLayerVisibilitySignature = '';
 
 	}
 
@@ -72,18 +74,35 @@ export class VisualizationStateRuntime {
 
 	}
 
-	applyModelLayerVisibility(): void {
+	applyModelLayerVisibility(): { changed: boolean; changedObjectCount: number; visibilitySignature: string } {
 
-		this.options.layerVisibility.applyToRoot( this.options.placementSession.getArPlacedModel() );
+		const root = this.options.placementSession.getArPlacedModel();
+		const before = new Map<string, boolean>();
+		root?.traverse( ( object ) => before.set( object.uuid, object.visible ) );
+		this.options.layerVisibility.applyToRoot( root );
 		this.options.syncAttachmentInfoBoardVisibility();
 		const modelLayers = this.options.layerVisibility.getState();
-		this.options.store.patch( {
+		let changedObjectCount = 0;
+		root?.traverse( ( object ) => { if ( before.get( object.uuid ) !== object.visible ) changedObjectCount += 1; } );
+		const state = this.options.store.getState();
+		const visibilitySignature = JSON.stringify( {
+			modelUuid: root?.uuid ?? 'none', undergroundInspectionTool: state.undergroundInspectionTool,
+			hiddenLayerCount: modelLayers.filter( ( layer ) => layer.visible === false ).length,
+			sectionCutMode: state.sectionCutPlaneMode, sectionCutValue: state.sectionCutValue,
+			layers: modelLayers.map( ( layer ) => [ layer.id, layer.visible ] ),
+			objects: root === null ? [] : [ ...before.keys() ].sort().map( ( uuid ) => [ uuid, root.getObjectByProperty( 'uuid', uuid )?.visible ] )
+		} );
+		const changed = changedObjectCount > 0 || visibilitySignature !== this.previousLayerVisibilitySignature;
+		this.previousLayerVisibilitySignature = visibilitySignature;
+		const nextPatch = {
 			layerNames: modelLayers.length > 0
 				? modelLayers.map( ( layer ) => layer.label )
 				: STATIC_LAYER_NAMES,
 			modelLayers
-		} );
+		};
+		if ( JSON.stringify( { layerNames: state.layerNames, modelLayers: state.modelLayers } ) !== JSON.stringify( nextPatch ) ) this.options.store.patch( nextPatch );
 		this.syncVisualizationState();
+		return { changed, changedObjectCount, visibilitySignature };
 
 	}
 
