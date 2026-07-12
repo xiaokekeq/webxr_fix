@@ -7,6 +7,7 @@ import {
 import type { CpuDepthFrame } from '@/engine/depth/real-depth-provider.js';
 import { isArDebugEnabled } from '@/engine/debug/ar-logger.js';
 import { buildPortalRenderProxy } from './portal-render-proxy-builder.js';
+import { getPortalElevationRange, type PortalElevationRange } from './portal-elevation-range.js';
 
 const PORTAL_SURFACE_NAME = '__underground-top-portal-surface';
 const PORTAL_RENDER_ORDER = 40;
@@ -18,6 +19,8 @@ const PORTAL_DEPTH_FEATHER_METERS = readPortalNumber( 'portalFeather', 0.025 );
 const PORTAL_BACKGROUND_ALPHA = THREE.MathUtils.clamp( readPortalNumber( 'portalBackgroundAlpha', 0.9 ), 0.85, 1 );
 const PORTAL_BACKGROUND_COLOR = new THREE.Color( readPortalColor( 'portalBackgroundColor', 0x06101a ) );
 const PORTAL_DEBUG_MODE = readPortalDebugMode();
+const PORTAL_ELEVATION_LAYER = 31;
+const PORTAL_ELEVATION_STYLE = { shallowColor: new THREE.Color( 0xffb35c ), deepColor: new THREE.Color( 0x2467b3 ), overlayOpacity: 0.35, contourOpacity: 0.75, contourIntervalMeters: 0.25, contourWidthMeters: 0.02 };
 
 export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
 type GeometryCalibrationState = 'dirty' | 'calibrating' | 'ready' | 'failed';
@@ -44,6 +47,7 @@ precision highp float;
 precision highp int;
 
 uniform sampler2D uPortalColorTexture;
+uniform sampler2D uPortalElevationTexture;
 uniform bool uDepthOcclusionEnabled;
 uniform highp usampler2D uRealDepthTexture;
 uniform float uRawValueToMeters;
@@ -109,16 +113,40 @@ void main() {
     return;
   }
   vec4 portalColor = texture(uPortalColorTexture, vPortalUv);
+  vec4 elevationOverlay = texture(uPortalElevationTexture, vPortalUv);
   vec3 portalBackground = uPortalBackgroundColor;
-  vec3 visibleColor = mix(portalBackground, portalColor.rgb, portalColor.a);
+  vec3 modelColor = mix(portalColor.rgb, elevationOverlay.rgb, elevationOverlay.a);
+  vec3 visibleColor = mix(portalBackground, modelColor, portalColor.a);
   float baseAlpha = mix(uPortalBackgroundAlpha, 1.0, portalColor.a);
-  if (uDebugMode == 2) {
-    outColor = vec4(visibleColor, baseAlpha);
-    return;
-  }
-  float finalAlpha = baseAlpha * (1.0 - foregroundMask());
+  float finalAlpha = baseAlpha * (uDebugMode == 2 ? 1.0 : 1.0 - foregroundMask());
   if (finalAlpha < 0.01) discard;
   outColor = vec4(visibleColor, finalAlpha);
+}`;
+
+const elevationVertexShader = /* glsl */`
+out vec3 vWorldPosition;
+void main() {
+  vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+  gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPosition, 1.0);
+}`;
+
+const elevationFragmentShader = /* glsl */`
+precision highp float;
+uniform vec3 uPortalPlaneCenter, uPortalPlaneNormal, uShallowColor, uDeepColor;
+uniform float uMinDepthMeters, uMaxDepthMeters, uOverlayOpacity, uContourOpacity, uContourIntervalMeters, uContourWidthMeters;
+in vec3 vWorldPosition;
+out vec4 outColor;
+void main() {
+  float depthMeters = max(0.0, -dot(vWorldPosition - uPortalPlaneCenter, uPortalPlaneNormal));
+  float depth01 = clamp((depthMeters - uMinDepthMeters) / max(uMaxDepthMeters - uMinDepthMeters, 0.001), 0.0, 1.0);
+  float contour = 0.0;
+  if (uMaxDepthMeters - uMinDepthMeters > uContourIntervalMeters) {
+    float phase = abs(fract(depthMeters / uContourIntervalMeters + 0.5) - 0.5) * uContourIntervalMeters;
+    contour = 1.0 - smoothstep(uContourWidthMeters, uContourWidthMeters + fwidth(depthMeters), phase);
+  }
+  float edge = clamp(length(vec2(dFdx(depthMeters), dFdy(depthMeters))) * 2.0, 0.0, 1.0);
+  vec3 color = mix(uShallowColor, uDeepColor, depth01);
+  outColor = vec4(mix(color, vec3(1.0), contour * 0.25), (uOverlayOpacity + edge * 0.12) * max(0.0, 1.0 - contour * (1.0 - uContourOpacity)));
 }`;
 
 export interface UndergroundTopPortalPickResult {
@@ -151,8 +179,16 @@ export class UndergroundTopPortal {
 	private renderModel: THREE.Object3D | null = null;
 	private surface: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> | null = null;
 	private renderTarget: THREE.WebGLRenderTarget | null = null;
+	private elevationTarget: THREE.WebGLRenderTarget | null = null;
+	private elevationMaterial: THREE.ShaderMaterial | null = null;
+	private readonly elevationCamera = new THREE.OrthographicCamera();
+	private elevationRange: PortalElevationRange = { minSignedHeightMeters: 0, maxSignedHeightMeters: 0, minDepthMeters: 0, maxDepthMeters: 0, depthRangeMeters: 0, valid: false };
+	private elevationDirty = true;
+	private elevationRedrawCount = 0;
+	private lastElevationRedrawTimestamp = 0;
 	private uniforms: CpuDepthOcclusionUniforms & {
 		uPortalColorTexture: { value: THREE.Texture | null };
+		uPortalElevationTexture: { value: THREE.Texture | null };
 		uForegroundThresholdMeters: { value: number };
 		uDepthFeatherMeters: { value: number };
 		uPortalBackgroundAlpha: { value: number };
@@ -337,6 +373,10 @@ export class UndergroundTopPortal {
 		this.surface = null;
 		this.renderTarget?.dispose();
 		this.renderTarget = null;
+		this.elevationTarget?.dispose();
+		this.elevationTarget = null;
+		this.elevationMaterial?.dispose();
+		this.elevationMaterial = null;
 		this.uniforms = null;
 		this.cornerValues.fill( Number.NaN );
 		this.geometryCalibrationState = 'dirty';
@@ -436,6 +476,7 @@ export class UndergroundTopPortal {
 			}
 			this.renderModel?.removeFromParent();
 			this.renderModel = nextRenderModel;
+			this.renderModel.traverse( ( object ) => { if ( object instanceof THREE.Mesh ) object.layers.enable( PORTAL_ELEVATION_LAYER ); } );
 			this.proxyToSource.clear();
 			for ( const [ proxy, source ] of build.proxyToSource ) this.proxyToSource.set( proxy, source );
 			this.proxyBuildStats = {
@@ -450,6 +491,7 @@ export class UndergroundTopPortal {
 			this.proxyBuildSuccessCount += 1;
 			this.lastProxyBuildFailureReason = '';
 			this.portalDirty = true;
+			this.elevationDirty = true;
 			this.markContentDirty();
 			return null;
 		} catch ( error ) {
@@ -538,6 +580,7 @@ export class UndergroundTopPortal {
 
 		this.uniforms = Object.assign( createCpuDepthOcclusionUniforms(), {
 			uPortalColorTexture: { value: this.renderTarget?.texture ?? null },
+			uPortalElevationTexture: { value: this.elevationTarget?.texture ?? null },
 			uForegroundThresholdMeters: { value: PORTAL_FOREGROUND_THRESHOLD_METERS },
 			uDepthFeatherMeters: { value: PORTAL_DEPTH_FEATHER_METERS },
 			uPortalBackgroundAlpha: { value: PORTAL_BACKGROUND_ALPHA },
@@ -555,6 +598,23 @@ export class UndergroundTopPortal {
 			side: THREE.DoubleSide,
 			toneMapped: false
 		} );
+
+	}
+
+	private ensureElevationMaterial(): THREE.ShaderMaterial {
+
+		if ( this.elevationMaterial !== null ) return this.elevationMaterial;
+		this.elevationMaterial = new THREE.ShaderMaterial( {
+			uniforms: {
+				uPortalPlaneCenter: { value: this.center.clone() }, uPortalPlaneNormal: { value: this.normal.clone() },
+				uMinDepthMeters: { value: 0 }, uMaxDepthMeters: { value: 0 },
+				uShallowColor: { value: PORTAL_ELEVATION_STYLE.shallowColor }, uDeepColor: { value: PORTAL_ELEVATION_STYLE.deepColor },
+				uOverlayOpacity: { value: PORTAL_ELEVATION_STYLE.overlayOpacity }, uContourOpacity: { value: PORTAL_ELEVATION_STYLE.contourOpacity },
+				uContourIntervalMeters: { value: PORTAL_ELEVATION_STYLE.contourIntervalMeters }, uContourWidthMeters: { value: PORTAL_ELEVATION_STYLE.contourWidthMeters }
+			}, vertexShader: elevationVertexShader, fragmentShader: elevationFragmentShader, glslVersion: THREE.GLSL3,
+			transparent: true, depthTest: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false
+		} );
+		return this.elevationMaterial;
 
 	}
 
@@ -578,10 +638,17 @@ export class UndergroundTopPortal {
 		if ( this.renderTarget?.width === targetWidth && this.renderTarget.height === targetHeight ) return true;
 		const nextTarget = this.createRenderTarget( renderer, targetWidth, targetHeight );
 		if ( nextTarget === null ) return false;
+		const nextElevationTarget = this.createRenderTarget( renderer, nextTarget.width, nextTarget.height );
+		if ( nextElevationTarget === null ) { nextTarget.dispose(); return false; }
 		this.renderTarget?.dispose();
 		this.renderTarget = nextTarget;
+		this.elevationTarget?.dispose();
+		this.elevationTarget = nextElevationTarget;
 		if ( this.uniforms !== null ) this.uniforms.uPortalColorTexture.value = this.renderTarget.texture;
+		if ( this.uniforms !== null ) this.uniforms.uPortalElevationTexture.value = this.elevationTarget.texture;
+		this.elevationDirty = true;
 		this.portalDirty = true;
+		this.elevationDirty = true;
 		this.markContentDirty();
 		return true;
 
@@ -647,6 +714,7 @@ export class UndergroundTopPortal {
 				renderObject.material = source.material;
 			}
 		} );
+		this.elevationDirty = true;
 
 	}
 
@@ -746,6 +814,7 @@ export class UndergroundTopPortal {
 			renderer.setClearColor( 0x000000, 0 );
 			renderer.clear( true, true, true );
 			renderer.render( this.renderScene, this.camera );
+			this.renderElevation( renderer );
 			this.contentDirty = false;
 			this.lastRenderedRevision = this.offscreenRevision;
 			this.offscreenState = 'ready';
@@ -766,6 +835,30 @@ export class UndergroundTopPortal {
 			renderer.setScissorTest( previousScissorTest );
 			this.renderScene.overrideMaterial = previousOverrideMaterial;
 		}
+
+	}
+
+	private renderElevation(renderer: THREE.WebGLRenderer): void {
+
+		if ( this.elevationTarget === null || this.renderModel === null || this.elevationDirty === false ) return;
+		this.elevationRange = getPortalElevationRange( this.renderModel, this.center, this.normal );
+		if ( this.elevationRange.valid === false ) return;
+		const material = this.ensureElevationMaterial();
+		material.uniforms.uPortalPlaneCenter.value.copy( this.center );
+		material.uniforms.uPortalPlaneNormal.value.copy( this.normal );
+		material.uniforms.uMinDepthMeters.value = this.elevationRange.minDepthMeters;
+		material.uniforms.uMaxDepthMeters.value = this.elevationRange.maxDepthMeters;
+		this.elevationCamera.copy( this.camera );
+		this.elevationCamera.layers.set( PORTAL_ELEVATION_LAYER );
+		renderer.setRenderTarget( this.elevationTarget );
+		renderer.setViewport( 0, 0, this.elevationTarget.width, this.elevationTarget.height );
+		renderer.clear( true, true, true );
+		this.renderScene.overrideMaterial = material;
+		renderer.render( this.renderScene, this.elevationCamera );
+		this.renderScene.overrideMaterial = null;
+		this.elevationDirty = false;
+		this.elevationRedrawCount += 1;
+		this.lastElevationRedrawTimestamp = performance.now();
 
 	}
 
@@ -834,6 +927,19 @@ export class UndergroundTopPortal {
 			expectedSourceCornerNdc: JSON.stringify( [ [ -1, -1 ], [ 1, -1 ], [ 1, 1 ], [ -1, 1 ] ] ),
 			renderTargetCreationAttemptCount: this.renderTargetCreationAttemptCount,
 			lastRenderTargetCreationError: this.lastRenderTargetCreationError || 'none',
+			elevationEnabled: true,
+			elevationPassReady: this.elevationTarget !== null && this.elevationMaterial !== null,
+			minSignedHeightMeters: this.elevationRange.minSignedHeightMeters,
+			maxSignedHeightMeters: this.elevationRange.maxSignedHeightMeters,
+			minDepthMeters: this.elevationRange.minDepthMeters,
+			maxDepthMeters: this.elevationRange.maxDepthMeters,
+			depthRangeMeters: this.elevationRange.depthRangeMeters,
+			contourIntervalMeters: PORTAL_ELEVATION_STYLE.contourIntervalMeters,
+			contourWidthMeters: PORTAL_ELEVATION_STYLE.contourWidthMeters,
+			elevationOverlayOpacity: PORTAL_ELEVATION_STYLE.overlayOpacity,
+			elevationRedrawCount: this.elevationRedrawCount,
+			lastElevationRedrawTimestamp: Math.round( this.lastElevationRedrawTimestamp ),
+			elevationRenderTarget: this.elevationTarget === null ? 'none' : `${this.elevationTarget.width}x${this.elevationTarget.height}`,
 			lastFrameError: this.lastFrameError || 'none'
 		};
 
