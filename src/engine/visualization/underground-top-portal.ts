@@ -23,8 +23,6 @@ const PORTAL_ELEVATION_LAYER = 31;
 const PORTAL_ELEVATION_STYLE = { shallowColor: new THREE.Color( 0xffb35c ), deepColor: new THREE.Color( 0x2467b3 ), overlayOpacity: 0.35, contourOpacity: 0.75, contourIntervalMeters: 0.25, contourWidthMeters: 0.02 };
 const PORTAL_ELEVATION_RANGE_EPSILON = 0.001;
 const PORTAL_MATRIX_EPSILON = 1e-6;
-const PORTAL_CAMERA_FIT_PADDING = 1.2;
-const PORTAL_CAMERA_DEBUG_MODE = readPortalCameraDebugMode();
 
 export type PortalState = 'idle' | 'initializing' | 'surface-ready' | 'content-ready' | 'ready' | 'failed';
 type GeometryCalibrationState = 'dirty' | 'calibrating' | 'ready' | 'failed';
@@ -182,14 +180,6 @@ export class UndergroundTopPortal {
 	private readonly bounds = new THREE.Box3();
 	private readonly boundsSize = new THREE.Vector3();
 	private readonly boundsCenter = new THREE.Vector3();
-	private readonly fitWorldBox = new THREE.Box3();
-	private readonly fitWorldSphere = new THREE.Sphere();
-	private readonly fitViewDirection = new THREE.Vector3();
-	private readonly fitTarget = new THREE.Vector3();
-	private cameraFitRevision = 0;
-	private cameraFitReason = 'initial';
-	private fitRenderableMeshCount = 0;
-	private readonly cameraDebugGroup = new THREE.Group();
 	private readonly cornerValues = new Float32Array( 24 );
 	private readonly surfaceTargetCornerValues = new Float32Array( 12 );
 	private readonly modelMatrixValues = new Float32Array( 16 );
@@ -262,7 +252,6 @@ export class UndergroundTopPortal {
 		const light = new THREE.DirectionalLight( 0xffffff, 1.6 );
 		light.position.set( 3, 8, 4 );
 		this.renderScene.add( light );
-		this.renderScene.add( this.cameraDebugGroup );
 
 	}
 
@@ -625,7 +614,6 @@ export class UndergroundTopPortal {
 		this.axisU.copy( axisU ); this.axisV.copy( axisV ); this.normal.copy( normal ); this.sourceCalibrationCenter.copy( center ); this.targetSurfacePlaneCenter.copy( targetSurfacePlaneCenter ); this.targetSurfacePlanarityResidualMeters = targetSurfacePlanarityResidualMeters;
 		this.upReference.copy( normalizedUpReference ); this.candidateSurfaceNormal.copy( candidateSurfaceNormal ); this.surfaceUpNormal.copy( surfaceUpNormal ); this.surfaceNormalWasFlipped = surfaceNormalWasFlipped;
 		this.camera.copy( camera );
-		this.fitCameraToRenderModel();
 		this.sourceCornerIds = normalized.map( ( corner ) => corner!.id );
 		this.originalCornerIds = correspondences.map( ( corner ) => corner.id );
 		this.windingBefore = windingWasReversed ? 'clockwise' : 'counter-clockwise';
@@ -754,63 +742,10 @@ export class UndergroundTopPortal {
 		this.bounds.setFromObject( this.renderModel );
 		this.bounds.getSize( this.boundsSize );
 		this.bounds.getCenter( this.boundsCenter );
-		this.fitCameraToRenderModel();
+		this.camera.far = Math.max( 50, this.camera.position.distanceTo( this.boundsCenter ) + this.boundsSize.length() + 10 );
+		this.camera.updateProjectionMatrix();
 		this.portalDirty = true;
 		this.markContentDirty();
-
-	}
-
-	private fitCameraToRenderModel(): void {
-
-		if ( this.renderModel === null || this.renderTarget === null ) return;
-		this.renderModel.updateMatrixWorld( true );
-		this.fitWorldBox.setFromObject( this.renderModel );
-		if ( this.fitWorldBox.isEmpty() ) return;
-		const size = this.fitWorldBox.getSize( this.boundsSize );
-		const center = this.fitWorldBox.getCenter( this.boundsCenter );
-		this.fitWorldBox.getBoundingSphere( this.fitWorldSphere );
-		if ( this.fitWorldSphere.radius <= 0 ) return;
-		this.fitRenderableMeshCount = 0;
-		this.renderModel.traverse( ( object ) => { if ( isRenderablePortalMesh( object ) ) this.fitRenderableMeshCount += 1; } );
-		this.camera.getWorldDirection( this.fitViewDirection ).normalize();
-		const right = new THREE.Vector3( 1, 0, 0 ).applyQuaternion( this.camera.quaternion ).normalize();
-		const up = new THREE.Vector3( 0, 1, 0 ).applyQuaternion( this.camera.quaternion ).normalize();
-		let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-		for ( const x of [ this.fitWorldBox.min.x, this.fitWorldBox.max.x ] ) for ( const y of [ this.fitWorldBox.min.y, this.fitWorldBox.max.y ] ) for ( const z of [ this.fitWorldBox.min.z, this.fitWorldBox.max.z ] ) {
-			const relative = new THREE.Vector3( x, y, z ).sub( center );
-			const localX = relative.dot( right ), localY = relative.dot( up ), localZ = relative.dot( this.fitViewDirection );
-			minX = Math.min( minX, localX ); maxX = Math.max( maxX, localX ); minY = Math.min( minY, localY ); maxY = Math.max( maxY, localY ); minZ = Math.min( minZ, localZ ); maxZ = Math.max( maxZ, localZ );
-		}
-		const aspect = this.renderTarget.width / this.renderTarget.height;
-		const paddedWidth = Math.max( 0.01, ( maxX - minX ) * PORTAL_CAMERA_FIT_PADDING );
-		const paddedHeight = Math.max( 0.01, ( maxY - minY ) * PORTAL_CAMERA_FIT_PADDING );
-		const width = paddedWidth / paddedHeight > aspect ? paddedWidth : paddedHeight * aspect;
-		const height = width / aspect;
-		const distance = this.fitWorldSphere.radius * 2 + maxZ - minZ;
-		this.fitTarget.copy( center );
-		this.camera.left = -width / 2; this.camera.right = width / 2; this.camera.bottom = -height / 2; this.camera.top = height / 2; this.camera.zoom = 1;
-		this.camera.position.copy( center ).addScaledVector( this.fitViewDirection, -distance );
-		this.camera.up.copy( up ); this.camera.lookAt( center );
-		this.camera.near = 0.01; this.camera.far = distance + this.fitWorldSphere.radius * 4;
-		this.camera.updateProjectionMatrix(); this.camera.updateMatrixWorld( true );
-		this.cameraFitRevision += 1; this.cameraFitReason = 'proxy-matrix-changed';
-		this.updateCameraDebug();
-		void size;
-
-	}
-
-	private updateCameraDebug(): void {
-
-		this.cameraDebugGroup.clear();
-		if ( PORTAL_CAMERA_DEBUG_MODE !== 'fit' ) return;
-		this.cameraDebugGroup.add( new THREE.Box3Helper( this.fitWorldBox, 0xff00ff ) );
-		const axes = new THREE.AxesHelper( Math.max( 0.1, this.fitWorldSphere.radius * 0.15 ) );
-		axes.position.copy( this.fitTarget );
-		this.cameraDebugGroup.add( axes );
-		this.renderModel?.traverse( ( object ) => {
-			if ( isRenderablePortalMesh( object ) === false ) return;
-			this.cameraDebugGroup.add( new THREE.Box3Helper( new THREE.Box3().setFromObject( object ), 0x00ccff ) );
-		} );
 
 	}
 
@@ -922,7 +857,7 @@ export class UndergroundTopPortal {
 			renderer.xr.enabled = false;
 			renderer.autoClear = false;
 			renderer.setScissorTest( false );
-			renderer.setClearColor( PORTAL_CAMERA_DEBUG_MODE === 'fit' ? 0xc8c8c8 : 0x000000, PORTAL_CAMERA_DEBUG_MODE === 'fit' ? 1 : 0 );
+			renderer.setClearColor( 0x000000, 0 );
 			if ( this.contentDirty ) {
 				renderer.setRenderTarget( this.renderTarget );
 				renderer.setViewport( 0, 0, this.renderTarget.width, this.renderTarget.height );
@@ -1039,20 +974,6 @@ export class UndergroundTopPortal {
 			matrixWorldMaxAbsError: matrixError,
 			portalModelNdcBounds: proxyNdc === null ? 'none' : JSON.stringify( proxyNdc ),
 			modelIntersectsCameraFootprint: proxyNdc !== null && !( proxyNdc.right < -1 || proxyNdc.left > 1 || proxyNdc.top < -1 || proxyNdc.bottom > 1 ),
-			cameraType: 'orthographic', cameraAutoFitEnabled: true, cameraFitRevision: this.cameraFitRevision, cameraFitReason: this.cameraFitReason,
-			fitWorldBoxMin: JSON.stringify( vectorToObject( this.fitWorldBox.min ) ), fitWorldBoxMax: JSON.stringify( vectorToObject( this.fitWorldBox.max ) ),
-			fitWorldBoxSize: JSON.stringify( vectorToObject( this.fitWorldBox.getSize( new THREE.Vector3() ) ) ), fitWorldCenter: JSON.stringify( vectorToObject( this.fitTarget ) ),
-			fitBoundingSphereRadius: this.fitWorldSphere.radius, fitRenderableMeshCount: this.fitRenderableMeshCount, fitSourceObjectUuid: this.renderModel?.userData.__portalSourceRootId ?? 'none',
-			cameraPosition: JSON.stringify( vectorToObject( this.camera.position ) ), cameraTarget: JSON.stringify( vectorToObject( this.fitTarget ) ), cameraViewDirection: JSON.stringify( vectorToObject( this.fitViewDirection ) ),
-			cameraDistance: this.camera.position.distanceTo( this.fitTarget ), cameraNear: this.camera.near, cameraFar: this.camera.far,
-			cameraAspect: this.renderTarget === null ? 0 : this.renderTarget.width / this.renderTarget.height,
-			orthographicLeft: this.camera.left, orthographicRight: this.camera.right, orthographicTop: this.camera.top, orthographicBottom: this.camera.bottom,
-			orthographicWidth: this.camera.right - this.camera.left, orthographicHeight: this.camera.top - this.camera.bottom, orthographicZoom: this.camera.zoom,
-			cameraInsideWorldBox: this.fitWorldBox.containsPoint( this.camera.position ),
-			modelViewportCoverageX: proxyNdc === null ? 0 : proxyNdc.right - proxyNdc.left,
-			modelViewportCoverageY: proxyNdc === null ? 0 : proxyNdc.top - proxyNdc.bottom,
-			nearPlaneClipsWorldBox: false,
-			farPlaneClipsWorldBox: false,
 			redrawCount: this.redrawCount,
 			lastRedrawTimestamp: Math.round( this.lastRedrawTimestamp ),
 			renderTarget: this.renderTarget === null ? 'none' : `${this.renderTarget.width}x${this.renderTarget.height}`,
@@ -1319,12 +1240,5 @@ function readPortalDebugMode(): 'surface' | 'texture' | 'full' {
 	if ( typeof window === 'undefined' ) return 'full';
 	const mode = new URLSearchParams( window.location.search ).get( 'portalDebug' );
 	return mode === 'surface' || mode === 'texture' ? mode : 'full';
-
-}
-
-function readPortalCameraDebugMode(): 'fit' | 'none' {
-
-	if ( typeof window === 'undefined' ) return 'none';
-	return new URLSearchParams( window.location.search ).get( 'portalCameraDebug' ) === 'fit' ? 'fit' : 'none';
 
 }
