@@ -346,7 +346,7 @@ export class RegistrationStateRuntime {
 
 		this.lastEngineeringConfigLogSignature = signature;
 		const payload = {
-			siteId: args.demoModelConfig.modelId,
+			siteId: args.demoModelConfig.siteId,
 			modelId: args.demoModelConfig.modelId,
 			sessionId: this.options.getCurrentSessionId(),
 			targetId: args.firstTarget?.id ?? null,
@@ -447,7 +447,7 @@ export class RegistrationStateRuntime {
 
 		const now = Date.now();
 		return {
-			siteId: demoModelConfig.modelId,
+			siteId: demoModelConfig.siteId,
 			siteOrigin: { ...demoModelConfig.siteFrame.origin },
 			modelLocalToEnuVersion: 'rigid-ground-plane-model-local-to-enu-v1',
 			controlTargets: this.options.resolveBaselineControlTargets(),
@@ -481,10 +481,11 @@ export class RegistrationStateRuntime {
 		createdAt: number;
 	} {
 
-		const modelId = this.options.getDemoModelConfig()?.modelId ?? null;
+		const config = this.options.getDemoModelConfig();
+		const modelId = config?.modelId ?? null;
 		return {
 			mode: this.options.getWorkflowMode(),
-			siteId: modelId,
+			siteId: config?.siteId ?? null,
 			modelId,
 			sessionId: this.options.getCurrentSessionId(),
 			currentStep: args.currentStep,

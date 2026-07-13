@@ -136,6 +136,7 @@ const tempQuaternion = new THREE.Quaternion();
 
 type EngineeringPlacementBlockReason =
 	| 'model-config-missing'
+	| 'model-template-missing'
 	| 'site-origin-missing'
 	| 'control-targets-missing'
 	| 'corners-enu-missing'
@@ -344,6 +345,7 @@ export class ThreeEngine {
 	private modelPlacementAttemptCount = 0;
 	private modelPlacementSuccessCount = 0;
 	private lastAppliedMarkerSolutionId: string | null = null;
+	private autoPlacementInFlightSolutionId: string | null = null;
 	private replacedModelCount = 0;
 	private lastPlacementReason = '-';
 	private lastPlacementTimestamp = 0;
@@ -440,7 +442,7 @@ export class ThreeEngine {
 			getWorkflowMode: () => this.workflowMode,
 			getInspectionPlacementSource: () => this.store.getState().inspectionPlacementSource,
 			getCurrentSessionId: () => this.currentArSessionId,
-			getSiteId: () => this.demoModelConfig?.modelId ?? this.currentArSessionContext?.siteId ?? null,
+			getSiteId: () => this.demoModelConfig?.siteId ?? this.currentArSessionContext?.siteId ?? null,
 			getControlTargets: () => this.getCurrentControlTargets(),
 			getPrimaryTargetId: () => this.getCurrentControlTargets()[ 0 ]?.id ?? null,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
@@ -496,7 +498,7 @@ export class ThreeEngine {
 			getWorkflowMode: () => this.workflowMode,
 			getCurrentSessionId: () => this.currentArSessionId,
 			getRepositoryDataSource: () => repositories.dataSource,
-			getDemoModelConfig: () => this.demoModelConfig,
+			getDemoModelConfig: () => this.demoModelConfig ?? this.currentArSessionContext?.siteConfig ?? null,
 			getRegistrationSolution: () => this.registrationSolution,
 			getResolvedMarkerPosesInEnu: () => this.resolvedMarkerPosesInEnu,
 			getActiveMarkerLocalizationResult: () => this.activeMarkerLocalizationResult,
@@ -515,7 +517,7 @@ export class ThreeEngine {
 		this.placementWorkflow = new PlacementWorkflow( {
 			placementSession: this.placementSession,
 			getWorkflowMode: () => this.workflowMode,
-			getSiteId: () => this.demoModelConfig?.modelId ?? null,
+			getSiteId: () => this.demoModelConfig?.siteId ?? this.currentArSessionContext?.siteId ?? null,
 			getCurrentSessionId: () => this.currentArSessionId,
 			getInspectionTargetId: () => this.activeMarkerLocalizationResult?.markerId ?? this.inspectionMarkerWorkflow.getStableTargetId(),
 			getInspectionStableFrameCount: () => this.inspectionMarkerWorkflow.getStableFrameCount(),
@@ -654,7 +656,7 @@ export class ThreeEngine {
 				this.emit();
 			},
 			onRuntimeReset: ( nextModelId ) => {
-				const preserveCurrentArLocalization = this.currentArSessionId !== null && this.currentArSessionContext?.siteId === nextModelId;
+				const preserveCurrentArLocalization = this.canPreserveMarkerLocalizationForRuntimeRefresh( nextModelId );
 				this.modelRuntimeGeneration += 1;
 				const calibrationCancelled = this.markerCalibrationRuntime.cancelForModelRuntimeChange();
 				this.sectionCapRuntime.dispose( 'model-switch' );
@@ -715,6 +717,15 @@ export class ThreeEngine {
 				this.markerCalibrationRuntime.syncState();
 				this.syncRegistrationChainDebug();
 				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
+				const markerSolution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
+				if ( markerSolution !== null ) {
+					this.renderEngineeringCornerDebug(
+						markerSolution,
+						this.getActiveEngineeringControlTarget(),
+						[],
+						'model-runtime-ready'
+					);
+				}
 				this.tryAutoPlaceAppliedMarkerSolution();
 			},
 			onLoadManualRegistration: () => {},
@@ -1342,7 +1353,7 @@ export class ThreeEngine {
 		}
 
 		const solutionId = `${arFromEnuSolution.sessionId ?? 'none'}:${arFromEnuSolution.timestamp}`;
-		if ( this.lastAppliedMarkerSolutionId === solutionId ) {
+		if ( this.lastAppliedMarkerSolutionId === solutionId || this.autoPlacementInFlightSolutionId === solutionId ) {
 			return;
 		}
 
@@ -1352,8 +1363,21 @@ export class ThreeEngine {
 			return;
 		}
 
-		this.lastAppliedMarkerSolutionId = solutionId;
-		void this.placeModelFromCurrentMarkerSolution( guard, 'marker-applied-model-runtime-ready' );
+		this.autoPlacementInFlightSolutionId = solutionId;
+		this.placeModelFromCurrentMarkerSolution( guard, 'marker-applied-model-runtime-ready' )
+			.then( () => {
+				if ( this.placementSession.getArPlacedModel() !== null ) {
+					this.lastAppliedMarkerSolutionId = solutionId;
+				}
+			} )
+			.catch( ( error ) => {
+				this.setStatus( error instanceof Error ? `Marker 校正后的模型放置失败：${error.message}` : 'Marker 校正后的模型放置失败。' );
+				console.error( '[MarkerModelAutoPlacementFailed]', { solutionId, error } );
+			} )
+			.finally( () => {
+				this.autoPlacementInFlightSolutionId = null;
+				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
+			} );
 
 	}
 
@@ -1386,7 +1410,7 @@ export class ThreeEngine {
 
 	saveInspectionRecord(input: Omit<CreateInspectionRecordInput, 'siteId'>): void {
 
-		const siteId = this.demoModelConfig?.modelId ?? null;
+		const siteId = this.demoModelConfig?.siteId ?? null;
 		if ( siteId === null ) {
 			this.setStatus( '当前站点尚未准备完成，无法保存巡查记录。' );
 			return;
@@ -1575,6 +1599,20 @@ export class ThreeEngine {
 
 	}
 
+	private canPreserveMarkerLocalizationForRuntimeRefresh(nextModelId: string): boolean {
+
+		const context = this.currentArSessionContext;
+		const activeTargetId = context?.controlTargets?.[ 0 ]?.id
+			?? this.store.getState().markerCalibration.markerId
+			?? null;
+		return this.currentArSessionId !== null
+			&& context !== null
+			&& context.siteConfig.modelId === nextModelId
+			&& context.siteId.length > 0
+			&& activeTargetId !== null;
+
+	}
+
 	private async ensureArSessionContextReady(): Promise<void> {
 
 		this.syncArSessionContext();
@@ -1590,7 +1628,7 @@ export class ThreeEngine {
 		silentStatus?: boolean;
 	}): Promise<SiteCalibrationBaseline | null> {
 
-		const siteId = this.demoModelConfig?.modelId ?? null;
+		const siteId = this.demoModelConfig?.siteId ?? null;
 		if ( siteId === null ) {
 			this.activeSiteCalibrationBaseline = null;
 			this.syncArSessionContext();
@@ -1612,7 +1650,7 @@ export class ThreeEngine {
 
 		try {
 			const baseline = await repositories.siteBaseline.load( siteId );
-			if ( requestId !== this.siteBaselineLoadRequestId || this.demoModelConfig?.modelId !== siteId ) {
+			if ( requestId !== this.siteBaselineLoadRequestId || this.demoModelConfig?.siteId !== siteId ) {
 				return this.activeSiteCalibrationBaseline;
 			}
 
@@ -1648,7 +1686,7 @@ export class ThreeEngine {
 			this.emit();
 			return baseline;
 		} catch ( error ) {
-			if ( requestId !== this.siteBaselineLoadRequestId || this.demoModelConfig?.modelId !== siteId ) {
+			if ( requestId !== this.siteBaselineLoadRequestId || this.demoModelConfig?.siteId !== siteId ) {
 				return this.activeSiteCalibrationBaseline;
 			}
 
@@ -1689,7 +1727,7 @@ export class ThreeEngine {
 		const nextContext: ArSessionContext = {
 			sessionId: this.currentArSessionId,
 			mode: this.workflowMode,
-			siteId: this.demoModelConfig.modelId,
+			siteId: this.demoModelConfig.siteId,
 			siteConfig: this.demoModelConfig,
 			baseline: this.activeSiteCalibrationBaseline,
 			controlTargets: resolved.controlTargets
@@ -1830,11 +1868,19 @@ export class ThreeEngine {
 			};
 		}
 
-		if ( this.registrationSolution === null || this.modelTemplate === null ) {
+		if ( this.modelTemplate === null ) {
+			return {
+				ok: false,
+				reason: 'model-template-missing',
+				message: '模型模板尚未加载完成，无法正式放置模型。'
+			};
+		}
+
+		if ( this.registrationSolution === null ) {
 			return {
 				ok: false,
 				reason: 'model-registration-missing',
-				message: '模型工程配准尚未准备完成，无法正式放置模型。'
+				message: '模型控制点配准尚未准备完成，无法正式放置模型。'
 			};
 		}
 
@@ -1960,7 +2006,13 @@ export class ThreeEngine {
 			&& hasMockEngineeringDataInConfig( this.demoModelConfig, controlTargets );
 		return {
 			modelId: this.demoModelConfig?.modelId ?? this.store.getState().selectedModelId ?? null,
+			siteId: this.demoModelConfig?.siteId ?? this.currentArSessionContext?.siteId ?? null,
 			configUrl: this.modelSession.getCurrentModelDefinition()?.configUrl ?? null,
+			modelTemplateReady: this.modelTemplate !== null,
+			registrationReady: this.registrationSolution !== null,
+			modelControlPointOrder: this.demoModelConfig?.modelControlTargetDiagnostics.modelControlTargetIds ?? [],
+			parsedModelControlPointCount: this.demoModelConfig?.modelControlTargetDiagnostics.normalizedModelControlTargetCount ?? 0,
+			registrationControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
 			hasSiteOrigin: this.demoModelConfig !== null
 				&& Number.isFinite( this.demoModelConfig.siteFrame.origin.lat )
 				&& Number.isFinite( this.demoModelConfig.siteFrame.origin.lon )
@@ -3405,14 +3457,14 @@ export class ThreeEngine {
 			return;
 		}
 
-		const hadPlacedModel = this.placementSession.getPlacedModel() !== null;
+		const hadPlacedModel = this.placementSession.getArPlacedModel() !== null;
 		this.engineeringPlacementCallCount += 1;
 		this.modelPlacementAttemptCount += 1;
 		this.replacedModelCount += hadPlacedModel ? 1 : 0;
 		this.lastPlacementReason = reason;
 		this.lastPlacementTimestamp = Date.now();
 		await this.placementWorkflow.placeLocalizedModel();
-		if ( this.placementSession.getPlacedModel() === null ) {
+		if ( this.placementSession.getArPlacedModel() === null ) {
 			this.syncModelPlacementDebug( arFromEnuSolution );
 			return;
 		}
