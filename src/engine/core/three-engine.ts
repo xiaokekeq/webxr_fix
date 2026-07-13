@@ -314,6 +314,7 @@ export class ThreeEngine {
 	private registrationSolution: EngineeringRegistrationSolution | null = null;
 	private resolvedMarkerPosesInEnu: MarkerPoseInEnu[] = [];
 	private activeMarkerArFromEnuSolution: ArFromEnuSolution | null = null;
+	private markerCalibrationCapturedCornersAr: THREE.Vector3[] = [];
 	private activeSiteCalibrationBaseline: SiteCalibrationBaseline | null = null;
 	private activeMarkerLocalizationResult: SavedMarkerLocalizationResult | null = null;
 	private markerCorrectionFallbackArFromEnuSolution: ArFromEnuSolution | null = null;
@@ -731,15 +732,7 @@ export class ThreeEngine {
 				this.markerCalibrationRuntime.syncState();
 				this.syncRegistrationChainDebug();
 				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
-				const markerSolution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
-				if ( markerSolution !== null ) {
-					this.renderEngineeringCornerDebug(
-						markerSolution,
-						this.getActiveEngineeringControlTarget(),
-						[],
-						'model-runtime-ready'
-					);
-				}
+				this.syncLocalizationDebugObjects( 'model-runtime-ready' );
 				this.tryAutoPlaceAppliedMarkerSolution();
 			},
 			onRuntimeLoadFailed: ( error ) => {
@@ -1265,8 +1258,10 @@ export class ThreeEngine {
 		const fallbackSource = fallbackSolution?.source ?? 'unknown';
 
 		this.activeMarkerArFromEnuSolution = null;
+		this.markerCalibrationCapturedCornersAr = [];
 		this.activeMarkerLocalizationResult = null;
 		this.markerCorrectionFallbackArFromEnuSolution = null;
+		this.clearEngineeringCornerDebug();
 
 		if ( fallbackSolution !== null ) {
 			const appliedToPlacedModel = this.placementSession.applyArLocalizationSolution( {
@@ -2076,7 +2071,7 @@ export class ThreeEngine {
 	private renderEngineeringCornerDebug(
 		arFromEnuSolution: ArFromEnuSolution,
 		controlTarget: VisualControlTarget | null,
-		capturedCornersAr: THREE.Vector3[] = [],
+		capturedCornersAr: THREE.Vector3[],
 		updateReason = 'unknown'
 	): void {
 
@@ -2100,8 +2095,13 @@ export class ThreeEngine {
 				color: 0x32ff8f
 			} );
 		}
-		if ( controlTarget?.cornersEnu !== undefined ) {
+		if ( controlTarget?.cornersEnu?.length === 4 ) {
 			const markerCornersEnu = controlTarget.cornersEnu.map( tupleToVector3 );
+			this.addDebugPoint(
+				'marker-center',
+				averageVectors( markerCornersEnu ).applyMatrix4( arFromEnuSolution.matrix ),
+				0x00d4ff
+			);
 			const markerPhysicalText = capturedCornersAr.length === 4
 				? `RTK marker 边长 ${computeSideLengths( markerCornersEnu ).map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m；采集边长 ${computeSideLengths( capturedCornersAr ).map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m。请确认 RTK marker 四角和当前采集的三角桶底座四角是同一组物理点。`
 				: '请确认 RTK 测量的 marker 四角和当前采集的三角桶底座四角是同一组物理点。三角桶如果被移动或旋转，校正会稳定但整体偏移。';
@@ -2154,7 +2154,6 @@ export class ThreeEngine {
 			if ( markerCornersEnu.length === 4 ) {
 				const markerCenterAr = averageVectors( markerCornersEnu )
 					.applyMatrix4( arFromEnuSolution.matrix );
-				this.addDebugPoint( 'marker-center', markerCenterAr, 0x00d4ff );
 				this.addDebugPoint( 'footprint-center', footprintCenterAr, 0xffd84d );
 				this.addDebugLine( 'marker-to-footprint-center', [ markerCenterAr, footprintCenterAr ], 0xffd84d );
 			}
@@ -2221,6 +2220,22 @@ export class ThreeEngine {
 		} );
 		this.engineeringDebugRenderSuccessCount += 1;
 		this.engineeringDebugBlockedReason = null;
+
+	}
+
+	private syncLocalizationDebugObjects(updateReason: string): void {
+
+		const markerSolution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
+		if ( markerSolution === null ) {
+			return;
+		}
+
+		this.renderEngineeringCornerDebug(
+			markerSolution,
+			this.getActiveEngineeringControlTarget(),
+			this.markerCalibrationCapturedCornersAr,
+			updateReason
+		);
 
 	}
 
@@ -2345,14 +2360,7 @@ export class ThreeEngine {
 		}
 
 		this.siteOriginReferencePanelOpen = ! this.siteOriginReferencePanelOpen;
-		if ( this.activeMarkerArFromEnuSolution !== null ) {
-			this.renderEngineeringCornerDebug(
-				this.activeMarkerArFromEnuSolution,
-				this.getActiveEngineeringControlTarget(),
-				[],
-				'site-origin-reference-toggle'
-			);
-		}
+		this.syncLocalizationDebugObjects( 'site-origin-reference-toggle' );
 		this.setStatus( this.siteOriginReferencePanelOpen ? '已显示参考原点说明。' : '已关闭参考原点说明。' );
 		return true;
 
@@ -3347,6 +3355,7 @@ export class ThreeEngine {
 			? null
 			: cloneArFromEnuSolution( fallbackSolution );
 		this.activeMarkerArFromEnuSolution = cloneArFromEnuSolution( solution.arFromEnuSolution );
+		this.markerCalibrationCapturedCornersAr = ( metadata.capturedCornersAr ?? [] ).map( ( point ) => point.clone() );
 		this.arCoordinateService.setArFromEnuSolution( this.activeMarkerArFromEnuSolution, this.currentArSessionId );
 		this.annotationLayer.updateFromCalibration( this.arCoordinateService );
 		this.activeMarkerLocalizationResult = {
@@ -3395,14 +3404,7 @@ export class ThreeEngine {
 		const modelVisibleBefore = placedModelBefore?.visible === true;
 		const placeModel = metadata.placeModel === true;
 		this.placementSession.cancelAutoPlacement();
-		if ( this.registrationSolution !== null ) {
-			this.renderEngineeringCornerDebug(
-				solution.arFromEnuSolution,
-				currentTarget ?? null,
-				metadata.capturedCornersAr ?? [],
-				'marker-calibration'
-			);
-		}
+		this.syncLocalizationDebugObjects( 'marker-solution-applied' );
 		const appliedToPlacedModel = false;
 		const autoPlacementPendingAfter = this.placementSession.getAutoPlacementPending();
 		const placedModelAfter = this.placementSession.getPlacedModel();
@@ -3546,7 +3548,7 @@ export class ThreeEngine {
 		this.renderEngineeringCornerDebug(
 			arFromEnuSolution,
 			guard.controlTarget ?? this.getActiveEngineeringControlTarget(),
-			[],
+			this.markerCalibrationCapturedCornersAr,
 			'engineering-place-button'
 		);
 		this.logModelAxisMappingCheck( arFromEnuSolution );
@@ -3896,6 +3898,7 @@ export class ThreeEngine {
 	private resetMarkerLocalizationCorrection(): void {
 
 		this.activeMarkerArFromEnuSolution = null;
+		this.markerCalibrationCapturedCornersAr = [];
 		this.activeMarkerLocalizationResult = null;
 		this.markerCorrectionFallbackArFromEnuSolution = null;
 		this.arCoordinateService.clear( 'marker-localization-reset' );
