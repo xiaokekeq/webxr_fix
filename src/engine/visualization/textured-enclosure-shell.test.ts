@@ -18,16 +18,6 @@ describe( 'TexturedEnclosureShell', () => {
 		expect( placedModel.getObjectByName( '__model-conforming-shell' )?.visible ).toBe( false );
 		shell.sync( placedModel, 'layer-peeling' );
 		expect( placedModel.getObjectByName( '__model-conforming-shell' )?.visible ).toBe( true );
-		const right = shell.getDebugSnapshot().faces.find( ( face ) => face.face === 'right' )!;
-		expect( right ).toMatchObject( { resolved: true, meshExists: true, attachedToRoot: true, visible: true, parentVisible: true, materialSide: 'double' } );
-		expect( right.positionCount ).toBeGreaterThanOrEqual( 3 );
-		expect( right.triangleCount ).toBeGreaterThanOrEqual( 1 );
-		expect( right.localBoundsSize ).not.toBeNull();
-		expect( right.worldBoundsSize ).not.toBeNull();
-		shell.setRightForceDebug( true );
-		expect( shell.getDebugSnapshot().faces.find( ( face ) => face.face === 'right' ) ).toMatchObject( { depthTest: false, depthWrite: false, frustumCulled: false } );
-		shell.setRightForceDebug( false );
-		expect( shell.getDebugSnapshot().faces.find( ( face ) => face.face === 'right' ) ).toMatchObject( { depthTest: true, depthWrite: true, frustumCulled: true } );
 		shell.sync( placedModel, 'section-cut' );
 		expect( placedModel.getObjectByName( '__model-conforming-shell' )?.visible ).toBe( true );
 		shell.sync( placedModel, 'complete' );

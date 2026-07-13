@@ -34,22 +34,12 @@ const markerApplyFeedback = ref<{
 	createdAt: number;
 } | null>( null );
 const arDebugMode = isArDebugEnabled();
-const shellDebugEnabled = computed( () => import.meta.env.DEV || route.query.shellDebug === '1' );
-const shellForceDebug = ref( false );
 const debugInfoOpen = ref( false );
 const registrationDiagnosticOpen = ref( false );
 const modelPlacementDiagnosticOpen = ref( false );
 const diagnosticCopyFeedback = ref( '' );
 
 const engine = computed( () => store.engine );
-const shellDebug = computed( () => engine.value.conformingShellDebug );
-
-function setShellRightForceDebug(active: boolean): void {
-
-	shellForceDebug.value = active;
-	store.actions.setConformingShellRightForceDebug( active );
-
-}
 const { activeAdjustment, floatingAdjustment, selectMaterial, selectTool } = useUndergroundDisplayControls( engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
@@ -1067,26 +1057,6 @@ function setArOverlayClass(active: boolean): void {
 			</button>
 		</nav>
 
-		<section
-			v-if="hasArSession && shellDebugEnabled"
-			class="shell-debug-card"
-			data-ar-ui="true"
-			@pointerdown.stop="store.actions.handleArUiInteraction()"
-			@click.stop
-		>
-			<div>Shell root={{ shellDebug.rootExists }} visible={{ shellDebug.rootVisible }} faces={{ shellDebug.actualFaceCount }}/{{ shellDebug.expectedFaceCount }}</div>
-			<div
-				v-for="face in shellDebug.faces"
-				:key="face.face"
-				class="shell-debug-face"
-				:class="{ error: !face.meshExists || face.triangleCount === 0 || !face.localBoundsSize || !face.averageNormal, warning: !face.visible || !face.parentVisible || face.materialSide !== 'double' }"
-			>
-				<strong>{{ face.face }}</strong> {{ face.meshExists ? 'OK' : 'ERR' }} tris={{ face.triangleCount }} pos={{ face.positionCount }}<br>
-				<span v-if="face.face === 'right'">resolved={{ face.resolved }} attached={{ face.attachedToRoot }} visible={{ face.visible }}/{{ face.parentVisible }}<br>bounds={{ face.localBoundsSize ?? '-' }} world={{ face.worldBoundsSize ?? '-' }}<br>normal={{ face.averageNormal ?? '-' }} offset={{ face.averageOffsetDirection ?? '-' }} candidates={{ face.candidateTriangleCount }} accepted={{ face.acceptedTriangleCount }}</span>
-			</div>
-			<label class="shell-debug-force"><input type="checkbox" :checked="shellForceDebug" @change="setShellRightForceDebug(($event.target as HTMLInputElement).checked)"> RIGHT FORCE DEBUG ACTIVE</label>
-		</section>
-
 		<ArFloatingValueRail
 			v-if="hasArSession && ui.drawerOpen === false && floatingAdjustment !== null && showMarkerCalibrationOverlay === false"
 			:model-value="floatingAdjustment.value"
@@ -1501,26 +1471,6 @@ function setArOverlayClass(active: boolean): void {
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	backdrop-filter: blur(24px);
 }
-
-.shell-debug-card {
-	position: fixed;
-	z-index: 6;
-	top: max(72px, env(safe-area-inset-top));
-	right: 14px;
-	max-width: min(310px, calc(100vw - 28px));
-	padding: 9px;
-	border: 1px solid rgba(45, 212, 191, 0.35);
-	border-radius: 12px;
-	background: rgba(8, 15, 27, 0.78);
-	color: #ccfbf1;
-	font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
-	backdrop-filter: blur(14px);
-}
-
-.shell-debug-face { margin-top: 5px; color: #bbf7d0; }
-.shell-debug-face.warning { color: #fde68a; }
-.shell-debug-face.error { color: #fecaca; }
-.shell-debug-force { display: block; margin-top: 7px; color: #f0abfc; }
 
 .dock-item {
 	min-height: 50px;

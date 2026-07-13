@@ -7,7 +7,7 @@ import {
 
 export type EnclosureFaceName = BoundarySurfaceName;
 
-export type EnclosureShellBuildFailureReason = 'empty-model' | 'required-boundary-surface-missing' | 'invalid-boundary-surface';
+export type EnclosureShellBuildFailureReason = 'empty-model' | 'missing-boundary-surface';
 
 export type EnclosureShellBuildResult = {
 	ok: true;
@@ -44,7 +44,6 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 		mesh.name = `__shell-${surface.face}`;
 		applyShellFlags( mesh );
 		mesh.userData.boundarySurfaceFace = surface.face;
-		mesh.userData.__conformingShellDebug = surface.debug;
 		root.add( mesh );
 	}
 

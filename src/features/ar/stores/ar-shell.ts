@@ -264,7 +264,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void { ensureController().actions.setUndergroundMaterialMode( mode ); },
 		setUndergroundInspectionTool(tool: UndergroundInspectionTool): void { ensureController().actions.setUndergroundInspectionTool( tool ); },
-		setConformingShellRightForceDebug(active: boolean): void { ensureController().actions.setConformingShellRightForceDebug( active ); },
 		setTransparentXrayValue(value: number): void { ensureController().actions.setTransparentXrayValue( value ); },
 		setLayerPeelingValue(value: number): void { ensureController().actions.setLayerPeelingValue( value ); },
 		setSectionCutValue(value: number): void { ensureController().actions.setSectionCutValue( value ); },
