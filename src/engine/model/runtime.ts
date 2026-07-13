@@ -32,22 +32,47 @@ export interface LoadedModelRuntimeBundle {
 	modelPlacementReport: ReturnType<typeof readPlaceableTemplateReport>;
 	registrationSolution: EngineeringRegistrationSolution;
 	modelDefinition: ModelCatalogItem;
+	ownedGeometries: Set<THREE.BufferGeometry>;
+	ownedMaterials: Set<THREE.Material>;
+	ownedTextures: Set<THREE.Texture>;
 }
 
 const TEXTURE_KEYS = [ 'map', 'alphaMap', 'aoMap', 'bumpMap', 'displacementMap', 'emissiveMap', 'envMap', 'lightMap', 'metalnessMap', 'normalMap', 'roughnessMap', 'specularMap' ] as const;
 
 export function disposeModelRuntimeBundle(bundle: LoadedModelRuntimeBundle): void {
 
-	const geometries = new Set<THREE.BufferGeometry>(); const materials = new Set<THREE.Material>(); const textures = new Set<THREE.Texture>();
-	bundle.modelTemplate.traverse( ( object ) => {
-		if ( object instanceof THREE.Mesh === false ) return;
-		geometries.add( object.geometry );
-		( Array.isArray( object.material ) ? object.material : [ object.material ] ).forEach( ( material ) => materials.add( material ) );
-	} );
-	materials.forEach( ( material ) => { const textured = material as THREE.Material & Record<string, unknown>; TEXTURE_KEYS.forEach( ( key ) => { const texture = textured[ key ]; if ( texture instanceof THREE.Texture ) textures.add( texture ); } ); material.dispose(); } );
-	geometries.forEach( ( geometry ) => geometry.dispose() );
-	textures.forEach( ( texture ) => texture.dispose() );
+	bundle.ownedMaterials.forEach( ( material ) => material.dispose() );
+	bundle.ownedGeometries.forEach( ( geometry ) => geometry.dispose() );
+	bundle.ownedTextures.forEach( ( texture ) => texture.dispose() );
+	bundle.ownedMaterials.clear();
+	bundle.ownedGeometries.clear();
+	bundle.ownedTextures.clear();
 	bundle.modelTemplate.removeFromParent();
+
+}
+
+function collectOwnedModelResources(modelTemplate: THREE.Object3D): Pick<LoadedModelRuntimeBundle, 'ownedGeometries' | 'ownedMaterials' | 'ownedTextures'> {
+
+	const ownedGeometries = new Set<THREE.BufferGeometry>();
+	const ownedMaterials = new Set<THREE.Material>();
+	const ownedTextures = new Set<THREE.Texture>();
+	modelTemplate.traverse( ( object ) => {
+		if ( object instanceof THREE.Mesh === false ) return;
+		ownedGeometries.add( object.geometry );
+		( Array.isArray( object.material ) ? object.material : [ object.material ] ).forEach( ( material ) => ownedMaterials.add( material ) );
+	} );
+	ownedMaterials.forEach( ( material ) => collectMaterialTextures( material, ownedTextures ) );
+	return { ownedGeometries, ownedMaterials, ownedTextures };
+
+}
+
+function collectMaterialTextures(material: THREE.Material, target: Set<THREE.Texture>): void {
+
+	const textured = material as THREE.Material & Record<string, unknown>;
+	TEXTURE_KEYS.forEach( ( key ) => {
+		const texture = textured[ key ];
+		if ( texture instanceof THREE.Texture ) target.add( texture );
+	} );
 
 }
 
@@ -86,7 +111,8 @@ export async function loadModelRuntimeBundle(
 		modelSourceMetadata: readModelSourceMetadata( modelTemplate ),
 		modelPlacementReport,
 		registrationSolution,
-		modelDefinition
+		modelDefinition,
+		...collectOwnedModelResources( modelTemplate )
 	};
 
 }
