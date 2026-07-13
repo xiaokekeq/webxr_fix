@@ -11,7 +11,6 @@ import type {
 import {
 	createEnuFrame,
 	enuToGeodetic,
-	geodeticToEnu,
 	type EnuFrame,
 	type GeodeticCoordinate
 } from '@/localization/core/geodesy.js';
@@ -85,7 +84,7 @@ export function solveEngineeringRegistration(
 			.multiplyScalar( modelUnitScale )
 			.clone();
 		const worldGeodetic = point.world;
-		const worldEnu = geodeticToEnu( worldGeodetic, siteEnuFrame );
+		const worldEnu = new THREE.Vector3( point.enu[ 0 ], point.enu[ 1 ], point.enu[ 2 ] );
 
 		return {
 			id,
@@ -111,6 +110,19 @@ export function solveEngineeringRegistration(
 	const rootSiteEnu = modelToSite.translation.clone();
 	const rootWorldGeodetic = enuToGeodetic( rootSiteEnu, siteEnuFrame );
 	const rootHeadingDeg = extractHeadingDegFromQuaternion( modelToSite.rotation );
+	console.info( '[ModelControlPointRegistrationReady]', {
+		modelId: config.modelId,
+		siteId: config.siteId,
+		source: 'controlPoints[id].modelLocal + controlPoints[id].enu',
+		controlPointCount: controlPoints.length,
+		controlPointIds: controlPoints.map( ( point ) => point.id ),
+		modelLocal: controlPoints.map( ( point ) => point.modelLocal.toArray() ),
+		targetEnu: controlPoints.map( ( point ) => point.worldEnu.toArray() ),
+		rmsErrorMeters: modelToSite.rmsErrorMeters,
+		rotation: modelToSite.rotation.toArray(),
+		translation: modelToSite.translation.toArray(),
+		scale: modelToSite.scale
+	} );
 
 	return {
 		modelId: config.modelId,

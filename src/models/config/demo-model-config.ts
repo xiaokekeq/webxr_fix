@@ -25,7 +25,9 @@ export interface DemoModelLocalPoint {
 
 export interface DemoModelControlPointCorrespondence {
 	modelLocal: DemoModelLocalPoint;
+	enu: [ number, number, number ];
 	world: GeodeticCoordinate;
+	cornerRole?: string;
 }
 
 export interface ModelControlTargetDiagnostics {
@@ -128,6 +130,7 @@ export interface UndergroundDisplayConfig {
 
 export interface DemoModelConfig {
 	modelId: string;
+	siteId: string;
 	siteFrame: {
 		origin: GeodeticCoordinate;
 		axes: 'enu';
@@ -232,9 +235,13 @@ interface LocalDebugModelConfig {
 interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
+	modelControlPointOrder?: string[];
+	modelControlPointCornerOrder?: string[];
 	controlPoints: Record<string, {
 		modelLocal: DemoModelLocalPoint;
+		enu?: [ number, number, number ];
 		world: RawGeodeticCoordinateShape;
+		cornerRole?: string;
 	} | LegacyControlPointShape>;
 	markers?: RawMarkerEngineeringConfig[];
 	attachments?: RawDemoModelAttachmentShape[];
@@ -287,6 +294,9 @@ export async function loadDemoModelConfig(
 			configUrl: url,
 			modelId: 'modelId' in raw ? raw.modelId : 'siteId' in raw ? raw.siteId : null,
 			hasSiteFrameOrigin: 'siteFrame' in raw && raw.siteFrame?.origin !== undefined,
+			rawModelControlPointOrder: Array.isArray( ( raw as { modelControlPointOrder?: unknown } ).modelControlPointOrder )
+				? ( raw as { modelControlPointOrder: unknown[] } ).modelControlPointOrder
+				: [],
 			rawModelControlPointCount: getRawModelControlPointCount( raw ),
 			rawControlTargetsCount: 'controlTargets' in raw && Array.isArray( raw.controlTargets ) ? raw.controlTargets.length : 0,
 			rawMarkersCount: 'markers' in raw && Array.isArray( raw.markers ) ? raw.markers.length : 0,
@@ -334,27 +344,31 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 	};
 
 	const normalizedControlPoints: Record<string, DemoModelControlPointCorrespondence> = {};
+	const controlPointOrder = config.modelControlPointOrder;
+	if ( Array.isArray( controlPointOrder ) === false || controlPointOrder.length === 0 ) {
+		throw new Error( 'model-control-point-order-missing' );
+	}
 
-	for ( const [ id, point ] of Object.entries( config.controlPoints ) ) {
+	for ( const id of controlPointOrder ) {
+		const point = config.controlPoints[ id ];
+		if ( point === undefined ) {
+			throw new Error( `model-control-point-record-missing:${id}` );
+		}
 		if ( isControlPointCorrespondence( point ) ) {
+			const enu = normalizeEnuTuple( point.enu );
+			if ( enu === undefined ) {
+				throw new Error( `model-control-point-enu-missing:${id}` );
+			}
 			normalizedControlPoints[ id ] = {
 				...( point as unknown as Record<string, unknown> ),
 				modelLocal: point.modelLocal,
+				enu,
 				world: normalizeGeodeticShape( point.world, `${id}.world` )
 			};
 			continue;
 		}
 
-		const legacyPoint = point as LegacyControlPointShape;
-		const normalizedModelLocal = {
-			x: legacyPoint.x,
-			y: legacyPoint.y,
-			z: legacyPoint.z
-		};
-		normalizedControlPoints[ id ] = {
-			modelLocal: normalizedModelLocal,
-			world: synthesizeWorldControlPoint( normalizedModelLocal, anchor, config.yaw, config.scale )
-		};
+		throw new Error( `model-control-point-model-local-missing:${id}` );
 	}
 
 	const modelControlTargetDiagnostics = createModelControlTargetDiagnostics(
@@ -369,6 +383,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 
 	return {
 		modelId: config.modelId,
+		siteId: typeof config.siteId === 'string' && config.siteId.length > 0 ? config.siteId : config.modelId,
 		siteFrame,
 		anchor,
 		yaw: config.yaw,
@@ -423,6 +438,7 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 
 	return {
 		modelId: config.siteId,
+		siteId: config.siteId,
 		siteFrame: {
 			origin,
 			axes: 'enu'
@@ -481,6 +497,7 @@ function normalizeLocalDebugControlPoints(
 
 			normalizedControlPoints[ point.id ] = {
 				modelLocal,
+				enu: [ siteEnu.x, siteEnu.z, siteEnu.y ],
 				world
 			};
 		}
@@ -500,6 +517,7 @@ function normalizeLocalDebugControlPoints(
 	return {
 		ANCHOR: {
 			modelLocal: anchorModelLocal,
+			enu: [ 0, 0, 0 ],
 			world: origin
 		},
 		AXIS_EAST: {
@@ -508,6 +526,7 @@ function normalizeLocalDebugControlPoints(
 				y: anchorModelLocal.y,
 				z: anchorModelLocal.z
 			},
+			enu: [ 1, 0, 0 ],
 			world: synthesizeLocalDebugAnchorWorldPoint(
 				anchorModelLocal,
 				{ x: anchorModelLocal.x + 1, y: anchorModelLocal.y, z: anchorModelLocal.z },
@@ -522,6 +541,7 @@ function normalizeLocalDebugControlPoints(
 				y: anchorModelLocal.y,
 				z: anchorModelLocal.z - 1
 			},
+			enu: [ 0, 1, 0 ],
 			world: synthesizeLocalDebugAnchorWorldPoint(
 				anchorModelLocal,
 				{ x: anchorModelLocal.x, y: anchorModelLocal.y, z: anchorModelLocal.z - 1 },
@@ -536,6 +556,7 @@ function normalizeLocalDebugControlPoints(
 				y: anchorModelLocal.y + 1,
 				z: anchorModelLocal.z
 			},
+			enu: [ 0, 0, 1 ],
 			world: synthesizeLocalDebugAnchorWorldPoint(
 				anchorModelLocal,
 				{ x: anchorModelLocal.x, y: anchorModelLocal.y + 1, z: anchorModelLocal.z },
@@ -876,7 +897,7 @@ function createModelControlTargetDiagnostics(
 	if ( Object.values( controlPoints ).some( ( point ) => [ point.modelLocal.x, point.modelLocal.y, point.modelLocal.z ].some( ( value ) => Number.isFinite( value ) === false ) ) ) {
 		return { ...base, modelControlTargetValidationState: 'invalid', modelControlTargetFailureReason: 'model-control-target-model-local-missing' };
 	}
-	if ( Object.values( controlPoints ).some( ( point ) => [ point.world.lat, point.world.lon, point.world.alt ].some( ( value ) => Number.isFinite( value ) === false ) ) ) {
+	if ( Object.values( controlPoints ).some( ( point ) => point.enu.some( ( value ) => Number.isFinite( value ) === false ) ) ) {
 		return { ...base, modelControlTargetValidationState: 'invalid', modelControlTargetFailureReason: 'model-control-target-enu-missing' };
 	}
 	return { ...base, modelControlTargetValidationState: 'ready' };
@@ -1501,11 +1522,13 @@ function createConfigDebugPayload(configUrl: string, config: DemoModelConfig): R
 
 	return {
 		modelId: config.modelId,
+		siteId: config.siteId,
 		configUrl,
 		rawModelControlPointCount: config.modelControlTargetDiagnostics.rawModelControlPointCount,
 		normalizedModelControlTargetCount: config.modelControlTargetDiagnostics.normalizedModelControlTargetCount,
 		requiredModelControlTargetCount: config.modelControlTargetDiagnostics.requiredModelControlTargetCount,
 		modelControlTargetIds: config.modelControlTargetDiagnostics.modelControlTargetIds,
+		modelControlPointOrder: config.modelControlTargetDiagnostics.modelControlTargetIds,
 		modelControlTargetValidationState: config.modelControlTargetDiagnostics.modelControlTargetValidationState,
 		modelControlTargetFailureReason: config.modelControlTargetDiagnostics.modelControlTargetFailureReason ?? null,
 		siteFrameOriginLoaded: typeof config.siteFrame.origin.lat === 'number' && typeof config.siteFrame.origin.lon === 'number',
@@ -1525,6 +1548,7 @@ function isControlPointCorrespondence(
 		| LegacyControlPointShape
 		| {
 			modelLocal: DemoModelLocalPoint;
+			enu?: [ number, number, number ];
 			world: RawGeodeticCoordinateShape;
 		}
 ): point is DemoModelControlPointCorrespondence {
