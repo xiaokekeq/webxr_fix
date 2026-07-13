@@ -1,23 +1,21 @@
 import * as THREE from 'three';
 
-export type BoundarySurfaceName = 'front' | 'back' | 'left' | 'right' | 'bottom';
-
-export interface ResolvedBoundarySurface {
-	face: BoundarySurfaceName;
+export interface ResolvedConformingSurface {
 	sourceMeshes: THREE.Mesh[];
 	geometry: THREE.BufferGeometry;
 	materials: THREE.Material[];
 	triangleCount: number;
+	excludedTopTriangleCount: number;
 }
 
-export type BoundarySurfaceResolveResult = {
+export type ConformingSurfaceResolveResult = {
 	ok: true;
-	surfaces: ResolvedBoundarySurface[];
+	surface: ResolvedConformingSurface;
 	bounds: THREE.Box3;
 	epsilon: number;
 } | {
 	ok: false;
-	reason: 'empty-model' | 'missing-boundary-surface';
+	reason: 'empty-model' | 'no-exposed-surface' | 'invalid-surface';
 	message: string;
 };
 
@@ -30,17 +28,13 @@ interface SurfaceTriangle {
 	sourceMesh: THREE.Mesh;
 	center: THREE.Vector3;
 	averageNormal: THREE.Vector3;
-	explicitFace: BoundarySurfaceName | null;
 }
 
-const faceNames: BoundarySurfaceName[] = [ 'front', 'back', 'left', 'right', 'bottom' ];
-
-export function resolveModelBoundarySurfaces(modelRoot: THREE.Object3D): BoundarySurfaceResolveResult {
+export function resolveModelConformingSurface(modelRoot: THREE.Object3D): ConformingSurfaceResolveResult {
 
 	modelRoot.updateWorldMatrix( true, true );
-	const sourceMeshes = listBoundarySurfaceSourceMeshes( modelRoot );
-	if ( sourceMeshes.length === 0 ) return { ok: false, reason: 'empty-model', message: 'Model has no eligible boundary surface meshes.' };
-	if ( import.meta.env.DEV ) console.info( '[ModelSurfaceCandidates]', { meshes: sourceMeshes.map( describeSourceMesh ) } );
+	const sourceMeshes = listConformingSurfaceSourceMeshes( modelRoot );
+	if ( sourceMeshes.length === 0 ) return { ok: false, reason: 'empty-model', message: 'Model has no eligible conforming surface meshes.' };
 
 	const inverseRoot = modelRoot.matrixWorld.clone().invert();
 	const triangles = sourceMeshes.flatMap( ( mesh ) => collectMeshTriangles( mesh, inverseRoot ) );
@@ -50,29 +44,24 @@ export function resolveModelBoundarySurfaces(modelRoot: THREE.Object3D): Boundar
 	const center = bounds.getCenter( new THREE.Vector3() );
 	triangles.forEach( ( triangle ) => orientTriangleOutward( triangle, center ) );
 
-	const hasExplicitFaces = faceNames.every( ( face ) => triangles.some( ( triangle ) => triangle.explicitFace === face ) );
-	const resolved = new Map<BoundarySurfaceName, SurfaceTriangle[]>();
-	faceNames.forEach( ( face ) => resolved.set( face, [] ) );
-	for ( const triangle of triangles ) {
-		const face = hasExplicitFaces ? triangle.explicitFace : classifyExposedTriangle( triangle, triangles, epsilon );
-		if ( face !== null ) resolved.get( face )!.push( triangle );
+	const exposedTriangles = triangles.filter( ( triangle ) => isExposedTriangle( triangle, triangles, epsilon ) );
+	if ( exposedTriangles.length === 0 ) return { ok: false, reason: 'no-exposed-surface', message: 'Model has no exposed boundary triangles.' };
+	const shellTriangles = exposedTriangles.filter( ( triangle ) => isTopFacingTriangle( triangle ) === false );
+	if ( shellTriangles.length === 0 ) return { ok: false, reason: 'no-exposed-surface', message: 'All exposed triangles were classified as top-facing.' };
+
+	const surface = createResolvedConformingSurface( shellTriangles, epsilon, exposedTriangles.length - shellTriangles.length );
+	if ( isValidSurface( surface ) === false ) {
+		surface.geometry.dispose();
+		return { ok: false, reason: 'invalid-surface', message: 'Resolved conforming surface geometry is invalid.' };
 	}
-	const missing = faceNames.filter( ( face ) => resolved.get( face )!.length === 0 );
-	if ( missing.length > 0 ) return { ok: false, reason: 'missing-boundary-surface', message: `Could not resolve boundary surfaces: ${missing.join( ', ' )}.` };
-	return {
-		ok: true,
-		bounds,
-		epsilon,
-		surfaces: faceNames.map( ( face ) => createResolvedSurface( face, resolved.get( face )!, epsilon ) )
-	};
+	return { ok: true, surface, bounds, epsilon };
 
 }
 
-export function isBoundarySurfaceSourceMesh(object: THREE.Object3D): object is THREE.Mesh {
+export function isConformingSurfaceSourceMesh(object: THREE.Object3D): object is THREE.Mesh {
 
 	const name = object.name.toLowerCase();
 	return object instanceof THREE.Mesh
-		&& object.visible !== false
 		&& object.userData.__nonSelectableHelper !== true
 		&& object.userData.__visualizationHelper !== true
 		&& object.userData.__enclosureShell !== true
@@ -89,33 +78,11 @@ export function isBoundarySurfaceSourceMesh(object: THREE.Object3D): object is T
 
 }
 
-function listBoundarySurfaceSourceMeshes(root: THREE.Object3D): THREE.Mesh[] {
+function listConformingSurfaceSourceMeshes(root: THREE.Object3D): THREE.Mesh[] {
 
 	const meshes: THREE.Mesh[] = [];
-	root.traverse( ( object ) => { if ( isBoundarySurfaceSourceMesh( object ) ) meshes.push( object ); } );
+	root.traverse( ( object ) => { if ( isConformingSurfaceSourceMesh( object ) ) meshes.push( object ); } );
 	return meshes;
-
-}
-
-function describeSourceMesh(mesh: THREE.Mesh): Record<string, unknown> {
-
-	mesh.geometry.computeBoundingBox();
-	const normals = mesh.geometry.getAttribute( 'normal' );
-	const averageNormal = new THREE.Vector3();
-	if ( normals !== undefined ) for ( let index = 0; index < normals.count; index += 1 ) averageNormal.add( new THREE.Vector3().fromBufferAttribute( normals, index ) );
-	if ( averageNormal.lengthSq() > 0 ) averageNormal.normalize();
-	const materials = Array.isArray( mesh.material ) ? mesh.material : [ mesh.material ];
-	return {
-		name: mesh.name,
-		parentName: mesh.parent?.name ?? '',
-		materialName: materials.map( ( material ) => material.name ).join( '|' ),
-		layerId: mesh.userData.__layerId ?? null,
-		triangleCount: ( mesh.geometry.getIndex()?.count ?? mesh.geometry.getAttribute( 'position' ).count ) / 3,
-		localBounds: mesh.geometry.boundingBox === null ? null : { min: mesh.geometry.boundingBox.min.toArray(), max: mesh.geometry.boundingBox.max.toArray() },
-		averageNormal: averageNormal.toArray(),
-		hasUv: mesh.geometry.getAttribute( 'uv' ) !== undefined,
-		hasMap: materials.some( ( material ) => ( material as THREE.Material & { map?: THREE.Texture | null } ).map !== null && ( material as THREE.Material & { map?: THREE.Texture | null } ).map !== undefined )
-	};
 
 }
 
@@ -131,8 +98,7 @@ function collectMeshTriangles(mesh: THREE.Mesh, inverseRoot: THREE.Matrix4): Sur
 	const meshToRoot = new THREE.Matrix4().multiplyMatrices( inverseRoot, mesh.matrixWorld );
 	const normalMatrix = new THREE.Matrix3().getNormalMatrix( meshToRoot );
 	const materials = Array.isArray( mesh.material ) ? mesh.material : [ mesh.material ];
-	const triangleCount = ( index?.count ?? position.count ) / 3;
-	const explicitFace = normalizeBoundarySurfaceName( mesh.userData.boundarySurfaceFace );
+	const triangleCount = Math.floor( ( index?.count ?? position.count ) / 3 );
 	const triangles: SurfaceTriangle[] = [];
 	for ( let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1 ) {
 		const offset = triangleIndex * 3;
@@ -141,19 +107,19 @@ function collectMeshTriangles(mesh: THREE.Mesh, inverseRoot: THREE.Matrix4): Sur
 		const faceNormal = new THREE.Vector3().crossVectors( positions[ 1 ].clone().sub( positions[ 0 ] ), positions[ 2 ].clone().sub( positions[ 0 ] ) ).normalize();
 		if ( faceNormal.lengthSq() === 0 ) continue;
 		const normals = indices.map( ( vertexIndex ) => normal === undefined ? faceNormal.clone() : new THREE.Vector3().fromBufferAttribute( normal, vertexIndex ).applyMatrix3( normalMatrix ).normalize() ) as SurfaceTriangle['normals'];
-		const averageNormal = normals.reduce( ( sum, value ) => sum.add( value ), new THREE.Vector3() ).normalize();
 		const materialIndex = geometry.groups.find( ( group ) => offset >= group.start && offset < group.start + group.count )?.materialIndex ?? 0;
-		triangles.push( {
+		const triangle: SurfaceTriangle = {
 			positions,
 			normals,
 			uvs: uv === undefined ? null : indices.map( ( vertexIndex ) => new THREE.Vector2( uv.getX( vertexIndex ), uv.getY( vertexIndex ) ) ) as SurfaceTriangle['uvs'],
 			colors: color === undefined ? null : indices.map( ( vertexIndex ) => new THREE.Color().fromBufferAttribute( color, vertexIndex ) ) as SurfaceTriangle['colors'],
 			material: materials[ materialIndex ] ?? materials[ 0 ],
 			sourceMesh: mesh,
-			center: positions[ 0 ].clone().add( positions[ 1 ] ).add( positions[ 2 ] ).multiplyScalar( 1 / 3 ),
-			averageNormal,
-			explicitFace
-		} );
+			center: new THREE.Vector3(),
+			averageNormal: new THREE.Vector3()
+		};
+		refreshTriangleMetrics( triangle );
+		triangles.push( triangle );
 	}
 	return triangles;
 
@@ -161,48 +127,64 @@ function collectMeshTriangles(mesh: THREE.Mesh, inverseRoot: THREE.Matrix4): Sur
 
 function orientTriangleOutward(triangle: SurfaceTriangle, modelCenter: THREE.Vector3): void {
 
-	if ( triangle.averageNormal.dot( triangle.center.clone().sub( modelCenter ) ) >= 0 ) return;
-	triangle.averageNormal.negate();
+	if ( triangle.averageNormal.dot( triangle.center.clone().sub( modelCenter ) ) < 0 ) reverseTriangleWinding( triangle );
+
+}
+
+function reverseTriangleWinding(triangle: SurfaceTriangle): void {
+
+	[ triangle.positions[ 1 ], triangle.positions[ 2 ] ] = [ triangle.positions[ 2 ], triangle.positions[ 1 ] ];
+	[ triangle.normals[ 1 ], triangle.normals[ 2 ] ] = [ triangle.normals[ 2 ], triangle.normals[ 1 ] ];
+	if ( triangle.uvs !== null ) [ triangle.uvs[ 1 ], triangle.uvs[ 2 ] ] = [ triangle.uvs[ 2 ], triangle.uvs[ 1 ] ];
+	if ( triangle.colors !== null ) [ triangle.colors[ 1 ], triangle.colors[ 2 ] ] = [ triangle.colors[ 2 ], triangle.colors[ 1 ] ];
 	triangle.normals.forEach( ( normal ) => normal.negate() );
+	refreshTriangleMetrics( triangle );
 
 }
 
-function classifyExposedTriangle(triangle: SurfaceTriangle, allTriangles: SurfaceTriangle[], epsilon: number): BoundarySurfaceName | null {
+function refreshTriangleMetrics(triangle: SurfaceTriangle): void {
 
-	if ( isOccludedAlongOutwardNormal( triangle, allTriangles, epsilon ) ) return null;
+	triangle.center.copy( triangle.positions[ 0 ] ).add( triangle.positions[ 1 ] ).add( triangle.positions[ 2 ] ).multiplyScalar( 1 / 3 );
+	triangle.averageNormal.copy( triangle.normals[ 0 ] ).add( triangle.normals[ 1 ] ).add( triangle.normals[ 2 ] ).normalize();
+
+}
+
+function isExposedTriangle(triangle: SurfaceTriangle, allTriangles: readonly SurfaceTriangle[], epsilon: number): boolean {
+
+	return isOccludedAlongOutwardNormal( triangle, allTriangles, epsilon ) === false;
+
+}
+
+function isTopFacingTriangle(triangle: SurfaceTriangle): boolean {
+
 	const normal = triangle.averageNormal;
-	const horizontal = Math.max( Math.abs( normal.x ), Math.abs( normal.z ) );
-	if ( normal.y < - 0.5 && - normal.y >= horizontal ) return 'bottom';
-	if ( normal.y > 0.5 && normal.y > horizontal ) return null;
-	if ( horizontal < 0.2 ) return null;
-	if ( Math.abs( normal.x ) >= Math.abs( normal.z ) ) return normal.x < 0 ? 'left' : 'right';
-	return normal.z < 0 ? 'front' : 'back';
+	const horizontalDominance = Math.max( Math.abs( normal.x ), Math.abs( normal.z ) );
+	return normal.y > 0.5 && normal.y > horizontalDominance;
 
 }
 
-function isOccludedAlongOutwardNormal(triangle: SurfaceTriangle, allTriangles: SurfaceTriangle[], epsilon: number): boolean {
+function isOccludedAlongOutwardNormal(triangle: SurfaceTriangle, allTriangles: readonly SurfaceTriangle[], epsilon: number): boolean {
 
 	const ray = new THREE.Ray( triangle.center.clone().addScaledVector( triangle.averageNormal, epsilon * 2 ), triangle.averageNormal );
 	const hit = new THREE.Vector3();
-	const maxDistance = 1e6;
 	for ( const other of allTriangles ) {
 		if ( other === triangle ) continue;
-		if ( ray.intersectTriangle( other.positions[ 0 ], other.positions[ 1 ], other.positions[ 2 ], false, hit ) !== null && hit.distanceTo( ray.origin ) > epsilon && hit.distanceTo( ray.origin ) < maxDistance ) return true;
+		if ( ray.intersectTriangle( other.positions[ 0 ], other.positions[ 1 ], other.positions[ 2 ], false, hit ) !== null && hit.distanceTo( ray.origin ) > epsilon ) return true;
 	}
 	return false;
 
 }
 
-function createResolvedSurface(face: BoundarySurfaceName, triangles: SurfaceTriangle[], epsilon: number): ResolvedBoundarySurface {
+function createResolvedConformingSurface(triangles: SurfaceTriangle[], epsilon: number, excludedTopTriangleCount: number): ResolvedConformingSurface {
 
 	const materials: THREE.Material[] = [];
 	const sourceMeshes: THREE.Mesh[] = [];
 	const grouped = new Map<THREE.Material, SurfaceTriangle[]>();
 	for ( const triangle of triangles ) {
 		if ( sourceMeshes.includes( triangle.sourceMesh ) === false ) sourceMeshes.push( triangle.sourceMesh );
-		const byMaterial = grouped.get( triangle.material ) ?? [];
-		byMaterial.push( triangle );
-		grouped.set( triangle.material, byMaterial );
+		const materialTriangles = grouped.get( triangle.material ) ?? [];
+		materialTriangles.push( triangle );
+		grouped.set( triangle.material, materialTriangles );
 	}
 	const positions: number[] = [];
 	const normals: number[] = [];
@@ -228,12 +210,17 @@ function createResolvedSurface(face: BoundarySurfaceName, triangles: SurfaceTria
 	geometry.setAttribute( 'color', new THREE.Float32BufferAttribute( colors, 3 ) );
 	geometry.computeBoundingBox();
 	geometry.computeBoundingSphere();
-	return { face, sourceMeshes, geometry, materials, triangleCount: positions.length / 9 };
+	return { sourceMeshes, geometry, materials, triangleCount: positions.length / 9, excludedTopTriangleCount };
 
 }
 
-function normalizeBoundarySurfaceName(value: unknown): BoundarySurfaceName | null {
+function isValidSurface(surface: ResolvedConformingSurface): boolean {
 
-	return faceNames.includes( value as BoundarySurfaceName ) ? value as BoundarySurfaceName : null;
+	const position = surface.geometry.getAttribute( 'position' );
+	const normal = surface.geometry.getAttribute( 'normal' );
+	return position !== undefined && position.count >= 3 && normal !== undefined && normal.count === position.count
+		&& Array.from( position.array ).every( Number.isFinite ) && Array.from( normal.array ).every( Number.isFinite )
+		&& surface.geometry.boundingBox !== null && surface.geometry.boundingBox.isEmpty() === false
+		&& surface.geometry.boundingSphere !== null && Number.isFinite( surface.geometry.boundingSphere.radius );
 
 }

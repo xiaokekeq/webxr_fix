@@ -5,7 +5,7 @@ import { TexturedEnclosureShell } from './textured-enclosure-shell.js';
 
 describe( 'TexturedEnclosureShell', () => {
 
-	it( 'controls the cloned five-face shell as one root group', () => {
+	it( 'controls the cloned unified shell as one root group', () => {
 
 		const model = new THREE.Group();
 		model.add( new THREE.Mesh( new THREE.BoxGeometry( 2, 3, 4 ), new THREE.MeshBasicMaterial() ) );
@@ -26,8 +26,9 @@ describe( 'TexturedEnclosureShell', () => {
 		materials.setRoot( placedModel );
 		materials.applySection( new THREE.Plane( new THREE.Vector3( 0, 1, 0 ), 0 ) );
 		materials.applyMaterial( 'xray', 50 );
-		expect( ( ( placedModel.getObjectByName( '__shell-front' ) as THREE.Mesh ).material as THREE.MeshBasicMaterial ).opacity ).toBe( 1 );
-		expect( ( ( placedModel.getObjectByName( '__shell-front' ) as THREE.Mesh ).material as THREE.MeshBasicMaterial ).clippingPlanes ).toBeNull();
+		const surface = placedModel.getObjectByName( '__model-conforming-shell-surface' ) as THREE.Mesh;
+		expect( ( surface.material as THREE.MeshBasicMaterial ).opacity ).toBe( 1 );
+		expect( ( surface.material as THREE.MeshBasicMaterial ).clippingPlanes ).toBeNull();
 		materials.restore();
 		shell.dispose();
 
