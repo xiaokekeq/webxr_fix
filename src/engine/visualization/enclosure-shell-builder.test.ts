@@ -37,6 +37,11 @@ describe( 'enclosure shell builder', () => {
 
 		const model = groupWithMesh( new THREE.BoxGeometry( 2, 3, 4 ) );
 		model.add( new THREE.Mesh( new THREE.BoxGeometry( 1, 1, 1 ), new THREE.MeshBasicMaterial() ) );
+		const helper = new THREE.Mesh( new THREE.BoxGeometry( 1, 1, 1 ), new THREE.MeshBasicMaterial() );
+		helper.name = 'ignored-helper';
+		helper.position.x = 100;
+		helper.userData.__excludeFromLayerIndex = true;
+		model.add( helper );
 		const { renderer, render } = createRenderer();
 		const result = buildEnclosureShell( model, { renderer } );
 
@@ -45,9 +50,13 @@ describe( 'enclosure shell builder', () => {
 			expect( result.renderableCount ).toBe( 2 );
 			expect( result.meshCount ).toBe( 5 );
 			expect( render ).toHaveBeenCalledTimes( 5 );
+			expect( result.bounds.max.x ).toBe( 1 );
+			expect( ( render.mock.calls[ 0 ][ 0 ] as THREE.Scene ).getObjectByName( 'ignored-helper' )?.visible ).toBe( false );
 			expect( result.root.children.map( ( child ) => child.name ) ).toEqual( [
 				'__enclosure-front', '__enclosure-back', '__enclosure-left', '__enclosure-right', '__enclosure-bottom'
 			] );
+			expect( Array.from( ( result.root.getObjectByName( '__enclosure-front' ) as THREE.Mesh ).geometry.getAttribute( 'uv' ).array ) ).toEqual( [ 1, 0, 1, 1, 0, 1, 0, 0 ] );
+			expect( Array.from( ( result.root.getObjectByName( '__enclosure-bottom' ) as THREE.Mesh ).geometry.getAttribute( 'uv' ).array ) ).toEqual( [ 1, 1, 0, 1, 0, 0, 1, 0 ] );
 		}
 
 	} );
