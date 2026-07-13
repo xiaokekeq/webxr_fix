@@ -126,7 +126,6 @@ const AUTO_PLACE_AFTER_MARKER_CALIBRATION = import.meta.env.VITE_AUTO_PLACE_AFTE
 interface EngineeringDebugLayerOptions {
 	showMarkerExpected: boolean;
 	showMarkerCaptured: boolean;
-	showFootprintExpected: boolean;
 	showModelActualControlPoints: boolean;
 	showModelBoundingBox: boolean;
 }
@@ -276,7 +275,6 @@ export class ThreeEngine {
 	private readonly engineeringDebugLayers: EngineeringDebugLayerOptions = {
 		showMarkerExpected: readDebugLayerFlag( 'VITE_SHOW_MARKER_EXPECTED', false ),
 		showMarkerCaptured: readDebugLayerFlag( 'VITE_SHOW_MARKER_CAPTURED', false ),
-		showFootprintExpected: readDebugLayerFlag( 'VITE_SHOW_FOOTPRINT_EXPECTED', true ),
 		showModelActualControlPoints: readDebugLayerFlag( 'VITE_SHOW_MODEL_ACTUAL_CONTROL_POINTS', true ),
 		showModelBoundingBox: readDebugLayerFlag( 'VITE_SHOW_MODEL_BOUNDING_BOX', false )
 	};
@@ -2124,7 +2122,7 @@ export class ThreeEngine {
 			} );
 		}
 
-		if ( this.engineeringDebugLayers.showFootprintExpected && this.registrationSolution !== null ) {
+		if ( this.registrationSolution !== null ) {
 			const footprintControlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
 			const footprintCornersAr = this.getTargetControlPointCornersAr( arFromEnuSolution );
 			const footprintCenterAr = averageVectors( footprintControlPoints.map( ( point ) => point.worldEnu ) )
@@ -2208,11 +2206,27 @@ export class ThreeEngine {
 			}
 		}
 
+		const debugMeshes = this.registrationDebugRoot.children.filter( ( child ) => child instanceof THREE.Mesh );
+		const expectedYellowControlPointCount = ( this.registrationSolution?.controlPoints.length ?? 0 ) >= 4 ? 4 : 0;
+		const yellowControlPointCount = debugMeshes.filter( ( child ) => child.name.startsWith( 'footprint-enu-' ) ).length;
+		const markerReferenceSphereExists = debugMeshes.some( ( child ) => child.name === 'marker-center' );
+		const engineeringOriginSphereExists = debugMeshes.some( ( child ) => child.name === 'site-origin-reference-point' );
+		console.assert(
+			engineeringOriginSphereExists
+			&& ( controlTarget?.cornersEnu?.length !== 4 || markerReferenceSphereExists )
+			&& yellowControlPointCount === expectedYellowControlPointCount,
+			'Localization debug objects are incomplete.',
+			{ engineeringOriginSphereExists, markerReferenceSphereExists, yellowControlPointCount }
+		);
+
 		arInfo( 'EngineeringCornerDebugDrawn', {
 			controlTargetId: controlTarget?.id ?? null,
 			markerCornerCount: controlTarget?.cornersEnu?.length ?? 0,
 			capturedCornerCount: capturedCornersAr.length,
 			modelControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
+			markerReferenceSphereExists,
+			engineeringOriginSphereExists,
+			yellowControlPointCount,
 			layers: this.engineeringDebugLayers,
 			placementMode: 'diagnostic-only',
 			affectsPlacement: false,
@@ -2250,19 +2264,23 @@ export class ThreeEngine {
 			return;
 		}
 
-		const material = new THREE.LineBasicMaterial( { color: args.color, depthTest: false } );
+		const material = new THREE.LineBasicMaterial( { color: args.color, depthTest: false, depthWrite: false } );
 		const geometry = new THREE.BufferGeometry().setFromPoints( [ ...args.points, args.points[ 0 ] ] );
 		const line = new THREE.Line( geometry, material );
 		line.name = `${args.name}-quad`;
+		line.frustumCulled = false;
+		line.renderOrder = 259;
 		this.registrationDebugRoot.add( line );
 
 		for ( let index = 0; index < args.points.length; index += 1 ) {
 			const sphere = new THREE.Mesh(
-				new THREE.SphereGeometry( 0.035, 12, 8 ),
-				new THREE.MeshBasicMaterial( { color: args.color, depthTest: false } )
+				new THREE.SphereGeometry( 0.08, 12, 8 ),
+				new THREE.MeshBasicMaterial( { color: args.color, depthTest: false, depthWrite: false } )
 			);
 			sphere.position.copy( args.points[ index ] );
 			sphere.name = `${args.name}-${args.labels[ index ]}`;
+			sphere.frustumCulled = false;
+			sphere.renderOrder = 260;
 			this.registrationDebugRoot.add( sphere );
 
 			const label = createDebugTextSprite( args.labels[ index ], args.color );
@@ -2275,11 +2293,13 @@ export class ThreeEngine {
 	private addDebugPoint(labelText: string, position: THREE.Vector3, color: number): void {
 
 		const sphere = new THREE.Mesh(
-			new THREE.SphereGeometry( 0.045, 12, 8 ),
-			new THREE.MeshBasicMaterial( { color, depthTest: false } )
+			new THREE.SphereGeometry( 0.09, 12, 8 ),
+			new THREE.MeshBasicMaterial( { color, depthTest: false, depthWrite: false } )
 		);
 		sphere.name = labelText;
 		sphere.position.copy( position );
+		sphere.frustumCulled = false;
+		sphere.renderOrder = 260;
 		this.registrationDebugRoot.add( sphere );
 
 		const label = createDebugTextSprite( labelText, color );
@@ -2290,10 +2310,12 @@ export class ThreeEngine {
 
 	private addDebugLine(name: string, points: THREE.Vector3[], color: number): void {
 
-		const material = new THREE.LineBasicMaterial( { color, depthTest: false } );
+		const material = new THREE.LineBasicMaterial( { color, depthTest: false, depthWrite: false } );
 		const geometry = new THREE.BufferGeometry().setFromPoints( points );
 		const line = new THREE.Line( geometry, material );
 		line.name = name;
+		line.frustumCulled = false;
+		line.renderOrder = 259;
 		this.registrationDebugRoot.add( line );
 
 	}
@@ -2303,11 +2325,13 @@ export class ThreeEngine {
 		const originAr = new THREE.Vector3( 0, 0, 0 ).applyMatrix4( arFromEnuSolution.matrix );
 		const labelPosition = originAr.clone().add( new THREE.Vector3( 0.22, 0.42, 0 ) );
 		const point = new THREE.Mesh(
-			new THREE.SphereGeometry( 0.055, 16, 10 ),
-			new THREE.MeshBasicMaterial( { color: 0x38bdf8, depthTest: false } )
+			new THREE.SphereGeometry( 0.11, 16, 10 ),
+			new THREE.MeshBasicMaterial( { color: 0x38bdf8, depthTest: false, depthWrite: false } )
 		);
 		point.name = 'site-origin-reference-point';
 		point.position.copy( originAr );
+		point.frustumCulled = false;
+		point.renderOrder = 260;
 		markSiteOriginReferenceObject( point );
 		this.registrationDebugRoot.add( point );
 
@@ -5114,10 +5138,14 @@ function createDebugTextSprite(text: string, color: number): THREE.Sprite {
 	const sprite = new THREE.Sprite( new THREE.SpriteMaterial( {
 		map: texture,
 		depthTest: false,
+		depthWrite: false,
+		toneMapped: false,
 		transparent: true
 	} ) );
 	sprite.scale.set( 0.38, 0.14, 1 );
 	sprite.name = `corner-debug-label-${text}`;
+	sprite.frustumCulled = false;
+	sprite.renderOrder = 261;
 	return sprite;
 
 }
@@ -5160,10 +5188,12 @@ function createCanvasPanelSprite(args: {
 	const sprite = new THREE.Sprite( new THREE.SpriteMaterial( {
 		map: texture,
 		depthTest: false,
+		depthWrite: false,
 		transparent: true,
 		toneMapped: false
 	} ) );
 	sprite.renderOrder = 260;
+	sprite.frustumCulled = false;
 	sprite.raycast = THREE.Sprite.prototype.raycast;
 	sprite.scale.set( args.width, args.width / ( canvas.width / canvas.height ), 1 );
 	return sprite;
