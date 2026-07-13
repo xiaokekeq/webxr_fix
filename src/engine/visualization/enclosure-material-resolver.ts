@@ -15,7 +15,7 @@ const directions: Record<EnclosureFaceName, THREE.Vector3> = {
 	left: new THREE.Vector3( - 1, 0, 0 ), right: new THREE.Vector3( 1, 0, 0 ), bottom: new THREE.Vector3( 0, - 1, 0 )
 };
 
-export function resolveEnclosureMaterialSources(modelRoot: THREE.Object3D, bounds: THREE.Box3): Record<EnclosureFaceName, EnclosureMaterialSource> {
+export function resolveEnclosureMaterialSources(modelRoot: THREE.Object3D, bounds: THREE.Box3): Record<EnclosureFaceName, EnclosureMaterialSource> | null {
 
 	const candidates = new Map<EnclosureFaceName, Candidate[]>();
 	( Object.keys( directions ) as EnclosureFaceName[] ).forEach( ( face ) => candidates.set( face, [] ) );
@@ -49,7 +49,8 @@ export function resolveEnclosureMaterialSources(modelRoot: THREE.Object3D, bound
 		}
 	} );
 
-	const fallback = largestMaterial( modelRoot ) ?? new THREE.MeshStandardMaterial( { color: 0x55734d, roughness: 0.9 } );
+	const fallback = largestMaterial( modelRoot );
+	if ( fallback === null ) return null;
 	const pick = ( face: EnclosureFaceName ): EnclosureMaterialSource => candidates.get( face )!.sort( ( a, b ) => b.area - a.area )[ 0 ] ?? { material: fallback, source: 'model-fallback', metersPerUv: 1 };
 	return { front: pick( 'front' ), back: pick( 'back' ), left: pick( 'left' ), right: pick( 'right' ), bottom: pick( 'bottom' ) };
 
@@ -63,7 +64,7 @@ export function cloneEnclosureMaterial(source: EnclosureMaterialSource): THREE.M
 	material.polygonOffsetFactor = - 1;
 	material.polygonOffsetUnits = - 1;
 	const textured = material as THREE.Material & { map?: THREE.Texture };
-	if ( textured.map !== undefined ) {
+	if ( textured.map != null ) {
 		textured.map = textured.map.clone();
 		textured.map.wrapS = THREE.RepeatWrapping;
 		textured.map.wrapT = THREE.RepeatWrapping;

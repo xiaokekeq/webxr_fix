@@ -31,7 +31,8 @@ export type ModelRuntimeLoadStage =
 	| 'asset-stake-marker'
 	| 'registration'
 	| 'template-compose'
-	| 'resource-ownership';
+	| 'resource-ownership'
+	| 'runtime-activation';
 
 export type ModelRuntimeLoadState = 'loading' | 'ready' | 'failed';
 

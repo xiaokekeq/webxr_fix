@@ -34,12 +34,17 @@ interface CreateModelSessionOptions {
 	appendLog(message: string): void;
 	resetPlacement(): void;
 	onRuntimeReset(nextModelId: string): void;
-	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void;
+	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): ModelRuntimeActivationResult;
+	onRuntimeBundleReady(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void;
 	onRuntimeLoadFailed(error: ModelRuntimeLoadError, modelLoadRequestId: number): void;
 	onLoadManualRegistration(modelId: string): void;
 	canRequestAutoPlacement(): boolean;
 	requestAutoPlacement(): void;
 }
+
+export type ModelRuntimeActivationResult =
+	| { ok: true }
+	| { ok: false; stage: 'runtime-activation'; reason: string; error: unknown };
 
 export interface ModelSessionController {
 	initializeCatalog(): Promise<void>;
@@ -58,6 +63,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 		resetPlacement,
 		onRuntimeReset,
 		onRuntimeBundleLoaded,
+		onRuntimeBundleReady,
 		onRuntimeLoadFailed,
 		onLoadManualRegistration,
 		canRequestAutoPlacement,
@@ -118,6 +124,21 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			return;
 		}
 
+		let activationResult: ModelRuntimeActivationResult;
+		try {
+			activationResult = onRuntimeBundleLoaded( bundle, requestId );
+		} catch ( error ) {
+			activationResult = { ok: false, stage: 'runtime-activation', reason: 'callback-threw', error };
+		}
+		if ( activationResult.ok === false ) {
+			const failure = new ModelRuntimeLoadError( 'runtime-activation', modelDefinition.id, undefined, undefined, activationResult.error );
+			patchRuntimeLoadFailure( store, requestId, failure );
+			onRuntimeLoadFailed( failure, requestId );
+			console.error( '[ModelRuntimeActivationFailed]', { failure, reason: activationResult.reason, cause: activationResult.error } );
+			setStatus( formatRuntimeLoadFailure( failure ) );
+			throw failure;
+		}
+
 		modelLoadCompletedRequestId = requestId;
 		store.patch( {
 			modelRuntimeLoad: {
@@ -132,7 +153,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			}
 		} );
 		currentModelDefinition = bundle.modelDefinition;
-		onRuntimeBundleLoaded( bundle, requestId );
+		onRuntimeBundleReady( bundle, requestId );
 		onLoadManualRegistration( bundle.demoModelConfig.modelId );
 
 		store.patch( {

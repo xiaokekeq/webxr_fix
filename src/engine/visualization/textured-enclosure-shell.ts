@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { buildEnclosureShell, type EnclosureShellBuildResult } from './enclosure-shell-builder.js';
 
+export type EnclosureRebuildOutcome =
+	| { ok: true; rebuilt: boolean }
+	| Extract<EnclosureShellBuildResult, { ok: false }>;
+
 interface EnclosureRebuildOptions {
 	model: THREE.Object3D;
 	modelName?: string;
@@ -29,7 +33,7 @@ export class TexturedEnclosureShell {
 	private materialDisposedCount = 0;
 	private root: THREE.Group | null = null;
 
-	rebuildForModel(options: EnclosureRebuildOptions): boolean {
+	rebuildForModel(options: EnclosureRebuildOptions): EnclosureRebuildOutcome {
 
 		const sourceRevision = options.modelRevision ?? 0;
 		const structureRevision = options.structureRevision ?? 0;
@@ -45,13 +49,14 @@ export class TexturedEnclosureShell {
 		if ( unchanged ) {
 			this.buildSkipCount += 1;
 			this.lastBuildSkipReason = 'unchanged-model-revision';
-			return false;
+			return { ok: true, rebuilt: false };
 		}
 
 		const requestId = ++this.buildRequestId;
 		options.model.updateWorldMatrix( true, true );
 		this.dispose();
 		const result = buildEnclosureShell( options.model );
+		if ( result.ok === false ) return result;
 		this.register( result, options.reason );
 		this.sourceModelUuid = options.model.uuid;
 		this.sourceModelName = options.modelName ?? options.model.name ?? null;
@@ -70,11 +75,11 @@ export class TexturedEnclosureShell {
 				'Enclosure shell must belong to its current five-face source model.'
 			);
 		}
-		return true;
+		return { ok: true, rebuilt: true };
 
 	}
 
-	private register(result: EnclosureShellBuildResult, reason: string): void {
+	private register(result: Extract<EnclosureShellBuildResult, { ok: true }>, reason: string): void {
 
 		this.root = result.root;
 		this.buildCount += 1;

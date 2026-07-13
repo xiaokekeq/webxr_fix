@@ -35,7 +35,15 @@ export interface EnclosureGeometryValidation {
 	boundaryCornersConnected: boolean;
 }
 
-export interface EnclosureShellBuildResult {
+export type EnclosureShellBuildFailureReason =
+	| 'empty-model'
+	| 'invalid-bounds'
+	| 'degenerate-bounds'
+	| 'invalid-face-geometry'
+	| 'material-source-missing';
+
+export type EnclosureShellBuildResult = {
+	ok: true;
 	root: THREE.Group;
 	meshCount: number;
 	triangleCount: number;
@@ -47,25 +55,44 @@ export interface EnclosureShellBuildResult {
 	axisV: THREE.Vector3;
 	axisUp: THREE.Vector3;
 	faceDiagnostics: EnclosureFaceDiagnostic[];
-}
+} | {
+	ok: false;
+	reason: EnclosureShellBuildFailureReason;
+	bounds: THREE.Box3 | null;
+	message: string;
+};
+
+const ENCLOSURE_BOUNDS_EPSILON = 1e-6;
 
 export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBuildResult {
 
 	modelRoot.updateWorldMatrix( true, true );
 	const bounds = resolveLocalBounds( modelRoot );
+	const renderableCount = countRenderableMeshes( modelRoot );
+	if ( renderableCount === 0 || bounds.isEmpty() ) {
+		return buildFailure( 'empty-model', null, 'Model has no renderable geometry.' );
+	}
+	if ( [ ...bounds.min.toArray(), ...bounds.max.toArray() ].every( Number.isFinite ) === false ) {
+		return buildFailure( 'invalid-bounds', null, 'Model bounds contain non-finite values.' );
+	}
+	const size = bounds.getSize( new THREE.Vector3() );
+	if ( size.toArray().some( ( value ) => value <= ENCLOSURE_BOUNDS_EPSILON ) ) {
+		return buildFailure( 'degenerate-bounds', bounds, 'Model bounds are degenerate.' );
+	}
+
+	const validation = validateEnclosureFaceGeometry( bounds );
+	if ( validation.ok === false ) {
+		return buildFailure( 'invalid-face-geometry', bounds, 'Invalid five-face enclosure geometry.' );
+	}
+
+	const sources = resolveEnclosureMaterialSources( modelRoot, bounds );
+	if ( sources === null ) {
+		return buildFailure( 'material-source-missing', bounds, 'No enclosure material source is available.' );
+	}
 	const root = new THREE.Group();
 	root.name = '__textured-enclosure-shell';
 	root.userData.__enclosureShell = true;
 	root.userData.__excludeFromLayerIndex = true;
-	const renderableCount = countRenderableMeshes( modelRoot );
-	if ( bounds.isEmpty() ) return createEmptyBuildResult( root, bounds, renderableCount );
-
-	const validation = validateEnclosureFaceGeometry( bounds );
-	if ( validation.ok === false ) {
-		throw new Error( 'Invalid five-face enclosure geometry.' );
-	}
-
-	const sources = resolveEnclosureMaterialSources( modelRoot, bounds );
 	const faceDefinitions = createFaceDefinitions( bounds );
 	for ( const face of faceDefinitions ) {
 		const source = sources[ face.name ];
@@ -88,6 +115,7 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 
 	modelRoot.add( root );
 	return {
+		ok: true,
 		root,
 		meshCount: 5,
 		triangleCount: validation.triangleCount,
@@ -139,25 +167,9 @@ export function validateEnclosureFaceGeometry(bounds: THREE.Box3): EnclosureGeom
 
 }
 
-function createEmptyBuildResult(
-	root: THREE.Group,
-	bounds: THREE.Box3,
-	renderableCount: number
-): EnclosureShellBuildResult {
+function buildFailure(reason: EnclosureShellBuildFailureReason, bounds: THREE.Box3 | null, message: string): EnclosureShellBuildResult {
 
-	return {
-		root,
-		meshCount: 0,
-		triangleCount: 0,
-		materialCount: 0,
-		materialSources: { front: 'none', back: 'none', left: 'none', right: 'none', bottom: 'none' },
-		bounds,
-		renderableCount,
-		axisU: new THREE.Vector3( 1, 0, 0 ),
-		axisV: new THREE.Vector3( 0, 0, 1 ),
-		axisUp: new THREE.Vector3( 0, 1, 0 ),
-		faceDiagnostics: []
-	};
+	return { ok: false, reason, bounds: bounds?.clone() ?? null, message };
 
 }
 
@@ -385,8 +397,4 @@ function makeFaceGeometry(points: THREE.Vector3[], repeatU: number, repeatV: num
 	geometry.computeVertexNormals();
 	return geometry;
 
-}
-
-if ( import.meta.env.DEV ) {
-	runEnclosureFaceGeometrySelfCheck();
 }

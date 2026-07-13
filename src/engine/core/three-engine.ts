@@ -3,6 +3,7 @@ import type { PipeRecord } from '@/models/types/pipe-record.js';
 import { createPointerSelectionSession } from '@/engine/interaction/pointer-selection.js';
 import { createPropertySelectionController } from '@/engine/interaction/property-selection.js';
 import { createModelSession } from '@/engine/model/session.js';
+import type { LoadedModelRuntimeBundle } from '@/engine/model/runtime.js';
 import {
 	createPlacementSession
 } from '@/engine/placement/session.js';
@@ -536,6 +537,7 @@ export class ThreeEngine {
 			getPreferredLocalizationOverride: () => this.getPreferredFormalLocalizationOverride(),
 			getModelTemplate: () => this.modelTemplate,
 			getRegistrationSolution: () => this.registrationSolution,
+			getRuntimeLoadStatus: () => this.store.getState().modelRuntimeLoad,
 			getHitTestController: () => this.xrRuntime.getHitTestController(),
 			getModelOrientationTarget: () => this.modelOrientation,
 				onBeforePlacementRequest: () => {
@@ -711,26 +713,15 @@ export class ThreeEngine {
 				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
 			},
 			onRuntimeBundleLoaded: ( bundle, modelLoadRequestId ) => {
-				this.pipesByName = bundle.pipesByName;
-				this.demoModelConfig = bundle.demoModelConfig;
-				this.modelTemplate = bundle.modelTemplate;
-				this.enclosureShell.rebuildForModel( { model: bundle.modelTemplate, modelName: bundle.modelDefinition.name, reason: 'model-loaded', modelRevision: modelLoadRequestId } );
-				this.registrationSolution = bundle.registrationSolution;
-				this.logGroundAwareArAudit( bundle.demoModelConfig );
-				this.annotationLayer.setAnnotations(
-					bundle.demoModelConfig.annotations,
-					bundle.demoModelConfig.annotationStyleRules
-				);
-				this.resolvedMarkerPosesInEnu = this.resolveConfiguredMarkerPoses( bundle.demoModelConfig );
-				this.rebuildModelLayers();
-				this.syncArSessionContext();
-				this.logModelLocalControlPointBoundsCheck();
-				this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
-				this.refreshSavedMarkerLocalizationResult( { silentStatus: true } );
-				this.markerCalibrationRuntime.syncState();
-				this.syncRegistrationChainDebug();
-				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
-				this.syncLocalizationDebugObjects( 'model-runtime-ready' );
+				try {
+					this.activateCoreModelRuntime( bundle );
+					return { ok: true };
+				} catch ( error ) {
+					return { ok: false, stage: 'runtime-activation', reason: 'core-runtime-activation-failed', error };
+				}
+			},
+			onRuntimeBundleReady: ( bundle, modelLoadRequestId ) => {
+				this.initializeOptionalModelVisuals( bundle, modelLoadRequestId );
 				this.tryAutoPlaceAppliedMarkerSolution();
 			},
 			onRuntimeLoadFailed: ( error ) => {
@@ -839,6 +830,60 @@ export class ThreeEngine {
 
 		this.sceneHostRuntime.mount( hosts, this.xrButtonWrap );
 		this.syncSceneHost();
+
+	}
+
+	private activateCoreModelRuntime(bundle: LoadedModelRuntimeBundle): void {
+
+		this.pipesByName = bundle.pipesByName;
+		this.demoModelConfig = bundle.demoModelConfig;
+		this.modelTemplate = bundle.modelTemplate;
+		this.registrationSolution = bundle.registrationSolution;
+		this.resolvedMarkerPosesInEnu = this.resolveConfiguredMarkerPoses( bundle.demoModelConfig );
+		this.logGroundAwareArAudit( bundle.demoModelConfig );
+		this.annotationLayer.setAnnotations(
+			bundle.demoModelConfig.annotations,
+			bundle.demoModelConfig.annotationStyleRules
+		);
+		this.rebuildModelLayers();
+		this.syncArSessionContext();
+		this.logModelLocalControlPointBoundsCheck();
+		this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
+		this.refreshSavedMarkerLocalizationResult( { silentStatus: true } );
+		this.markerCalibrationRuntime.syncState();
+		this.syncRegistrationChainDebug();
+		this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
+		this.syncLocalizationDebugObjects( 'model-runtime-ready' );
+
+	}
+
+	private initializeOptionalModelVisuals(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void {
+
+		try {
+			const result = this.enclosureShell.rebuildForModel( {
+				model: bundle.modelTemplate,
+				modelName: bundle.modelDefinition.name,
+				reason: 'model-loaded',
+				modelRevision: modelLoadRequestId
+			} );
+			if ( result.ok === false ) {
+				console.warn( '[EnclosureShellDisabled]', {
+					modelId: bundle.modelDefinition.id,
+					modelName: bundle.modelDefinition.name,
+					reason: result.reason,
+					message: result.message
+				} );
+				this.appendLog( '纹理包围壳构建失败，已自动关闭；模型配准和放置不受影响。' );
+			}
+		} catch ( error ) {
+			this.enclosureShell.dispose();
+			console.warn( '[EnclosureShellDisabled]', {
+				modelId: bundle.modelDefinition.id,
+				modelName: bundle.modelDefinition.name,
+				error
+			} );
+			this.appendLog( '纹理包围壳构建失败，已自动关闭；模型配准和放置不受影响。' );
+		}
 
 	}
 
@@ -1879,6 +1924,14 @@ export class ThreeEngine {
 
 	private validateEngineeringPlacementPreconditions(): EngineeringPlacementGuardResult {
 
+		if ( this.store.getState().modelRuntimeLoad.modelRuntimeLoadState !== 'ready' ) {
+			return {
+				ok: false,
+				reason: this.getRuntimePlacementBlockReason(),
+				message: this.getRuntimePlacementBlockedMessage()
+			};
+		}
+
 		if ( this.demoModelConfig === null ) {
 			return {
 				ok: false,
@@ -2032,6 +2085,7 @@ export class ThreeEngine {
 		const controlTargets = this.getCurrentControlTargets();
 		const controlTarget = this.getActiveEngineeringControlTarget();
 		const markerState = this.store.getState().markerCalibration;
+		const runtime = this.store.getState().modelRuntimeLoad;
 		const arFromEnuSolution = this.activeMarkerArFromEnuSolution;
 		const hasMockEngineeringData = this.demoModelConfig !== null
 			&& hasMockEngineeringDataInConfig( this.demoModelConfig, controlTargets );
@@ -2041,6 +2095,9 @@ export class ThreeEngine {
 			configUrl: this.modelSession.getCurrentModelDefinition()?.configUrl ?? null,
 			modelTemplateReady: this.modelTemplate !== null,
 			registrationReady: this.registrationSolution !== null,
+			runtimeState: runtime.modelRuntimeLoadState,
+			runtimeStage: runtime.modelRuntimeLoadStage,
+			runtimeFailureReason: runtime.modelRuntimeLoadFailureReason,
 			modelControlPointOrder: this.demoModelConfig?.modelControlTargetDiagnostics.modelControlTargetIds ?? [],
 			parsedModelControlPointCount: this.demoModelConfig?.modelControlTargetDiagnostics.normalizedModelControlTargetCount ?? 0,
 			registrationControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
