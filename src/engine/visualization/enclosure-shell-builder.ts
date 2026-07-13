@@ -4,14 +4,13 @@ import {
 	type ResolvedConformingSurface
 } from './model-boundary-surface-resolver.js';
 
-export type EnclosureShellBuildFailureReason = 'empty-model' | 'no-exposed-surface' | 'invalid-surface';
+export type EnclosureShellBuildFailureReason = 'empty-model' | 'no-conforming-surface' | 'invalid-surface';
 
 export type EnclosureShellBuildResult = {
 	ok: true;
 	root: THREE.Group;
 	meshCount: number;
 	bounds: THREE.Box3;
-	epsilon: number;
 	surface: ResolvedConformingSurface;
 } | {
 	ok: false;
@@ -44,12 +43,13 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 	modelRoot.add( root );
 	if ( import.meta.env.DEV ) console.info( '[ModelConformingShellReady]', {
 		meshCount: 1,
-		triangleCount: resolved.surface.triangleCount,
+		sourceTriangleCount: resolved.surface.sourceTriangleCount,
+		shellTriangleCount: resolved.surface.triangleCount,
 		excludedTopTriangleCount: resolved.surface.excludedTopTriangleCount,
+		excludedInternalBottomTriangleCount: resolved.surface.excludedInternalBottomTriangleCount,
 		materialCount: resolved.surface.materials.length,
-		epsilon: resolved.epsilon,
 	} );
-	return { ok: true, root, meshCount: 1, bounds: resolved.bounds, epsilon: resolved.epsilon, surface: resolved.surface };
+	return { ok: true, root, meshCount: 1, bounds: resolved.bounds, surface: resolved.surface };
 }
 export function createBoundaryShellMaterial(source: THREE.Material): THREE.MeshBasicMaterial {
 
@@ -65,7 +65,10 @@ export function createBoundaryShellMaterial(source: THREE.Material): THREE.MeshB
 		side: THREE.DoubleSide,
 		toneMapped: false,
 		depthTest: true,
-		depthWrite: true
+		depthWrite: true,
+		polygonOffset: true,
+		polygonOffsetFactor: -1,
+		polygonOffsetUnits: -1
 	} );
 	material.clippingPlanes = null;
 	material.clipIntersection = false;

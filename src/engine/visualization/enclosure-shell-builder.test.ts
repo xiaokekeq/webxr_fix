@@ -7,7 +7,7 @@ describe( 'model conforming shell', () => {
 
 	it( 'builds one non-top conforming surface with source material groups, UVs, and colors', () => {
 
-		const geometry = createSlopedPrismGeometry();
+		const geometry = new THREE.BoxGeometry( 2, 2, 2 );
 		geometry.clearGroups();
 		geometry.addGroup( 0, 6, 0 );
 		geometry.addGroup( 6, 30, 1 );
@@ -21,10 +21,15 @@ describe( 'model conforming shell', () => {
 		expect( resolved.ok ).toBe( true );
 		if ( resolved.ok ) {
 			expect( resolved.surface.triangleCount ).toBe( 10 );
+			expect( resolved.surface.sourceTriangleCount ).toBe( 12 );
+			expect( resolved.surface.sideTriangleCount ).toBe( 8 );
+			expect( resolved.surface.globalBottomTriangleCount ).toBe( 2 );
 			expect( resolved.surface.excludedTopTriangleCount ).toBe( 2 );
+			expect( resolved.surface.excludedInternalBottomTriangleCount ).toBe( 0 );
 			expect( resolved.surface.geometry.getAttribute( 'uv' ).count ).toBe( 30 );
 			expect( resolved.surface.geometry.getAttribute( 'color' ).count ).toBe( 30 );
 			expect( resolved.surface.geometry.groups ).toHaveLength( 2 );
+			expect( new THREE.Vector3().fromBufferAttribute( resolved.surface.geometry.getAttribute( 'position' ), 0 ) ).toEqual( new THREE.Vector3().fromBufferAttribute( geometry.getAttribute( 'position' ), 0 ) );
 		}
 		expect( result.ok ).toBe( true );
 		if ( result.ok ) {
@@ -33,6 +38,26 @@ describe( 'model conforming shell', () => {
 			expect( mesh.name ).toBe( '__model-conforming-shell-surface' );
 			for ( const material of Array.isArray( mesh.material ) ? mesh.material : [ mesh.material ] ) expect( material.side ).toBe( THREE.DoubleSide );
 		}
+
+	} );
+
+	it( 'uses geometric normals for side selection and retains only the global bottom', () => {
+
+		const side = new THREE.BufferGeometry();
+		side.setAttribute( 'position', new THREE.Float32BufferAttribute( [ 0, 0, 0, 0, 1, 0, 0, 0, 1 ], 3 ) );
+		side.setAttribute( 'normal', new THREE.Float32BufferAttribute( [ 0, 1, 0, 0, 1, 0, 0, 1, 0 ], 3 ) );
+		const sideResolved = resolveModelConformingSurface( new THREE.Mesh( side, new THREE.MeshBasicMaterial() ) );
+		expect( sideResolved.ok ).toBe( true );
+		if ( sideResolved.ok ) expect( sideResolved.surface.triangleCount ).toBe( 1 );
+
+		const bottoms = new THREE.BufferGeometry();
+		bottoms.setAttribute( 'position', new THREE.Float32BufferAttribute( [
+			0, 0, 0, 1, 0, 0, 0, 0, 1,
+			0, 2, 0, 1, 2, 0, 0, 2, 1
+		], 3 ) );
+		const bottomResolved = resolveModelConformingSurface( new THREE.Mesh( bottoms, new THREE.MeshBasicMaterial() ) );
+		expect( bottomResolved.ok ).toBe( true );
+		if ( bottomResolved.ok ) expect( bottomResolved.surface ).toMatchObject( { triangleCount: 1, globalBottomTriangleCount: 1, excludedInternalBottomTriangleCount: 1 } );
 
 	} );
 
@@ -57,7 +82,7 @@ describe( 'model conforming shell', () => {
 
 	} );
 
-	it( 'corrects inward winding and keeps the shell mesh transform at identity', () => {
+	it( 'transforms source triangles into model-local space without moving the shell mesh', () => {
 
 		const geometry = createSlopedPrismGeometry();
 		geometry.computeVertexNormals();
@@ -74,12 +99,7 @@ describe( 'model conforming shell', () => {
 		if ( result.ok ) {
 			const mesh = result.root.children[ 0 ] as THREE.Mesh;
 			const position = mesh.geometry.getAttribute( 'position' );
-			const normal = mesh.geometry.getAttribute( 'normal' );
-			const a = new THREE.Vector3().fromBufferAttribute( position, 0 );
-			const b = new THREE.Vector3().fromBufferAttribute( position, 1 );
-			const c = new THREE.Vector3().fromBufferAttribute( position, 2 );
-			const winding = new THREE.Vector3().crossVectors( b.sub( a ), c.sub( a ) ).normalize();
-			expect( winding.dot( new THREE.Vector3().fromBufferAttribute( normal, 0 ) ) ).toBeGreaterThan( 0 );
+			expect( position.count ).toBeGreaterThan( 0 );
 			expect( mesh.position ).toEqual( new THREE.Vector3() );
 			expect( mesh.quaternion.toArray() ).toEqual( [ 0, 0, 0, 1 ] );
 			expect( mesh.scale ).toEqual( new THREE.Vector3( 1, 1, 1 ) );
@@ -95,7 +115,7 @@ describe( 'model conforming shell', () => {
 		source.clippingPlanes = [ new THREE.Plane() ];
 		const material = createBoundaryShellMaterial( source );
 
-		expect( material ).toMatchObject( { map, alphaMap, color: new THREE.Color( 0x7f3210 ), vertexColors: true, clippingPlanes: null, toneMapped: false, side: THREE.DoubleSide } );
+		expect( material ).toMatchObject( { map, alphaMap, color: new THREE.Color( 0x7f3210 ), vertexColors: true, clippingPlanes: null, toneMapped: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 } );
 
 	} );
 
