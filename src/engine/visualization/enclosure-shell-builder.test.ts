@@ -56,7 +56,7 @@ describe( 'model conforming shell', () => {
 		source.clippingPlanes = [ new THREE.Plane() ];
 		const material = createBoundaryShellMaterial( source );
 
-		expect( material ).toMatchObject( { map, alphaMap, color: new THREE.Color( 0x7f3210 ), vertexColors: true, clippingPlanes: null, toneMapped: false, side: THREE.DoubleSide } );
+		expect( material ).toMatchObject( { map, alphaMap, color: new THREE.Color( 0x7f3210 ), vertexColors: true, clippingPlanes: null, toneMapped: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: - 1, polygonOffsetUnits: - 1 } );
 
 	} );
 
