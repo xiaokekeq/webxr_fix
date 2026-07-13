@@ -13,6 +13,7 @@ import type {
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
 import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
+import type { ModelPlacementResult } from '@/engine/core/three-engine.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import type { LegacyArDisplayMode } from '@/engine/visualization/underground-display-state.js';
@@ -397,7 +398,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		placeModel(): Promise<void> {
+		placeModel(): Promise<ModelPlacementResult> {
 
 			return ensureController().actions.placeModel();
 

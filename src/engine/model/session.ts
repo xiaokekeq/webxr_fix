@@ -5,6 +5,8 @@ import {
 	createDefaultModelScaleSummaryState,
 	createDefaultPropertyPanelState,
 	createDefaultRegistrationMetricsState,
+	createDefaultModelRuntimeLoadStatus,
+	type ModelRuntimeLoadStatus,
 	type RegistrationStore
 } from '@/localization/core/registration-store.js';
 import {
@@ -17,7 +19,13 @@ import type {
 	EngineeringControlPoint
 } from '@/localization/coarse/engineering-registration.js';
 import type { SetStatus } from '@/features/ar/types/runtime-types.js';
-import { disposeModelRuntimeBundle, loadModelRuntimeBundle, type LoadedModelRuntimeBundle } from './runtime.js';
+import {
+	disposeModelRuntimeBundle,
+	loadModelRuntimeBundle,
+	type LoadedModelRuntimeBundle,
+	type ModelRuntimeLoadEvent,
+	ModelRuntimeLoadError
+} from './runtime.js';
 import { createRegistrationMetricsState } from '@/engine/session/view-state.js';
 
 interface CreateModelSessionOptions {
@@ -27,6 +35,7 @@ interface CreateModelSessionOptions {
 	resetPlacement(): void;
 	onRuntimeReset(nextModelId: string): void;
 	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void;
+	onRuntimeLoadFailed(error: ModelRuntimeLoadError, modelLoadRequestId: number): void;
 	onLoadManualRegistration(modelId: string): void;
 	canRequestAutoPlacement(): boolean;
 	requestAutoPlacement(): void;
@@ -49,6 +58,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 		resetPlacement,
 		onRuntimeReset,
 		onRuntimeBundleLoaded,
+		onRuntimeLoadFailed,
 		onLoadManualRegistration,
 		canRequestAutoPlacement,
 		requestAutoPlacement
@@ -77,12 +87,29 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			registrationMetrics: createDefaultRegistrationMetricsState(),
 			modelScaleSummary: createDefaultModelScaleSummaryState(),
 			placementSummary: createDefaultPlacementSummaryState(),
-			registrationStatusDetail: '\u72b6\u6001\uff1a\u6b63\u5728\u52a0\u8f7d\u6a21\u578b\u8d44\u6e90'
+			registrationStatusDetail: '\u72b6\u6001\uff1a\u6b63\u5728\u52a0\u8f7d\u6a21\u578b\u8d44\u6e90',
+			modelRuntimeLoad: createLoadingRuntimeStatus( requestId )
 		} );
 
 		appendLog( `\u6b63\u5728\u52a0\u8f7d\u6a21\u578b\uff1a${modelDefinition.name}` );
 
-		const bundle = await loadModelRuntimeBundle( modelDefinition, setStatus );
+		let bundle: LoadedModelRuntimeBundle;
+		try {
+			bundle = await loadModelRuntimeBundle( modelDefinition, setStatus, ( event ) => {
+				if ( requestId === modelLoadRequestId ) patchRuntimeLoadEvent( store, requestId, event );
+			} );
+		} catch ( error ) {
+			const failure = error instanceof ModelRuntimeLoadError
+				? error
+				: new ModelRuntimeLoadError( 'template-compose', modelDefinition.id, undefined, undefined, error );
+			if ( requestId === modelLoadRequestId ) {
+				patchRuntimeLoadFailure( store, requestId, failure );
+				onRuntimeLoadFailed( failure, requestId );
+				console.error( '[ModelRuntimeLoadFailed]', { failure, cause: failure.cause } );
+				setStatus( formatRuntimeLoadFailure( failure ) );
+			}
+			throw failure;
+		}
 		if ( requestId !== modelLoadRequestId ) {
 			disposeModelRuntimeBundle( bundle );
 			staleModelBundleDisposeCount += 1;
@@ -92,6 +119,18 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 		}
 
 		modelLoadCompletedRequestId = requestId;
+		store.patch( {
+			modelRuntimeLoad: {
+				...store.getState().modelRuntimeLoad,
+				modelLoadCompletedRequestId,
+				modelRuntimeLoadState: 'ready',
+				modelRuntimeLoadStage: undefined,
+				modelRuntimeLoadFailureReason: undefined,
+				modelRuntimeLoadErrorMessage: undefined,
+				runtimeBundleState: completeStage( store.getState().modelRuntimeLoad.runtimeBundleState ),
+				modelTemplateRenderableCount: countRenderableMeshes( bundle.modelTemplate )
+			}
+		} );
 		currentModelDefinition = bundle.modelDefinition;
 		onRuntimeBundleLoaded( bundle, requestId );
 		onLoadManualRegistration( bundle.demoModelConfig.modelId );
@@ -173,10 +212,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 				return;
 			}
 
-			void loadSelectedModelResources( nextModel ).catch( ( error ) => {
-				console.error( 'Model switch failed:', error );
-				setStatus( error instanceof Error ? error.message : '\u5207\u6362\u6a21\u578b\u5931\u8d25\u3002' );
-			} );
+			void loadSelectedModelResources( nextModel ).catch( () => {} );
 
 		},
 
@@ -321,6 +357,130 @@ function formatVector3AsMeters(vector: THREE.Vector3): string {
 function formatVector3(vector: THREE.Vector3): string {
 
 	return `${vector.x.toFixed( 3 )}, ${vector.y.toFixed( 3 )}, ${vector.z.toFixed( 3 )}`;
+
+}
+
+function createLoadingRuntimeStatus(requestId: number): ModelRuntimeLoadStatus {
+
+	const now = Date.now();
+	const status = createDefaultModelRuntimeLoadStatus();
+	return {
+		...status,
+		modelLoadRequestId: requestId,
+		modelRuntimeLoadState: 'loading',
+		modelCatalogState: { state: 'ready', startedAt: now, completedAt: now, durationMs: 0 },
+		runtimeBundleState: { state: 'loading', startedAt: now }
+	};
+
+}
+
+function patchRuntimeLoadEvent(
+	store: RegistrationStore,
+	requestId: number,
+	event: ModelRuntimeLoadEvent
+): void {
+
+	const current = store.getState().modelRuntimeLoad;
+	if ( current.modelLoadRequestId !== requestId ) return;
+	const stageState = {
+		state: event.state,
+		startedAt: event.startedAt,
+		completedAt: event.completedAt,
+		durationMs: event.durationMs,
+		failureReason: event.failureReason,
+		errorName: event.errorName,
+		errorMessage: event.errorMessage
+	} as const;
+	const next: ModelRuntimeLoadStatus = {
+		...current,
+		modelRuntimeLoadStage: event.state === 'loading' ? event.stage : current.modelRuntimeLoadStage,
+		pipeRecordsState: event.stage === 'pipe-records' ? stageState : current.pipeRecordsState,
+		siteConfigLoadState: event.stage === 'site-config' ? stageState : current.siteConfigLoadState,
+		assetLoadState: event.stage.startsWith( 'asset-' ) ? stageState : current.assetLoadState,
+		terrainAssetState: event.stage === 'asset-terrain' ? stageState : current.terrainAssetState,
+		stakeMarkerAssetState: event.stage === 'asset-stake-marker' ? stageState : current.stakeMarkerAssetState,
+		registrationSolveState: event.stage === 'registration' ? stageState : current.registrationSolveState,
+		modelTemplateComposeState: event.stage === 'template-compose' ? stageState : current.modelTemplateComposeState,
+		registrationControlPointCount: event.registrationControlPointCount ?? current.registrationControlPointCount,
+		registrationRmsErrorMeters: event.registrationRmsErrorMeters ?? current.registrationRmsErrorMeters,
+		registrationMatrixFinite: event.registrationMatrixFinite ?? current.registrationMatrixFinite,
+		registrationMatrixInvertible: event.registrationMatrixInvertible ?? current.registrationMatrixInvertible,
+		modelTemplateRenderableCount: event.modelTemplateRenderableCount ?? current.modelTemplateRenderableCount,
+		assetStates: updateAssetState( current.assetStates, event, stageState )
+	};
+	store.patch( { modelRuntimeLoad: next } );
+
+}
+
+function patchRuntimeLoadFailure(store: RegistrationStore, requestId: number, error: ModelRuntimeLoadError): void {
+
+	const current = store.getState().modelRuntimeLoad;
+	if ( current.modelLoadRequestId !== requestId ) return;
+	store.patch( {
+		modelRuntimeLoad: {
+			...current,
+			modelRuntimeLoadState: 'failed',
+			modelRuntimeLoadStage: error.stage,
+			modelRuntimeLoadFailureReason: error.stage,
+			modelRuntimeLoadErrorMessage: error.message,
+			modelRuntimeLoadFailedAssetId: error.assetId,
+			modelRuntimeLoadFailedUrl: error.resourceUrl,
+			runtimeBundleState: {
+				state: 'failed',
+				startedAt: current.runtimeBundleState.startedAt ?? Date.now(),
+				completedAt: Date.now(),
+				failureReason: error.stage,
+				errorName: error.cause instanceof Error ? error.cause.name : error.name,
+				errorMessage: error.message
+			}
+		}
+	} );
+
+}
+
+function updateAssetState(
+	assets: ModelRuntimeLoadStatus['assetStates'],
+	event: ModelRuntimeLoadEvent,
+	stageState: ModelRuntimeLoadStatus['assetLoadState']
+): ModelRuntimeLoadStatus['assetStates'] {
+
+	if ( event.assetId === undefined || event.assetUrl === undefined ) return assets;
+	const next = {
+		assetId: event.assetId,
+		assetUrl: event.assetUrl,
+		materialUrl: event.materialUrl,
+		...stageState
+	};
+	return [ ...assets.filter( ( asset ) => asset.assetId !== event.assetId ), next ];
+
+}
+
+function completeStage(stage: ModelRuntimeLoadStatus['runtimeBundleState']): ModelRuntimeLoadStatus['runtimeBundleState'] {
+
+	const completedAt = Date.now();
+	return {
+		state: 'ready',
+		startedAt: stage.startedAt ?? completedAt,
+		completedAt,
+		durationMs: completedAt - ( stage.startedAt ?? completedAt )
+	};
+
+}
+
+function countRenderableMeshes(root: THREE.Object3D): number {
+
+	let count = 0;
+	root.traverse( ( object ) => {
+		if ( object instanceof THREE.Mesh && object.geometry.getAttribute( 'position' ) !== undefined ) count += 1;
+	} );
+	return count;
+
+}
+
+function formatRuntimeLoadFailure(error: ModelRuntimeLoadError): string {
+
+	const asset = error.assetId === undefined ? '' : `（${error.assetId}）`;
+	return `模型运行时加载失败：${error.stage}${asset}。${error.message}`;
 
 }
 

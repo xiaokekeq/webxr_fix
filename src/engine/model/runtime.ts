@@ -24,6 +24,52 @@ import {
 } from '@/engine/core/model.js';
 import { repositories } from '@/services/repository-factory.js';
 
+export type ModelRuntimeLoadStage =
+	| 'pipe-records'
+	| 'site-config'
+	| 'asset-terrain'
+	| 'asset-stake-marker'
+	| 'registration'
+	| 'template-compose'
+	| 'resource-ownership';
+
+export type ModelRuntimeLoadState = 'loading' | 'ready' | 'failed';
+
+export interface ModelRuntimeLoadEvent {
+	stage: ModelRuntimeLoadStage;
+	state: ModelRuntimeLoadState;
+	startedAt: number;
+	completedAt?: number;
+	durationMs?: number;
+	failureReason?: string;
+	errorName?: string;
+	errorMessage?: string;
+	assetId?: string;
+	assetUrl?: string;
+	materialUrl?: string;
+	registrationControlPointCount?: number;
+	registrationRmsErrorMeters?: number;
+	registrationMatrixFinite?: boolean;
+	registrationMatrixInvertible?: boolean;
+	modelTemplateRenderableCount?: number;
+}
+
+export class ModelRuntimeLoadError extends Error {
+
+	readonly name = 'ModelRuntimeLoadError';
+
+	constructor(
+		readonly stage: ModelRuntimeLoadStage,
+		readonly modelId: string,
+		readonly assetId?: string,
+		readonly resourceUrl?: string,
+		readonly cause?: unknown
+	) {
+		super( `${stage} failed for ${modelId}: ${getErrorMessage( cause )}` );
+	}
+
+}
+
 export interface LoadedModelRuntimeBundle {
 	pipesByName: Map<string, PipeRecord>;
 	demoModelConfig: DemoModelConfig;
@@ -76,62 +122,156 @@ function collectMaterialTextures(material: THREE.Material, target: Set<THREE.Tex
 
 }
 
-export async function loadModelRuntimeBundle(
+async function loadRuntimeStage<T>(
+	stage: ModelRuntimeLoadStage,
 	modelDefinition: ModelCatalogItem,
-	setStatus: SetStatus
-): Promise<LoadedModelRuntimeBundle> {
+	report: ((event: ModelRuntimeLoadEvent) => void) | undefined,
+	load: () => T | Promise<T>,
+	onReady?: (result: T) => Partial<ModelRuntimeLoadEvent>,
+	asset?: { id: string; modelUrl: string; materialUrl?: string }
+): Promise<T> {
 
-	const [ pipesByName, demoModelConfig, loadedAssetTemplates ] = await Promise.all( [
-		repositories.model.loadPipeRecords( modelDefinition.id ),
-		repositories.siteConfig.getSiteConfig( modelDefinition.id ),
-		loadCatalogAssetTemplates( modelDefinition, setStatus )
-	] );
-	const primaryTemplate = loadedAssetTemplates.get( modelDefinition.primaryAssetId );
-	if ( primaryTemplate === undefined ) {
-		throw new Error( `Primary asset template is missing: ${modelDefinition.primaryAssetId}` );
+	const startedAt = Date.now();
+	const base = {
+		stage,
+		startedAt,
+		assetId: asset?.id,
+		assetUrl: asset?.modelUrl,
+		materialUrl: asset?.materialUrl
+	};
+	report?.( { ...base, state: 'loading' } );
+	try {
+		const result = await load();
+		const completedAt = Date.now();
+		report?.( {
+			...base,
+			state: 'ready',
+			completedAt,
+			durationMs: completedAt - startedAt,
+			...( onReady?.( result ) ?? {} )
+		} );
+		return result;
+	} catch ( error ) {
+		const completedAt = Date.now();
+		const wrapped = error instanceof ModelRuntimeLoadError
+			? error
+			: new ModelRuntimeLoadError( stage, modelDefinition.id, asset?.id, asset?.modelUrl ?? asset?.materialUrl, error );
+		report?.( {
+			...base,
+			state: 'failed',
+			completedAt,
+			durationMs: completedAt - startedAt,
+			failureReason: wrapped.stage,
+			errorName: error instanceof Error ? error.name : 'UnknownError',
+			errorMessage: getErrorMessage( error )
+		} );
+		throw wrapped;
 	}
 
-	const primaryTemplateTransform = readPlaceableTemplateTransform( primaryTemplate );
-	const registrationSolution = solveEngineeringRegistration( demoModelConfig, {
-		modelPivotOffset: primaryTemplateTransform?.pivotOffset,
-		modelUnitScale: primaryTemplateTransform?.unitScale
-	} );
-	const modelTemplate = composeModelTemplate( {
-		modelDefinition,
-		demoModelConfig,
-		registrationSolution,
-		loadedAssetTemplates
-	} );
-	const modelPlacementReport = readPlaceableTemplateReport( modelTemplate ) ?? readPlaceableTemplateReport( primaryTemplate );
+}
 
-	return {
-		pipesByName,
-		demoModelConfig,
-		modelTemplate,
-		modelSourceMetadata: readModelSourceMetadata( modelTemplate ),
-		modelPlacementReport,
-		registrationSolution,
-		modelDefinition,
-		...collectOwnedModelResources( modelTemplate )
-	};
+function getAssetStage(assetId: string): ModelRuntimeLoadStage {
+
+	// ponytail: current catalog has terrain and stake-marker; add a generic asset stage when a third required asset is introduced.
+	return assetId === 'stake-marker' ? 'asset-stake-marker' : 'asset-terrain';
+
+}
+
+function countRenderableMeshes(root: THREE.Object3D): number {
+
+	let count = 0;
+	root.traverse( ( object ) => {
+		if ( object instanceof THREE.Mesh && object.geometry.getAttribute( 'position' ) !== undefined ) count += 1;
+	} );
+	return count;
+
+}
+
+function getErrorMessage(error: unknown): string {
+
+	return error instanceof Error ? error.message : String( error );
+
+}
+
+export function runModelRuntimeLoadErrorSelfCheck(): void {
+
+	const error = new ModelRuntimeLoadError( 'asset-stake-marker', 'dz1207', 'stake-marker', '/pipe-viewer/dz1207/stake-marker.glb', new Error( '404' ) );
+	console.assert( error.stage === 'asset-stake-marker' && error.assetId === 'stake-marker' && error.resourceUrl?.endsWith( '.glb' ) === true, 'ModelRuntimeLoadError must retain its failed asset context.' );
+
+}
+
+if ( import.meta.env.DEV ) runModelRuntimeLoadErrorSelfCheck();
+
+export async function loadModelRuntimeBundle(
+	modelDefinition: ModelCatalogItem,
+	setStatus: SetStatus,
+	report?: (event: ModelRuntimeLoadEvent) => void
+): Promise<LoadedModelRuntimeBundle> {
+
+	try {
+		const [ pipesByName, demoModelConfig, loadedAssetTemplates ] = await Promise.all( [
+			loadRuntimeStage( 'pipe-records', modelDefinition, report, () => repositories.model.loadPipeRecords( modelDefinition.id ) ),
+			loadRuntimeStage( 'site-config', modelDefinition, report, () => repositories.siteConfig.getSiteConfig( modelDefinition.id ) ),
+			loadCatalogAssetTemplates( modelDefinition, setStatus, report )
+		] );
+		const primaryTemplate = loadedAssetTemplates.get( modelDefinition.primaryAssetId );
+		if ( primaryTemplate === undefined ) {
+			throw new ModelRuntimeLoadError( 'template-compose', modelDefinition.id, modelDefinition.primaryAssetId );
+		}
+
+		const primaryTemplateTransform = readPlaceableTemplateTransform( primaryTemplate );
+		const registrationSolution = await loadRuntimeStage( 'registration', modelDefinition, report, () => solveEngineeringRegistration( demoModelConfig, {
+			modelPivotOffset: primaryTemplateTransform?.pivotOffset,
+			modelUnitScale: primaryTemplateTransform?.unitScale
+		} ), ( solution ) => ( {
+			registrationControlPointCount: solution.controlPoints.length,
+			registrationRmsErrorMeters: solution.modelToSite.rmsErrorMeters,
+			registrationMatrixFinite: solution.modelToSite.matrix.elements.every( Number.isFinite ),
+			registrationMatrixInvertible: Math.abs( solution.modelToSite.matrix.determinant() ) > 1e-9
+		} ) );
+		const modelTemplate = await loadRuntimeStage( 'template-compose', modelDefinition, report, () => composeModelTemplate( {
+			modelDefinition,
+			demoModelConfig,
+			registrationSolution,
+			loadedAssetTemplates
+		} ), ( template ) => ( { modelTemplateRenderableCount: countRenderableMeshes( template ) } ) );
+		const modelPlacementReport = readPlaceableTemplateReport( modelTemplate ) ?? readPlaceableTemplateReport( primaryTemplate );
+		const ownership = await loadRuntimeStage( 'resource-ownership', modelDefinition, report, () => collectOwnedModelResources( modelTemplate ) );
+
+		return {
+			pipesByName,
+			demoModelConfig,
+			modelTemplate,
+			modelSourceMetadata: readModelSourceMetadata( modelTemplate ),
+			modelPlacementReport,
+			registrationSolution,
+			modelDefinition,
+			...ownership
+		};
+	} catch ( error ) {
+		throw error instanceof ModelRuntimeLoadError
+			? error
+			: new ModelRuntimeLoadError( 'template-compose', modelDefinition.id, undefined, undefined, error );
+	}
 
 }
 
 async function loadCatalogAssetTemplates(
 	modelDefinition: ModelCatalogItem,
-	setStatus: SetStatus
+	setStatus: SetStatus,
+	report?: (event: ModelRuntimeLoadEvent) => void
 ): Promise<Map<string, THREE.Group>> {
 
 	const assetEntries = await Promise.all(
 		modelDefinition.assets.map( async ( asset ) => ( {
 			id: asset.id,
-			template: await loadModelTemplate(
+			template: await loadRuntimeStage( getAssetStage( asset.id ), modelDefinition, report, () => loadModelTemplate(
 				asset.modelUrl,
 				setStatus,
 				1,
 				asset.materialUrl,
 				asset.assetTransform
-			)
+			), undefined, asset )
 		} ) )
 	);
 
@@ -177,8 +317,7 @@ function composeModelTemplate(options: {
 	for ( const attachment of demoModelConfig.attachments ) {
 		const attachmentTemplate = loadedAssetTemplates.get( attachment.assetId );
 		if ( attachmentTemplate === undefined ) {
-			console.warn( '[Model Runtime] Missing attachment asset:', attachment.assetId );
-			continue;
+			throw new ModelRuntimeLoadError( 'template-compose', modelDefinition.id, attachment.assetId );
 		}
 
 		positionAttachmentTemplate( attachmentTemplate, attachment, registrationSolution );

@@ -28,7 +28,9 @@ interface RegistrationStateRuntimeOptions {
 	getWorkflowMode(): ArWorkflowMode;
 	getCurrentSessionId(): string | null;
 	getRepositoryDataSource(): 'local' | 'api';
-	getDemoModelConfig(): DemoModelConfig | null;
+	getSessionSiteConfig(): DemoModelConfig | null;
+	getActiveRuntimeConfig(): DemoModelConfig | null;
+	getActiveModelTemplate(): THREE.Object3D | null;
 	getRegistrationSolution(): EngineeringRegistrationSolution | null;
 	getResolvedMarkerPosesInEnu(): MarkerPoseInEnu[];
 	getActiveMarkerLocalizationResult(): SavedMarkerLocalizationResult | null;
@@ -49,7 +51,7 @@ export class RegistrationStateRuntime {
 	syncRegistrationMetrics(): void {
 
 		const currentMetrics = this.options.store.getState().registrationMetrics;
-		const demoModelConfig = this.options.getDemoModelConfig();
+		const demoModelConfig = this.options.getActiveRuntimeConfig();
 		const registrationSolution = this.options.getRegistrationSolution();
 		if ( demoModelConfig === null || registrationSolution === null ) {
 			const nextMetrics = createDefaultRegistrationMetricsState();
@@ -114,7 +116,7 @@ export class RegistrationStateRuntime {
 		this.syncEngineeringConfigStatus();
 		const registrationSolution = this.options.getRegistrationSolution();
 		const arFromEnuSolution = this.options.getActiveArFromEnuSolution();
-		const demoModelConfig = this.options.getDemoModelConfig();
+		const demoModelConfig = this.options.getSessionSiteConfig();
 		const resolvedMarkerPosesInEnu = this.options.getResolvedMarkerPosesInEnu();
 
 		this.options.store.patch( {
@@ -157,7 +159,9 @@ export class RegistrationStateRuntime {
 
 	private syncEngineeringConfigStatus(): void {
 
-		const demoModelConfig = this.options.getDemoModelConfig();
+		const demoModelConfig = this.options.getSessionSiteConfig();
+		const activeRuntimeConfig = this.options.getActiveRuntimeConfig();
+		const modelTemplate = this.options.getActiveModelTemplate();
 		const registrationSolution = this.options.getRegistrationSolution();
 		if ( demoModelConfig === null ) {
 			this.options.store.patch( {
@@ -198,9 +202,12 @@ export class RegistrationStateRuntime {
 			activeTargets
 		);
 		const activeControlTargetHasCornersEnu = firstTarget?.cornersEnu !== undefined;
+		const runtimeLoadState = this.options.store.getState().modelRuntimeLoad.modelRuntimeLoadState;
 		const modelLocalToEnuSource = demoModelConfig.configCompleteness.hasExplicitModelLocalToEnu
 			? 'explicit'
-			: registrationSolution === null ? 'missing' : 'control-points';
+			: registrationSolution !== null ? 'control-points'
+				: runtimeLoadState === 'failed' ? 'failed'
+					: runtimeLoadState === 'loading' ? 'waiting-runtime' : 'missing';
 		const recommendedFieldHints = resolveRecommendedFieldHints( demoModelConfig );
 		const missingRequiredFields = resolveMissingFormalInspectionFields( {
 			hasSiteOrigin: true,
@@ -214,6 +221,13 @@ export class RegistrationStateRuntime {
 
 		this.options.store.patch( {
 			engineeringConfigStatus: {
+				configSource: activeRuntimeConfig !== null ? 'active-runtime' : 'session-context',
+				activeRuntimeConfigReady: activeRuntimeConfig !== null,
+				sessionContextConfigReady: true,
+				registrationSolutionReady: registrationSolution !== null,
+				modelTemplateReady: modelTemplate !== null,
+				rtkDataAvailable: demoModelConfig.rtkSurveyDataset !== undefined && demoModelConfig.rtkSurveyDataset.points.length > 0,
+				rtkRequiredForCurrentWorkflow: false,
 				rawModelControlPointCount: demoModelConfig.modelControlTargetDiagnostics.rawModelControlPointCount,
 				normalizedModelControlTargetCount: demoModelConfig.modelControlTargetDiagnostics.normalizedModelControlTargetCount,
 				requiredModelControlTargetCount: demoModelConfig.modelControlTargetDiagnostics.requiredModelControlTargetCount,
@@ -326,7 +340,7 @@ export class RegistrationStateRuntime {
 		hasMockEngineeringData: boolean;
 		hasModelLocalToEnu: boolean;
 		hasRtkSurveyDataset: boolean;
-		modelLocalToEnuSource: 'explicit' | 'control-points' | 'missing';
+		modelLocalToEnuSource: 'explicit' | 'control-points' | 'waiting-runtime' | 'failed' | 'missing';
 		hitTestReady: boolean;
 		localizationReady: boolean;
 	}): void {
@@ -383,7 +397,7 @@ export class RegistrationStateRuntime {
 		}
 	): SiteCalibrationBaseline | null {
 
-		const siteId = this.options.getDemoModelConfig()?.modelId ?? null;
+		const siteId = this.options.getSessionSiteConfig()?.siteId ?? null;
 		if ( baseline === null ) {
 			this.options.store.patch( {
 				siteCalibrationBaseline: {
@@ -440,7 +454,7 @@ export class RegistrationStateRuntime {
 
 	buildSiteCalibrationBaseline(existingCreatedAt?: number): SiteCalibrationBaseline {
 
-		const demoModelConfig = this.options.getDemoModelConfig();
+		const demoModelConfig = this.options.getSessionSiteConfig();
 		if ( demoModelConfig === null ) {
 			throw new Error( 'Site config is unavailable.' );
 		}
@@ -481,7 +495,7 @@ export class RegistrationStateRuntime {
 		createdAt: number;
 	} {
 
-		const config = this.options.getDemoModelConfig();
+		const config = this.options.getSessionSiteConfig();
 		const modelId = config?.modelId ?? null;
 		return {
 			mode: this.options.getWorkflowMode(),
@@ -578,7 +592,7 @@ function resolveEngineeringDataSourceText(
 }
 
 function formatModelLocalToEnuSource(
-	source: 'explicit' | 'control-points' | 'missing'
+	source: 'explicit' | 'control-points' | 'waiting-runtime' | 'failed' | 'missing'
 ): string {
 
 	switch ( source ) {
@@ -586,6 +600,10 @@ function formatModelLocalToEnuSource(
 			return '显式配置';
 		case 'control-points':
 			return '由 controlPoints 求解';
+		case 'waiting-runtime':
+			return '等待模型运行时';
+		case 'failed':
+			return '模型运行时加载失败';
 		case 'missing':
 			return '缺失';
 	}
@@ -687,9 +705,6 @@ function resolveMissingFormalInspectionFields(args: {
 	}
 	if ( args.activeControlTargetHasCornersEnu === false ) {
 		missing.push( 'controlTargets[].cornersEnu' );
-	}
-	if ( args.hasRtkSurveyDataset === false ) {
-		missing.push( 'rtkSurveyDataset' );
 	}
 	if ( args.hasPlacementAnchor === false ) {
 		missing.push( 'placementAnchorEnu' );

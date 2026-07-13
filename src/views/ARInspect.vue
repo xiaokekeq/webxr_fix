@@ -49,6 +49,7 @@ const currentModel = computed(
 const currentModelName = computed( () => currentModel.value?.name ?? '未选择站点' );
 const currentConfigUrl = computed( () => currentModel.value?.configUrl ?? '-' );
 const configStatus = computed( () => engine.value.engineeringConfigStatus );
+const runtimeLoad = computed( () => engine.value.modelRuntimeLoad );
 const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
 const modelPlaced = computed( () => engine.value.placementSummary.positionText !== '-' );
 const hitTestReady = computed(
@@ -105,6 +106,16 @@ const activeControlTargetSummary = computed( () => {
 
 const registrationDiagnosticCards = computed( () => [
 	{ label: 'modelId', value: engine.value.selectedModelId || '-', wide: true },
+	{ label: 'modelLoadRequestId', value: `${runtimeLoad.value.modelLoadRequestId}/${runtimeLoad.value.modelLoadCompletedRequestId}` },
+	{ label: 'runtimeLoad', value: `${runtimeLoad.value.modelRuntimeLoadState}/${runtimeLoad.value.modelRuntimeLoadStage ?? '-'}` },
+	{ label: 'pipeRecords', value: runtimeLoad.value.pipeRecordsState.state },
+	{ label: 'siteConfig', value: runtimeLoad.value.siteConfigLoadState.state },
+	{ label: 'terrainAsset', value: `${runtimeLoad.value.terrainAssetState.state}${runtimeLoad.value.terrainAssetState.failureReason ? `/${runtimeLoad.value.terrainAssetState.failureReason}` : ''}` },
+	{ label: 'stakeMarkerAsset', value: `${runtimeLoad.value.stakeMarkerAssetState.state}${runtimeLoad.value.stakeMarkerAssetState.failureReason ? `/${runtimeLoad.value.stakeMarkerAssetState.failureReason}` : ''}` },
+	{ label: 'runtimeFailure', value: runtimeLoad.value.modelRuntimeLoadErrorMessage ?? '-', wide: true },
+	{ label: 'configSource', value: `${configStatus.value.configSource}; active=${formatBoolean( configStatus.value.activeRuntimeConfigReady )}; session=${formatBoolean( configStatus.value.sessionContextConfigReady )}`, wide: true },
+	{ label: 'registrationSolve', value: `${runtimeLoad.value.registrationSolveState.state}; cp=${runtimeLoad.value.registrationControlPointCount}; ready=${formatBoolean( configStatus.value.registrationSolutionReady )}` },
+	{ label: 'modelTemplate', value: `${runtimeLoad.value.modelTemplateComposeState.state}; meshes=${runtimeLoad.value.modelTemplateRenderableCount}; ready=${formatBoolean( configStatus.value.modelTemplateReady )}`, wide: true },
 	{ label: 'configUrl', value: currentConfigUrl.value, wide: true },
 	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? 'configured' : 'missing' },
 	{ label: 'controlTargets', value: `${configStatus.value.controlTargetCount}` },
@@ -117,7 +128,13 @@ const registrationDiagnosticCards = computed( () => [
 	{ label: 'transformSessionId', value: engine.value.markerCalibration.currentSessionId ?? '-' },
 	{ label: 'currentSessionId', value: engine.value.markerCalibration.currentSessionId ?? '-' },
 	{ label: 'placementAnchorEnu', value: configStatus.value.placementAnchorText || '-' },
-	{ label: 'modelLocalToEnu', value: configStatus.value.hasModelLocalToEnu ? 'configured' : 'missing' },
+	{ label: 'modelLocalToEnu', value: configStatus.value.modelLocalToEnuText },
+	{ label: 'model runtime', value: runtimeLoad.value.modelRuntimeLoadState },
+	{ label: 'runtime stage', value: runtimeLoad.value.modelRuntimeLoadStage ?? '-' },
+	{ label: 'runtime error', value: runtimeLoad.value.modelRuntimeLoadErrorMessage ?? '-', wide: true },
+	{ label: 'runtime config', value: `${configStatus.value.configSource}; active ${formatBoolean( configStatus.value.activeRuntimeConfigReady )}; session ${formatBoolean( configStatus.value.sessionContextConfigReady )}`, wide: true },
+	{ label: 'registration', value: `${runtimeLoad.value.registrationSolveState.state}; ${runtimeLoad.value.registrationControlPointCount} CP` },
+	{ label: 'model template', value: `${configStatus.value.modelTemplateReady ? 'ready' : runtimeLoad.value.modelRuntimeLoadState}; meshes ${runtimeLoad.value.modelTemplateRenderableCount}` },
 	{ label: 'final AR position', value: engine.value.placementSummary.positionText },
 	{ label: 'final AR quaternion', value: engine.value.placementSummary.quaternionText, wide: true },
 	{ label: 'controlPointAlignment', value: engine.value.registrationStatusDetail || engine.value.runtimeStatus || '-', wide: true },
@@ -170,6 +187,11 @@ const modelPlacementDebugCards = computed( () => {
 		{
 			label: '放置调用',
 			value: `次数 ${debug.engineeringPlacementCallCount ?? 0}；替换 ${debug.replacedModelCount ?? 0}；原因 ${debug.lastPlacementReason ?? '-'}`,
+			wide: true
+		},
+		{
+			label: '工程调试点',
+			value: `attempt ${debug.engineeringDebugRenderAttemptCount ?? 0}; success ${debug.engineeringDebugRenderSuccessCount ?? 0}; corners ${debug.engineeringCornerDebugCount ?? 0}; blocked ${debug.engineeringDebugBlockedReason ?? '-'}`,
 			wide: true
 		},
 		{
@@ -271,10 +293,14 @@ const modelPlacementDebugGroups = computed( () => {
 const configWarnings = computed( () => {
 	const warnings: string[] = [];
 	if ( configStatus.value.hasRtkSurveyDataset === false ) {
-		warnings.push( '当前模型未加载 RTK 测量数据。' );
+		warnings.push( '当前未加载 RTK 测量数据，正在使用配置控制点与 Marker 校正。' );
 	}
-	if ( configStatus.value.hasModelLocalToEnu === false ) {
+	if ( configStatus.value.normalizedModelControlTargetCount < configStatus.value.requiredModelControlTargetCount ) {
 		warnings.push( '模型控制点不足，无法求解 modelLocalToEnu。' );
+	} else if ( configStatus.value.hasModelLocalToEnu === false && runtimeLoad.value.modelRuntimeLoadState === 'loading' ) {
+		warnings.push( 'Marker 工程配置已加载，模型运行时尚未准备完成。' );
+	} else if ( configStatus.value.hasModelLocalToEnu === false && runtimeLoad.value.modelRuntimeLoadState === 'failed' ) {
+		warnings.push( runtimeLoad.value.modelRuntimeLoadErrorMessage ?? '模型运行时加载失败。' );
 	}
 	if ( configStatus.value.hasControlTargets === false ) {
 		warnings.push( '当前模型没有控制标志。' );
@@ -350,6 +376,12 @@ const canPlaceEngineeringModel = computed(
 		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
 );
 const placementBlockedText = computed( () => {
+	if ( runtimeLoad.value.modelRuntimeLoadState === 'failed' ) {
+		return runtimeLoad.value.modelRuntimeLoadErrorMessage ?? `模型运行时加载失败：${runtimeLoad.value.modelRuntimeLoadFailureReason ?? 'unknown'}`;
+	}
+	if ( runtimeLoad.value.modelRuntimeLoadState === 'loading' ) {
+		return '模型资源仍在加载。';
+	}
 	if ( hasArSession.value === false ) {
 		return '请先进入 AR。';
 	}

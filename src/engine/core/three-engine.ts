@@ -44,6 +44,7 @@ import {
 	createDefaultSavedMarkerLocalizationState,
 	createDefaultSiteCalibrationBaselineState,
 	createDefaultEngineeringConfigStatusState,
+	createDefaultModelRuntimeLoadStatus,
 	createDefaultTargetGuidanceState,
 	createRegistrationStore,
 	type AnnotationDetailState,
@@ -137,6 +138,8 @@ const tempQuaternion = new THREE.Quaternion();
 type EngineeringPlacementBlockReason =
 	| 'model-config-missing'
 	| 'model-template-missing'
+	| 'model-runtime-loading'
+	| 'model-runtime-load-failed'
 	| 'site-origin-missing'
 	| 'control-targets-missing'
 	| 'corners-enu-missing'
@@ -172,6 +175,10 @@ export interface ThreeEngineSnapshot extends RegistrationStoreState {
 	hasSelection: boolean;
 	currentStatus: string;
 }
+
+export type ModelPlacementResult =
+	| { ok: true; placedModelUuid: string }
+	| { ok: false; stage: 'runtime' | 'registration' | 'marker' | 'placement'; reason: string; message: string };
 
 function createInitialState(): RegistrationStoreState {
 
@@ -221,6 +228,7 @@ function createInitialState(): RegistrationStoreState {
 		modelPlacementDebug: createDefaultModelPlacementDebugState(),
 		siteCalibrationBaseline: createDefaultSiteCalibrationBaselineState(),
 		engineeringConfigStatus: createDefaultEngineeringConfigStatusState(),
+		modelRuntimeLoad: createDefaultModelRuntimeLoadStatus(),
 		savedMarkerLocalization: createDefaultSavedMarkerLocalizationState(),
 		markerCalibration: createDefaultMarkerCalibrationState(),
 		placementSummary: {
@@ -346,6 +354,9 @@ export class ThreeEngine {
 	private modelPlacementSuccessCount = 0;
 	private lastAppliedMarkerSolutionId: string | null = null;
 	private autoPlacementInFlightSolutionId: string | null = null;
+	private engineeringDebugRenderAttemptCount = 0;
+	private engineeringDebugRenderSuccessCount = 0;
+	private engineeringDebugBlockedReason: string | null = null;
 	private replacedModelCount = 0;
 	private lastPlacementReason = '-';
 	private lastPlacementTimestamp = 0;
@@ -470,7 +481,7 @@ export class ThreeEngine {
 			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
 			getHitPosition: ( target ) => this.xrRuntime.getHitTestController().getHitPosition( target ),
-			getDemoModelConfig: () => this.demoModelConfig ?? this.currentArSessionContext?.siteConfig ?? null,
+			getDemoModelConfig: () => this.getSessionSiteConfig(),
 			getPrimaryConfiguredMarkerPose: () => this.getPrimaryConfiguredMarkerPose(),
 			getControlTargets: () => this.getCurrentControlTargets(),
 			hasAppliedMarkerSolutionForCurrentSession: () => (
@@ -498,7 +509,9 @@ export class ThreeEngine {
 			getWorkflowMode: () => this.workflowMode,
 			getCurrentSessionId: () => this.currentArSessionId,
 			getRepositoryDataSource: () => repositories.dataSource,
-			getDemoModelConfig: () => this.demoModelConfig ?? this.currentArSessionContext?.siteConfig ?? null,
+			getSessionSiteConfig: () => this.getSessionSiteConfig(),
+			getActiveRuntimeConfig: () => this.getActiveRuntimeConfig(),
+			getActiveModelTemplate: () => this.getActiveModelTemplate(),
 			getRegistrationSolution: () => this.registrationSolution,
 			getResolvedMarkerPosesInEnu: () => this.resolvedMarkerPosesInEnu,
 			getActiveMarkerLocalizationResult: () => this.activeMarkerLocalizationResult,
@@ -664,6 +677,7 @@ export class ThreeEngine {
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
 				this.registrationSolution = null;
+				this.engineeringDebugBlockedReason = 'model-runtime-loading';
 				this.resolvedMarkerPosesInEnu = [];
 				if ( preserveCurrentArLocalization === false ) {
 					this.activeSiteCalibrationBaseline = null;
@@ -697,7 +711,7 @@ export class ThreeEngine {
 				this.syncRegistrationChainDebug();
 				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
 			},
-				onRuntimeBundleLoaded: ( bundle, modelLoadRequestId ) => {
+			onRuntimeBundleLoaded: ( bundle, modelLoadRequestId ) => {
 				this.pipesByName = bundle.pipesByName;
 				this.demoModelConfig = bundle.demoModelConfig;
 				this.modelTemplate = bundle.modelTemplate;
@@ -727,6 +741,11 @@ export class ThreeEngine {
 					);
 				}
 				this.tryAutoPlaceAppliedMarkerSolution();
+			},
+			onRuntimeLoadFailed: ( error ) => {
+				this.engineeringDebugBlockedReason = this.describeRuntimeLoadBlock( error.stage );
+				this.syncRegistrationChainDebug();
+				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
 			},
 			onLoadManualRegistration: () => {},
 			canRequestAutoPlacement: () => false,
@@ -1322,21 +1341,22 @@ export class ThreeEngine {
 
 	}
 
-	async placeModel(): Promise<void> {
+	async placeModel(): Promise<ModelPlacementResult> {
 
 		if ( this.sceneBundle.renderer.xr.isPresenting === false ) {
 			this.setStatus( 'AR 会话尚未开启。' );
-			return;
+			return { ok: false, stage: 'marker', reason: 'ar-session-not-presenting', message: 'AR 会话尚未开启。' };
 		}
 
 		const guard = this.validateEngineeringPlacementPreconditions();
 		if ( guard.ok === false ) {
 			this.logEngineeringPlacementBlocked( guard.reason ?? 'transform-missing' );
-			this.setStatus( guard.message ?? '请先完成 Marker 四角点校正后再进行工程放置。' );
-			return;
+			const message = guard.message ?? '请先完成 Marker 四角点校正后再进行工程放置。';
+			this.setStatus( message );
+			return { ok: false, stage: placementStageForBlockReason( guard.reason ), reason: guard.reason ?? 'transform-missing', message };
 		}
 
-		await this.placeModelFromCurrentMarkerSolution( guard );
+		return this.placeModelFromCurrentMarkerSolution( guard );
 
 	}
 
@@ -1599,6 +1619,24 @@ export class ThreeEngine {
 
 	}
 
+	private getSessionSiteConfig(): DemoModelConfig | null {
+
+		return this.demoModelConfig ?? this.currentArSessionContext?.siteConfig ?? null;
+
+	}
+
+	private getActiveRuntimeConfig(): DemoModelConfig | null {
+
+		return this.demoModelConfig;
+
+	}
+
+	private getActiveModelTemplate(): THREE.Group | null {
+
+		return this.modelTemplate;
+
+	}
+
 	private canPreserveMarkerLocalizationForRuntimeRefresh(nextModelId: string): boolean {
 
 		const context = this.currentArSessionContext;
@@ -1851,8 +1889,8 @@ export class ThreeEngine {
 		if ( this.demoModelConfig === null ) {
 			return {
 				ok: false,
-				reason: 'model-config-missing',
-				message: '模型工程配置尚未加载完成。'
+				reason: this.getRuntimePlacementBlockReason(),
+				message: this.getRuntimePlacementBlockedMessage()
 			};
 		}
 
@@ -1871,16 +1909,16 @@ export class ThreeEngine {
 		if ( this.modelTemplate === null ) {
 			return {
 				ok: false,
-				reason: 'model-template-missing',
-				message: '模型模板尚未加载完成，无法正式放置模型。'
+				reason: this.getRuntimePlacementBlockReason(),
+				message: this.getRuntimePlacementBlockedMessage( '模型模板尚未加载完成，无法正式放置模型。' )
 			};
 		}
 
 		if ( this.registrationSolution === null ) {
 			return {
 				ok: false,
-				reason: 'model-registration-missing',
-				message: '模型控制点配准尚未准备完成，无法正式放置模型。'
+				reason: this.getRuntimePlacementBlockReason(),
+				message: this.getRuntimePlacementBlockedMessage( '模型控制点配准尚未准备完成，无法正式放置模型。' )
 			};
 		}
 
@@ -2042,6 +2080,7 @@ export class ThreeEngine {
 		updateReason = 'unknown'
 	): void {
 
+		this.engineeringDebugRenderAttemptCount += 1;
 		this.clearEngineeringCornerDebug();
 		this.addSiteOriginReferenceMarker( arFromEnuSolution );
 		if ( this.engineeringDebugLayers.showMarkerExpected && controlTarget?.cornersEnu !== undefined ) {
@@ -2180,6 +2219,8 @@ export class ThreeEngine {
 			affectsPlacement: false,
 			createdAt: Date.now()
 		} );
+		this.engineeringDebugRenderSuccessCount += 1;
+		this.engineeringDebugBlockedReason = null;
 
 	}
 
@@ -3158,6 +3199,32 @@ export class ThreeEngine {
 
 	}
 
+	private getRuntimePlacementBlockReason(): EngineeringPlacementBlockReason {
+
+		return this.store.getState().modelRuntimeLoad.modelRuntimeLoadState === 'failed'
+			? 'model-runtime-load-failed'
+			: 'model-runtime-loading';
+
+	}
+
+	private getRuntimePlacementBlockedMessage(fallback = '模型运行时尚未准备完成。'): string {
+
+		const runtime = this.store.getState().modelRuntimeLoad;
+		if ( runtime.modelRuntimeLoadState === 'failed' ) {
+			return runtime.modelRuntimeLoadErrorMessage ?? `模型运行时加载失败：${runtime.modelRuntimeLoadFailureReason ?? 'unknown'}。`;
+		}
+		return runtime.modelRuntimeLoadState === 'loading'
+			? '模型资源仍在加载，请稍候。'
+			: fallback;
+
+	}
+
+	private describeRuntimeLoadBlock(stage: string): string {
+
+		return `model-runtime-load-failed:${stage}`;
+
+	}
+
 	private createMarkerSolutionApplyDiagnostics(solution: MarkerLocalizationSolution, metadata: MarkerSolutionApplyMetadata): MarkerSolutionApplyDiagnostics {
 
 		const state = this.store.getState().markerCalibration;
@@ -3449,12 +3516,13 @@ export class ThreeEngine {
 	private async placeModelFromCurrentMarkerSolution(
 		guard: EngineeringPlacementGuardResult,
 		reason = 'engineering-place-button'
-	): Promise<void> {
+	): Promise<ModelPlacementResult> {
 
 		const arFromEnuSolution = guard.arFromEnuSolution ?? this.getActiveMarkerArFromEnuSolutionForCurrentSession();
 		if ( arFromEnuSolution === null ) {
-			this.setStatus( '请先完成 Marker 四角点校正后再进行工程放置。' );
-			return;
+			const message = '请先完成 Marker 四角点校正后再进行工程放置。';
+			this.setStatus( message );
+			return { ok: false, stage: 'marker', reason: 'marker-solution-missing', message };
 		}
 
 		const hadPlacedModel = this.placementSession.getArPlacedModel() !== null;
@@ -3466,7 +3534,7 @@ export class ThreeEngine {
 		await this.placementWorkflow.placeLocalizedModel();
 		if ( this.placementSession.getArPlacedModel() === null ) {
 			this.syncModelPlacementDebug( arFromEnuSolution );
-			return;
+			return { ok: false, stage: 'placement', reason: 'placed-model-missing', message: '模型放置未生成可显示对象。' };
 		}
 		this.modelPlacementSuccessCount += 1;
 
@@ -3485,6 +3553,7 @@ export class ThreeEngine {
 		this.logModelControlPointPlacementCheck( arFromEnuSolution );
 		this.logEngineeringPlacementApplied( arFromEnuSolution, guard.controlTarget ?? null );
 		this.syncModelPlacementDebug( arFromEnuSolution );
+		return { ok: true, placedModelUuid: this.placementSession.getArPlacedModel()?.uuid ?? '' };
 
 	}
 
@@ -3551,6 +3620,10 @@ export class ThreeEngine {
 			engineeringPlacementCallCount: this.engineeringPlacementCallCount,
 			modelPlacementAttemptCount: this.modelPlacementAttemptCount,
 			modelPlacementSuccessCount: this.modelPlacementSuccessCount,
+			engineeringDebugRenderAttemptCount: this.engineeringDebugRenderAttemptCount,
+			engineeringDebugRenderSuccessCount: this.engineeringDebugRenderSuccessCount,
+			engineeringDebugBlockedReason: this.engineeringDebugBlockedReason ?? undefined,
+			engineeringCornerDebugCount: this.registrationSolution?.controlPoints.length ?? 0,
 			lastModelPlacementReason: this.lastPlacementReason,
 			lastAppliedMarkerSolutionId: this.lastAppliedMarkerSolutionId ?? undefined,
 			lastPlacementReason: this.lastPlacementReason,
@@ -4628,6 +4701,14 @@ function resolveParallaxStatus(
 		return 'real-world-movement';
 	}
 	return 'unknown';
+
+}
+
+function placementStageForBlockReason(reason: EngineeringPlacementBlockReason | undefined): 'runtime' | 'registration' | 'marker' {
+
+	if ( reason === 'model-runtime-loading' || reason === 'model-runtime-load-failed' || reason === 'model-template-missing' || reason === 'model-config-missing' ) return 'runtime';
+	if ( reason === 'model-registration-missing' ) return 'registration';
+	return 'marker';
 
 }
 

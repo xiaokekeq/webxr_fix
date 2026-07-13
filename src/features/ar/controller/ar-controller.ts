@@ -3,7 +3,7 @@
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
-import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
+import type { ModelPlacementResult, ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
@@ -55,7 +55,7 @@ export interface LoadModelArController {
 		resetPlacement(): void;
 		setInspectionPlacementSource(source: InspectionPlacementSource): void;
 	enterAr(): void;
-		placeModel(): Promise<void>;
+		placeModel(): Promise<ModelPlacementResult>;
 		exitAr(): void;
 		setRegistrationView(_view: RegistrationView): void;
 		setInspectionFormExpanded(_expanded: boolean): void;

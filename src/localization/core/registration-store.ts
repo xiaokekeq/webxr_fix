@@ -240,6 +240,10 @@ export interface ModelPlacementDebugState {
 	engineeringPlacementCallCount?: number;
 	modelPlacementAttemptCount?: number;
 	modelPlacementSuccessCount?: number;
+	engineeringDebugRenderAttemptCount?: number;
+	engineeringDebugRenderSuccessCount?: number;
+	engineeringDebugBlockedReason?: string;
+	engineeringCornerDebugCount?: number;
 	lastModelPlacementReason?: string;
 	lastAppliedMarkerSolutionId?: string;
 	lastPlacementReason?: string;
@@ -266,7 +270,58 @@ export interface SiteCalibrationBaselineState {
 	updatedAtText: string;
 }
 
+export type ModelRuntimeLoadState = 'idle' | 'loading' | 'ready' | 'failed';
+
+export interface ModelRuntimeStageState {
+	state: ModelRuntimeLoadState;
+	startedAt?: number;
+	completedAt?: number;
+	durationMs?: number;
+	failureReason?: string;
+	errorName?: string;
+	errorMessage?: string;
+}
+
+export interface ModelRuntimeAssetState extends ModelRuntimeStageState {
+	assetId: string;
+	assetUrl: string;
+	materialUrl?: string;
+}
+
+export interface ModelRuntimeLoadStatus {
+	modelLoadRequestId: number;
+	modelLoadCompletedRequestId: number;
+	modelRuntimeLoadState: ModelRuntimeLoadState;
+	modelRuntimeLoadStage?: string;
+	modelRuntimeLoadFailureReason?: string;
+	modelRuntimeLoadErrorMessage?: string;
+	modelRuntimeLoadFailedAssetId?: string;
+	modelRuntimeLoadFailedUrl?: string;
+	modelCatalogState: ModelRuntimeStageState;
+	pipeRecordsState: ModelRuntimeStageState;
+	siteConfigLoadState: ModelRuntimeStageState;
+	assetLoadState: ModelRuntimeStageState;
+	terrainAssetState: ModelRuntimeStageState;
+	stakeMarkerAssetState: ModelRuntimeStageState;
+	registrationSolveState: ModelRuntimeStageState;
+	modelTemplateComposeState: ModelRuntimeStageState;
+	runtimeBundleState: ModelRuntimeStageState;
+	assetStates: ModelRuntimeAssetState[];
+	registrationControlPointCount: number;
+	registrationRmsErrorMeters?: number;
+	registrationMatrixFinite?: boolean;
+	registrationMatrixInvertible?: boolean;
+	modelTemplateRenderableCount: number;
+}
+
 export interface EngineeringConfigStatusState {
+	configSource: 'active-runtime' | 'session-context' | 'none';
+	activeRuntimeConfigReady: boolean;
+	sessionContextConfigReady: boolean;
+	registrationSolutionReady: boolean;
+	modelTemplateReady: boolean;
+	rtkDataAvailable: boolean;
+	rtkRequiredForCurrentWorkflow: boolean;
 	rawModelControlPointCount: number;
 	normalizedModelControlTargetCount: number;
 	requiredModelControlTargetCount: number;
@@ -280,7 +335,7 @@ export interface EngineeringConfigStatusState {
 	hasPlacementAnchor: boolean;
 	activeControlTargetHasCornersEnu: boolean;
 	hasMockEngineeringData: boolean;
-	modelLocalToEnuSource: 'explicit' | 'control-points' | 'missing';
+	modelLocalToEnuSource: 'explicit' | 'control-points' | 'waiting-runtime' | 'failed' | 'missing';
 	modelLocalToEnuText: string;
 	controlTargetCount: number;
 	activeControlTargetId?: string;
@@ -421,6 +476,7 @@ export interface RegistrationStoreState {
 	registrationChainDebug: RegistrationChainDebugState;
 	footprintDiagnostics: FootprintDiagnosticsState;
 	modelPlacementDebug: ModelPlacementDebugState;
+	modelRuntimeLoad: ModelRuntimeLoadStatus;
 	siteCalibrationBaseline: SiteCalibrationBaselineState;
 	engineeringConfigStatus: EngineeringConfigStatusState;
 	savedMarkerLocalization: SavedMarkerLocalizationState;
@@ -631,6 +687,13 @@ export function createDefaultSiteCalibrationBaselineState(): SiteCalibrationBase
 export function createDefaultEngineeringConfigStatusState(): EngineeringConfigStatusState {
 
 	return {
+		configSource: 'none',
+		activeRuntimeConfigReady: false,
+		sessionContextConfigReady: false,
+		registrationSolutionReady: false,
+		modelTemplateReady: false,
+		rtkDataAvailable: false,
+		rtkRequiredForCurrentWorkflow: false,
 		rawModelControlPointCount: 0,
 		normalizedModelControlTargetCount: 0,
 		requiredModelControlTargetCount: 0,
@@ -664,6 +727,29 @@ export function createDefaultEngineeringConfigStatusState(): EngineeringConfigSt
 		siteOriginText: '-',
 		placementAnchorText: '-',
 		controlTargetSummaries: []
+	};
+
+}
+
+export function createDefaultModelRuntimeLoadStatus(): ModelRuntimeLoadStatus {
+
+	const idle: ModelRuntimeStageState = { state: 'idle' };
+	return {
+		modelLoadRequestId: 0,
+		modelLoadCompletedRequestId: 0,
+		modelRuntimeLoadState: 'idle',
+		modelCatalogState: { ...idle },
+		pipeRecordsState: { ...idle },
+		siteConfigLoadState: { ...idle },
+		assetLoadState: { ...idle },
+		terrainAssetState: { ...idle },
+		stakeMarkerAssetState: { ...idle },
+		registrationSolveState: { ...idle },
+		modelTemplateComposeState: { ...idle },
+		runtimeBundleState: { ...idle },
+		assetStates: [],
+		registrationControlPointCount: 0,
+		modelTemplateRenderableCount: 0
 	};
 
 }
