@@ -77,10 +77,7 @@ export function createBoundaryShellMaterial(source: THREE.Material): THREE.MeshB
 		side: THREE.DoubleSide,
 		toneMapped: false,
 		depthTest: true,
-		depthWrite: true,
-		polygonOffset: true,
-		polygonOffsetFactor: - 1,
-		polygonOffsetUnits: - 1
+		depthWrite: true
 	} );
 	material.clippingPlanes = null;
 	material.clipIntersection = false;
