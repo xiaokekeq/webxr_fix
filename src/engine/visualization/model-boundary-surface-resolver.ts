@@ -5,10 +5,7 @@ export interface ResolvedConformingSurface {
 	geometry: THREE.BufferGeometry;
 	materials: THREE.Material[];
 	sourceTriangleCount: number;
-	sideTriangleCount: number;
-	globalBottomTriangleCount: number;
 	excludedTopTriangleCount: number;
-	excludedInternalBottomTriangleCount: number;
 	triangleCount: number;
 }
 
@@ -30,7 +27,11 @@ interface SurfaceTriangle {
 	material: THREE.Material;
 	sourceMesh: THREE.Mesh;
 	geometricNormal: THREE.Vector3;
+	center: THREE.Vector3;
 }
+
+const MODEL_UP = new THREE.Vector3( 0, 1, 0 );
+const TOP_NORMAL_MIN_Y = 0.2;
 
 export function resolveModelConformingSurface(modelRoot: THREE.Object3D): ConformingSurfaceResolveResult {
 
@@ -42,11 +43,21 @@ export function resolveModelConformingSurface(modelRoot: THREE.Object3D): Confor
 	const triangles = sourceMeshes.flatMap( ( mesh ) => collectMeshTriangles( mesh, inverseRoot ) );
 	const bounds = new THREE.Box3().setFromPoints( triangles.flatMap( ( triangle ) => triangle.positions ) );
 	if ( triangles.length === 0 || bounds.isEmpty() ) return { ok: false, reason: 'empty-model', message: 'Eligible model meshes have no triangles.' };
-	const bottomTolerance = Math.max( ( bounds.max.y - bounds.min.y ) * 1e-4, 1e-5 );
-	const shellTriangles = triangles.filter( ( triangle ) => shouldIncludeInConformingShell( triangle, bounds, bottomTolerance ) );
+	const modelSize = bounds.getSize( new THREE.Vector3() );
+	const epsilon = Math.max( modelSize.length() * 1e-5, 1e-5 );
+	const topTriangles = new Set<SurfaceTriangle>();
+	for ( const triangle of triangles ) {
+		if ( isUpperEnvelopeTriangle( triangle, triangles, epsilon, modelSize.y ) ) topTriangles.add( triangle );
+	}
+	const shellTriangles = triangles.filter( ( triangle ) => topTriangles.has( triangle ) === false );
+	if ( import.meta.env.DEV ) console.info( '[ModelConformingShellTopRemoval]', {
+		sourceTriangleCount: triangles.length,
+		removedTopTriangleCount: topTriangles.size,
+		shellTriangleCount: shellTriangles.length
+	} );
 	if ( shellTriangles.length === 0 ) return { ok: false, reason: 'no-conforming-surface', message: 'Model has no non-top conforming surface triangles.' };
 
-	const surface = createResolvedConformingSurface( triangles, shellTriangles, bounds, bottomTolerance );
+	const surface = createResolvedConformingSurface( triangles, shellTriangles, topTriangles.size );
 	if ( isValidSurface( surface ) === false ) {
 		surface.geometry.dispose();
 		return { ok: false, reason: 'invalid-surface', message: 'Resolved conforming surface geometry is invalid.' };
@@ -101,7 +112,7 @@ function collectMeshTriangles(mesh: THREE.Mesh, inverseRoot: THREE.Matrix4): Sur
 		const offset = triangleIndex * 3;
 		const indices = [ index === null ? offset : index.getX( offset ), index === null ? offset + 1 : index.getX( offset + 1 ), index === null ? offset + 2 : index.getX( offset + 2 ) ];
 		const positions = indices.map( ( vertexIndex ) => new THREE.Vector3().fromBufferAttribute( position, vertexIndex ).applyMatrix4( meshToRoot ) ) as SurfaceTriangle['positions'];
-		const geometricNormal = new THREE.Vector3().crossVectors( positions[ 1 ].clone().sub( positions[ 0 ] ), positions[ 2 ].clone().sub( positions[ 0 ] ) ).normalize();
+		const geometricNormal = computeGeometricNormal( positions );
 		if ( geometricNormal.lengthSq() === 0 ) continue;
 		const normals = indices.map( ( vertexIndex ) => normal === undefined ? geometricNormal.clone() : new THREE.Vector3().fromBufferAttribute( normal, vertexIndex ).applyMatrix3( normalMatrix ).normalize() ) as SurfaceTriangle['normals'];
 		const materialIndex = geometry.groups.find( ( group ) => offset >= group.start && offset < group.start + group.count )?.materialIndex ?? 0;
@@ -112,25 +123,42 @@ function collectMeshTriangles(mesh: THREE.Mesh, inverseRoot: THREE.Matrix4): Sur
 			colors: color === undefined ? null : indices.map( ( vertexIndex ) => new THREE.Color().fromBufferAttribute( color, vertexIndex ) ) as SurfaceTriangle['colors'],
 			material: materials[ materialIndex ] ?? materials[ 0 ],
 			sourceMesh: mesh,
-			geometricNormal
+			geometricNormal,
+			center: positions[ 0 ].clone().add( positions[ 1 ] ).add( positions[ 2 ] ).multiplyScalar( 1 / 3 )
 		} );
 	}
 	return triangles;
 
 }
 
-function shouldIncludeInConformingShell(triangle: SurfaceTriangle, modelBounds: THREE.Box3, bottomTolerance: number): boolean {
+function computeGeometricNormal(positions: SurfaceTriangle['positions']): THREE.Vector3 {
 
-	const verticalMagnitude = Math.abs( triangle.geometricNormal.y );
-	const horizontalMagnitude = Math.max( Math.abs( triangle.geometricNormal.x ), Math.abs( triangle.geometricNormal.z ) );
-	if ( horizontalMagnitude >= verticalMagnitude ) return true;
-	if ( isGlobalBottomTriangle( triangle, modelBounds, bottomTolerance ) ) return true;
-	if ( triangle.geometricNormal.y > 0 ) return false;
-	return false;
+	return new THREE.Vector3()
+		.crossVectors(
+			new THREE.Vector3().subVectors( positions[ 1 ], positions[ 0 ] ),
+			new THREE.Vector3().subVectors( positions[ 2 ], positions[ 0 ] )
+		)
+		.normalize();
 
 }
 
-function createResolvedConformingSurface(allTriangles: SurfaceTriangle[], triangles: SurfaceTriangle[], bounds: THREE.Box3, bottomTolerance: number): ResolvedConformingSurface {
+function isUpperEnvelopeTriangle(triangle: SurfaceTriangle, allTriangles: readonly SurfaceTriangle[], epsilon: number, modelHeight: number): boolean {
+
+	if ( Math.abs( triangle.geometricNormal.y ) < TOP_NORMAL_MIN_Y ) return false;
+	const origin = triangle.center.clone().addScaledVector( MODEL_UP, epsilon * 4 );
+	const ray = new THREE.Ray( origin, MODEL_UP );
+	const hit = new THREE.Vector3();
+	for ( const other of allTriangles ) {
+		if ( other === triangle ) continue;
+		if ( ray.intersectTriangle( other.positions[ 0 ], other.positions[ 1 ], other.positions[ 2 ], false, hit ) === null ) continue;
+		const distance = hit.distanceTo( origin );
+		if ( distance > epsilon && distance <= modelHeight + epsilon ) return false;
+	}
+	return true;
+
+}
+
+function createResolvedConformingSurface(allTriangles: SurfaceTriangle[], triangles: SurfaceTriangle[], excludedTopTriangleCount: number): ResolvedConformingSurface {
 
 	const materials: THREE.Material[] = [];
 	const sourceMeshes: THREE.Mesh[] = [];
@@ -165,33 +193,7 @@ function createResolvedConformingSurface(allTriangles: SurfaceTriangle[], triang
 	geometry.setAttribute( 'color', new THREE.Float32BufferAttribute( colors, 3 ) );
 	geometry.computeBoundingBox();
 	geometry.computeBoundingSphere();
-	const excludedTopTriangleCount = allTriangles.filter( ( triangle ) => isTopFacingTriangle( triangle ) && isGlobalBottomTriangle( triangle, bounds, bottomTolerance ) === false ).length;
-	const excludedInternalBottomTriangleCount = allTriangles.filter( ( triangle ) => isInternalBottomTriangle( triangle, bounds, bottomTolerance ) ).length;
-	const globalBottomTriangleCount = triangles.filter( ( triangle ) => isGlobalBottomTriangle( triangle, bounds, bottomTolerance ) ).length;
-	return { sourceMeshes, geometry, materials, sourceTriangleCount: allTriangles.length, sideTriangleCount: triangles.length - globalBottomTriangleCount, globalBottomTriangleCount, excludedTopTriangleCount, excludedInternalBottomTriangleCount, triangleCount: positions.length / 9 };
-
-}
-
-function isTopFacingTriangle(triangle: SurfaceTriangle): boolean {
-
-	const verticalMagnitude = Math.abs( triangle.geometricNormal.y );
-	const horizontalMagnitude = Math.max( Math.abs( triangle.geometricNormal.x ), Math.abs( triangle.geometricNormal.z ) );
-	return triangle.geometricNormal.y > 0 && verticalMagnitude > horizontalMagnitude;
-
-}
-
-function isGlobalBottomTriangle(triangle: SurfaceTriangle, bounds: THREE.Box3, bottomTolerance: number): boolean {
-
-	const triangleMaxY = Math.max( triangle.positions[ 0 ].y, triangle.positions[ 1 ].y, triangle.positions[ 2 ].y );
-	return triangleMaxY <= bounds.min.y + bottomTolerance;
-
-}
-
-function isInternalBottomTriangle(triangle: SurfaceTriangle, bounds: THREE.Box3, bottomTolerance: number): boolean {
-
-	const verticalMagnitude = Math.abs( triangle.geometricNormal.y );
-	const horizontalMagnitude = Math.max( Math.abs( triangle.geometricNormal.x ), Math.abs( triangle.geometricNormal.z ) );
-	return triangle.geometricNormal.y < 0 && verticalMagnitude > horizontalMagnitude && isGlobalBottomTriangle( triangle, bounds, bottomTolerance ) === false;
+	return { sourceMeshes, geometry, materials, sourceTriangleCount: allTriangles.length, excludedTopTriangleCount, triangleCount: positions.length / 9 };
 
 }
 

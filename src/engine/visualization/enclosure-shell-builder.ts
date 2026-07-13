@@ -41,14 +41,6 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 	root.add( mesh );
 
 	modelRoot.add( root );
-	if ( import.meta.env.DEV ) console.info( '[ModelConformingShellReady]', {
-		meshCount: 1,
-		sourceTriangleCount: resolved.surface.sourceTriangleCount,
-		shellTriangleCount: resolved.surface.triangleCount,
-		excludedTopTriangleCount: resolved.surface.excludedTopTriangleCount,
-		excludedInternalBottomTriangleCount: resolved.surface.excludedInternalBottomTriangleCount,
-		materialCount: resolved.surface.materials.length,
-	} );
 	return { ok: true, root, meshCount: 1, bounds: resolved.bounds, surface: resolved.surface };
 }
 export function createBoundaryShellMaterial(source: THREE.Material): THREE.MeshBasicMaterial {
