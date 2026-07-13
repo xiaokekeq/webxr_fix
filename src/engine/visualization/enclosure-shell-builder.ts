@@ -1,7 +1,53 @@
 import * as THREE from 'three';
-import { cloneEnclosureMaterial, resolveEnclosureMaterialSources, type EnclosureFaceName } from './enclosure-material-resolver.js';
+import {
+	cloneEnclosureMaterial,
+	resolveEnclosureMaterialSources,
+	type EnclosureFaceName
+} from './enclosure-material-resolver.js';
 
-export interface EnclosureShellBuildResult { root: THREE.Group; meshCount: number; triangleCount: number; materialCount: number; materialSources: Record<EnclosureFaceName, string>; bounds: THREE.Box3; renderableCount: number; }
+type FixedAxis = 'x' | 'y' | 'z';
+
+interface EnclosureFaceDefinition {
+	name: EnclosureFaceName;
+	fixedAxis: FixedAxis;
+	fixedValue: number;
+	expectedNormal: THREE.Vector3;
+	dimensions: THREE.Vector2;
+	points: THREE.Vector3[];
+}
+
+export interface EnclosureFaceDiagnostic {
+	faceName: EnclosureFaceName;
+	fixedAxis: FixedAxis;
+	fixedValue: number;
+	bounds: { min: number[]; max: number[] };
+	averageNormal: number[];
+	expectedNormal: number[];
+	normalDot: number;
+	visible: boolean;
+	materialSource: string;
+}
+
+export interface EnclosureGeometryValidation {
+	ok: boolean;
+	faceDiagnostics: EnclosureFaceDiagnostic[];
+	triangleCount: number;
+	boundaryCornersConnected: boolean;
+}
+
+export interface EnclosureShellBuildResult {
+	root: THREE.Group;
+	meshCount: number;
+	triangleCount: number;
+	materialCount: number;
+	materialSources: Record<EnclosureFaceName, string>;
+	bounds: THREE.Box3;
+	renderableCount: number;
+	axisU: THREE.Vector3;
+	axisV: THREE.Vector3;
+	axisUp: THREE.Vector3;
+	faceDiagnostics: EnclosureFaceDiagnostic[];
+}
 
 export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBuildResult {
 
@@ -12,60 +58,335 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 	root.userData.__enclosureShell = true;
 	root.userData.__excludeFromLayerIndex = true;
 	const renderableCount = countRenderableMeshes( modelRoot );
-	if ( bounds.isEmpty() ) return { root, meshCount: 0, triangleCount: 0, materialCount: 0, materialSources: { front: 'none', back: 'none', left: 'none', right: 'none', bottom: 'none' }, bounds, renderableCount };
+	if ( bounds.isEmpty() ) return createEmptyBuildResult( root, bounds, renderableCount );
+
+	const validation = validateEnclosureFaceGeometry( bounds );
+	if ( validation.ok === false ) {
+		throw new Error( 'Invalid five-face enclosure geometry.' );
+	}
+
 	const sources = resolveEnclosureMaterialSources( modelRoot, bounds );
-	const size = bounds.getSize( new THREE.Vector3() );
-	const faces: Array<[ EnclosureFaceName, THREE.Vector3[] ]> = [
-		[ 'front', quad( bounds.min.x, bounds.max.x, bounds.min.z, bounds.min.z, bounds.min.y, bounds.max.y, 'front' ) ],
-		[ 'back', quad( bounds.min.x, bounds.max.x, bounds.max.z, bounds.max.z, bounds.min.y, bounds.max.y, 'back' ) ],
-		[ 'left', quad( bounds.min.z, bounds.max.z, bounds.min.x, bounds.min.x, bounds.min.y, bounds.max.y, 'left' ) ],
-		[ 'right', quad( bounds.min.z, bounds.max.z, bounds.max.x, bounds.max.x, bounds.min.y, bounds.max.y, 'right' ) ],
-		[ 'bottom', quad( bounds.min.x, bounds.max.x, bounds.min.z, bounds.max.z, bounds.min.y, bounds.min.y, 'bottom' ) ]
-	];
-	for ( const [ name, points ] of faces ) {
-		const material = cloneEnclosureMaterial( sources[ name ] );
-		const dimensions = name === 'bottom' ? [ size.x, size.z ] : name === 'left' || name === 'right' ? [ size.z, size.y ] : [ size.x, size.y ];
-		const mesh = new THREE.Mesh( makeFaceGeometry( points, dimensions[ 0 ] / sources[ name ].metersPerUv, dimensions[ 1 ] / sources[ name ].metersPerUv ), material );
-		mesh.name = `__enclosure-${name}`; mesh.userData.__enclosureShell = true; mesh.userData.__excludeFromLayerIndex = true; mesh.userData.enclosureFace = name; mesh.userData.materialSource = sources[ name ].source;
+	const faceDefinitions = createFaceDefinitions( bounds );
+	for ( const face of faceDefinitions ) {
+		const source = sources[ face.name ];
+		const material = cloneEnclosureMaterial( source );
+		const mesh = new THREE.Mesh(
+			makeFaceGeometry(
+				face.points,
+				face.dimensions.x / source.metersPerUv,
+				face.dimensions.y / source.metersPerUv
+			),
+			material
+		);
+		mesh.name = `__enclosure-${face.name}`;
+		mesh.userData.__enclosureShell = true;
+		mesh.userData.__excludeFromLayerIndex = true;
+		mesh.userData.enclosureFace = face.name;
+		mesh.userData.materialSource = source.source;
 		root.add( mesh );
 	}
+
 	modelRoot.add( root );
-	return { root, meshCount: 5, triangleCount: 10, materialCount: 5, materialSources: Object.fromEntries( Object.entries( sources ).map( ( [ face, source ] ) => [ face, source.source ] ) ) as Record<EnclosureFaceName, string>, bounds, renderableCount };
+	return {
+		root,
+		meshCount: 5,
+		triangleCount: validation.triangleCount,
+		materialCount: 5,
+		materialSources: Object.fromEntries(
+			Object.entries( sources ).map( ( [ face, source ] ) => [ face, source.source ] )
+		) as Record<EnclosureFaceName, string>,
+		bounds,
+		renderableCount,
+		axisU: new THREE.Vector3( 1, 0, 0 ),
+		axisV: new THREE.Vector3( 0, 0, 1 ),
+		axisUp: new THREE.Vector3( 0, 1, 0 ),
+		faceDiagnostics: validation.faceDiagnostics.map( ( diagnostic ) => ( {
+			...diagnostic,
+			materialSource: sources[ diagnostic.faceName ].source
+		} ) )
+	};
+
+}
+
+/** Pure geometry check; the asymmetric box catches accidental Y/Z swaps. */
+export function runEnclosureFaceGeometrySelfCheck(): void {
+
+	const bounds = new THREE.Box3(
+		new THREE.Vector3( - 2, - 3, - 5 ),
+		new THREE.Vector3( 7, 11, 13 )
+	);
+	const validation = validateEnclosureFaceGeometry( bounds );
+	if ( validation.ok === false ) {
+		throw new Error( 'Five-face enclosure geometry self-check failed.' );
+	}
+
+}
+
+export function validateEnclosureFaceGeometry(bounds: THREE.Box3): EnclosureGeometryValidation {
+
+	const faces = createFaceDefinitions( bounds );
+	const faceDiagnostics = faces.map( ( face ) => validateFaceGeometry( face ) );
+	const triangleCount = faces.reduce( ( total, face ) => total + faceTriangleCount( face.points ), 0 );
+	const boundaryCornersConnected = hasConnectedBoundaryCorners( faces, bounds );
+	return {
+		ok: faceDiagnostics.every( ( diagnostic ) => diagnostic.normalDot > 0.99 )
+			&& triangleCount === 10
+			&& boundaryCornersConnected,
+		faceDiagnostics,
+		triangleCount,
+		boundaryCornersConnected
+	};
+
+}
+
+function createEmptyBuildResult(
+	root: THREE.Group,
+	bounds: THREE.Box3,
+	renderableCount: number
+): EnclosureShellBuildResult {
+
+	return {
+		root,
+		meshCount: 0,
+		triangleCount: 0,
+		materialCount: 0,
+		materialSources: { front: 'none', back: 'none', left: 'none', right: 'none', bottom: 'none' },
+		bounds,
+		renderableCount,
+		axisU: new THREE.Vector3( 1, 0, 0 ),
+		axisV: new THREE.Vector3( 0, 0, 1 ),
+		axisUp: new THREE.Vector3( 0, 1, 0 ),
+		faceDiagnostics: []
+	};
+
+}
+
+function createFaceDefinitions(bounds: THREE.Box3): EnclosureFaceDefinition[] {
+
+	const size = bounds.getSize( new THREE.Vector3() );
+	return [
+		createFrontFace( bounds, size ),
+		createBackFace( bounds, size ),
+		createLeftFace( bounds, size ),
+		createRightFace( bounds, size ),
+		createBottomFace( bounds, size )
+	];
+
+}
+
+function createFrontFace(bounds: THREE.Box3, size: THREE.Vector3): EnclosureFaceDefinition {
+
+	const z = bounds.min.z;
+	return {
+		name: 'front',
+		fixedAxis: 'z',
+		fixedValue: z,
+		expectedNormal: new THREE.Vector3( 0, 0, - 1 ),
+		dimensions: new THREE.Vector2( size.x, size.y ),
+		points: [
+			new THREE.Vector3( bounds.min.x, bounds.min.y, z ),
+			new THREE.Vector3( bounds.min.x, bounds.max.y, z ),
+			new THREE.Vector3( bounds.max.x, bounds.max.y, z ),
+			new THREE.Vector3( bounds.max.x, bounds.min.y, z )
+		]
+	};
+
+}
+
+function createBackFace(bounds: THREE.Box3, size: THREE.Vector3): EnclosureFaceDefinition {
+
+	const z = bounds.max.z;
+	return {
+		name: 'back',
+		fixedAxis: 'z',
+		fixedValue: z,
+		expectedNormal: new THREE.Vector3( 0, 0, 1 ),
+		dimensions: new THREE.Vector2( size.x, size.y ),
+		points: [
+			new THREE.Vector3( bounds.min.x, bounds.min.y, z ),
+			new THREE.Vector3( bounds.max.x, bounds.min.y, z ),
+			new THREE.Vector3( bounds.max.x, bounds.max.y, z ),
+			new THREE.Vector3( bounds.min.x, bounds.max.y, z )
+		]
+	};
+
+}
+
+function createLeftFace(bounds: THREE.Box3, size: THREE.Vector3): EnclosureFaceDefinition {
+
+	const x = bounds.min.x;
+	return {
+		name: 'left',
+		fixedAxis: 'x',
+		fixedValue: x,
+		expectedNormal: new THREE.Vector3( - 1, 0, 0 ),
+		dimensions: new THREE.Vector2( size.z, size.y ),
+		points: [
+			new THREE.Vector3( x, bounds.min.y, bounds.min.z ),
+			new THREE.Vector3( x, bounds.min.y, bounds.max.z ),
+			new THREE.Vector3( x, bounds.max.y, bounds.max.z ),
+			new THREE.Vector3( x, bounds.max.y, bounds.min.z )
+		]
+	};
+
+}
+
+function createRightFace(bounds: THREE.Box3, size: THREE.Vector3): EnclosureFaceDefinition {
+
+	const x = bounds.max.x;
+	return {
+		name: 'right',
+		fixedAxis: 'x',
+		fixedValue: x,
+		expectedNormal: new THREE.Vector3( 1, 0, 0 ),
+		dimensions: new THREE.Vector2( size.z, size.y ),
+		points: [
+			new THREE.Vector3( x, bounds.min.y, bounds.min.z ),
+			new THREE.Vector3( x, bounds.max.y, bounds.min.z ),
+			new THREE.Vector3( x, bounds.max.y, bounds.max.z ),
+			new THREE.Vector3( x, bounds.min.y, bounds.max.z )
+		]
+	};
+
+}
+
+function createBottomFace(bounds: THREE.Box3, size: THREE.Vector3): EnclosureFaceDefinition {
+
+	const y = bounds.min.y;
+	return {
+		name: 'bottom',
+		fixedAxis: 'y',
+		fixedValue: y,
+		expectedNormal: new THREE.Vector3( 0, - 1, 0 ),
+		dimensions: new THREE.Vector2( size.x, size.z ),
+		points: [
+			new THREE.Vector3( bounds.min.x, y, bounds.min.z ),
+			new THREE.Vector3( bounds.max.x, y, bounds.min.z ),
+			new THREE.Vector3( bounds.max.x, y, bounds.max.z ),
+			new THREE.Vector3( bounds.min.x, y, bounds.max.z )
+		]
+	};
+
+}
+
+function validateFaceGeometry(face: EnclosureFaceDefinition): EnclosureFaceDiagnostic {
+
+	const geometry = makeFaceGeometry( face.points, 1, 1 );
+	const normal = geometry.getAttribute( 'normal' );
+	const faceBounds = new THREE.Box3().setFromPoints( face.points );
+	const averageNormal = new THREE.Vector3();
+	for ( let index = 0; index < normal.count; index += 1 ) {
+		averageNormal.add( new THREE.Vector3().fromBufferAttribute( normal, index ) );
+	}
+	averageNormal.normalize();
+	const expected = face.expectedNormal;
+	const fixedPlaneMatches = face.points.every( ( point ) => Math.abs( point[ face.fixedAxis ] - face.fixedValue ) < 1e-6 );
+	const dimensionsMatch = faceBounds.getSize( new THREE.Vector3() )
+		.distanceTo( expectedFaceSize( face ) ) < 1e-6;
+	const normalDot = averageNormal.dot( expected );
+	geometry.dispose();
+	return {
+		faceName: face.name,
+		fixedAxis: face.fixedAxis,
+		fixedValue: face.fixedValue,
+		bounds: { min: faceBounds.min.toArray(), max: faceBounds.max.toArray() },
+		averageNormal: averageNormal.toArray(),
+		expectedNormal: expected.toArray(),
+		normalDot: fixedPlaneMatches && dimensionsMatch ? normalDot : - 1,
+		visible: true,
+		materialSource: 'none'
+	};
+
+}
+
+function expectedFaceSize(face: EnclosureFaceDefinition): THREE.Vector3 {
+
+	if ( face.fixedAxis === 'x' ) return new THREE.Vector3( 0, face.dimensions.y, face.dimensions.x );
+	if ( face.fixedAxis === 'y' ) return new THREE.Vector3( face.dimensions.x, 0, face.dimensions.y );
+	return new THREE.Vector3( face.dimensions.x, face.dimensions.y, 0 );
+
+}
+
+function faceTriangleCount(points: THREE.Vector3[]): number {
+
+	const geometry = makeFaceGeometry( points, 1, 1 );
+	const triangleCount = ( geometry.getIndex()?.count ?? 0 ) / 3;
+	geometry.dispose();
+	return triangleCount;
+
+}
+
+function hasConnectedBoundaryCorners(faces: EnclosureFaceDefinition[], bounds: THREE.Box3): boolean {
+
+	const counts = new Map<string, number>();
+	faces.flatMap( ( face ) => face.points ).forEach( ( point ) => {
+		const key = point.toArray().join( ',' );
+		counts.set( key, ( counts.get( key ) ?? 0 ) + 1 );
+	} );
+	for ( const x of [ bounds.min.x, bounds.max.x ] ) {
+		for ( const y of [ bounds.min.y, bounds.max.y ] ) {
+			for ( const z of [ bounds.min.z, bounds.max.z ] ) {
+				const count = counts.get( [ x, y, z ].join( ',' ) ) ?? 0;
+				const expectedCount = y === bounds.min.y ? 3 : 2;
+				if ( count !== expectedCount ) return false;
+			}
+		}
+	}
+	return true;
 
 }
 
 function countRenderableMeshes(root: THREE.Object3D): number {
+
 	let count = 0;
-	root.traverse( ( object ) => { if ( object instanceof THREE.Mesh && object.userData.__visualizationHelper !== true && object.userData.__enclosureShell !== true ) count += 1; } );
+	root.traverse( ( object ) => {
+		if ( object instanceof THREE.Mesh && object.userData.__visualizationHelper !== true && object.userData.__enclosureShell !== true ) count += 1;
+	} );
 	return count;
+
 }
 
 function resolveLocalBounds(root: THREE.Object3D): THREE.Box3 {
-	const bounds = new THREE.Box3(); const inverseRoot = root.matrixWorld.clone().invert(); const relative = new THREE.Matrix4(); const point = new THREE.Vector3();
+
+	const bounds = new THREE.Box3();
+	const inverseRoot = root.matrixWorld.clone().invert();
+	const relative = new THREE.Matrix4();
+	const point = new THREE.Vector3();
 	root.traverse( ( object ) => {
 		if ( object instanceof THREE.Mesh === false || object.userData.__visualizationHelper === true || object.userData.__enclosureShell === true ) return;
 		if ( object.geometry.boundingBox === null ) object.geometry.computeBoundingBox();
 		if ( object.geometry.boundingBox === null ) return;
 		relative.multiplyMatrices( inverseRoot, object.matrixWorld );
 		const box = object.geometry.boundingBox;
-		for ( const x of [ box.min.x, box.max.x ] ) for ( const y of [ box.min.y, box.max.y ] ) for ( const z of [ box.min.z, box.max.z ] ) bounds.expandByPoint( point.set( x, y, z ).applyMatrix4( relative ) );
+		for ( const x of [ box.min.x, box.max.x ] ) {
+			for ( const y of [ box.min.y, box.max.y ] ) {
+				for ( const z of [ box.min.z, box.max.z ] ) {
+					bounds.expandByPoint( point.set( x, y, z ).applyMatrix4( relative ) );
+				}
+			}
+		}
 	} );
 	return bounds;
-}
 
-function quad(a: number, b: number, fixedA: number, fixedB: number, low: number, high: number, face: EnclosureFaceName): THREE.Vector3[] {
-	if ( face === 'front' ) return [ new THREE.Vector3( a, fixedA, low ), new THREE.Vector3( b, fixedA, low ), new THREE.Vector3( b, fixedA, high ), new THREE.Vector3( a, fixedA, high ) ];
-	if ( face === 'back' ) return [ new THREE.Vector3( a, fixedA, low ), new THREE.Vector3( a, fixedA, high ), new THREE.Vector3( b, fixedA, high ), new THREE.Vector3( b, fixedA, low ) ];
-	if ( face === 'left' ) return [ new THREE.Vector3( fixedA, a, low ), new THREE.Vector3( fixedA, b, low ), new THREE.Vector3( fixedA, b, high ), new THREE.Vector3( fixedA, a, high ) ];
-	if ( face === 'right' ) return [ new THREE.Vector3( fixedA, a, low ), new THREE.Vector3( fixedA, a, high ), new THREE.Vector3( fixedA, b, high ), new THREE.Vector3( fixedA, b, low ) ];
-	return [ new THREE.Vector3( a, fixedA, low ), new THREE.Vector3( a, fixedB, low ), new THREE.Vector3( b, fixedB, low ), new THREE.Vector3( b, fixedA, low ) ];
 }
 
 function makeFaceGeometry(points: THREE.Vector3[], repeatU: number, repeatV: number): THREE.BufferGeometry {
+
 	const geometry = new THREE.BufferGeometry();
-	geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( points.flatMap( ( point ) => point.toArray() ), 3 ) );
+	geometry.setAttribute(
+		'position',
+		new THREE.Float32BufferAttribute( points.flatMap( ( point ) => point.toArray() ), 3 )
+	);
 	geometry.setIndex( [ 0, 1, 2, 0, 2, 3 ] );
-	geometry.setAttribute( 'uv', new THREE.Float32BufferAttribute( [ 0, 0, repeatU, 0, repeatU, repeatV, 0, repeatV ], 2 ) );
+	geometry.setAttribute(
+		'uv',
+		new THREE.Float32BufferAttribute( [ 0, 0, repeatU, 0, repeatU, repeatV, 0, repeatV ], 2 )
+	);
 	geometry.computeVertexNormals();
 	return geometry;
+
+}
+
+if ( import.meta.env.DEV ) {
+	runEnclosureFaceGeometrySelfCheck();
 }
