@@ -57,6 +57,7 @@ describe( 'enclosure shell builder', () => {
 			] );
 			expect( Array.from( ( result.root.getObjectByName( '__enclosure-front' ) as THREE.Mesh ).geometry.getAttribute( 'uv' ).array ) ).toEqual( [ 1, 0, 1, 1, 0, 1, 0, 0 ] );
 			expect( Array.from( ( result.root.getObjectByName( '__enclosure-bottom' ) as THREE.Mesh ).geometry.getAttribute( 'uv' ).array ) ).toEqual( [ 1, 1, 0, 1, 0, 0, 1, 0 ] );
+			expect( ( result.root.getObjectByName( '__enclosure-front' ) as THREE.Mesh ).material ).toMatchObject( { transparent: true, alphaTest: 0.001, depthWrite: false } );
 		}
 
 	} );

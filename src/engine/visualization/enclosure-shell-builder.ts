@@ -76,7 +76,7 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D, options: Enclosur
 	root.userData.__enclosureShell = true;
 	root.userData.__excludeFromLayerIndex = true;
 	for ( const face of createFaceDefinitions( bounds ) ) {
-		const mesh = new THREE.Mesh( makeFaceGeometry( face.points, face.uvs ), new THREE.MeshBasicMaterial( { map: captures[ face.name ].texture, side: THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: - 1, polygonOffsetUnits: - 1 } ) );
+		const mesh = new THREE.Mesh( makeFaceGeometry( face.points, face.uvs ), new THREE.MeshBasicMaterial( { map: captures[ face.name ].texture, transparent: true, alphaTest: 0.001, depthWrite: false, side: THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: - 1, polygonOffsetUnits: - 1 } ) );
 		mesh.name = `__enclosure-${face.name}`;
 		mesh.userData.__enclosureShell = true;
 		mesh.userData.__excludeFromLayerIndex = true;
