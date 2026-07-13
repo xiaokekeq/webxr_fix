@@ -326,7 +326,7 @@ export function createPointerSelectionSession(
 
 		let current: THREE.Object3D | null = object;
 		while ( current !== null ) {
-			if ( current.userData.__nonSelectableHelper === true ) {
+			if ( current.userData.__nonSelectableHelper === true || current.userData.__excludeFromPicking === true ) {
 				return true;
 			}
 

@@ -86,7 +86,7 @@ export class SectionCapRuntime {
 function collectSegments(root: THREE.Object3D, plane: THREE.Plane): Segment[] {
 	const segments: Segment[] = []; const positionA = new THREE.Vector3(); const positionB = new THREE.Vector3(); const positionC = new THREE.Vector3();
 	root.traverse( ( object ) => {
-		if ( object instanceof THREE.Mesh === false || object.userData.__sectionCap === true || object.userData.__enclosureShell === true || object.userData.__visualizationHelper === true || isVisible( object ) === false ) return;
+		if ( object instanceof THREE.Mesh === false || object.userData.__sectionCap === true || object.userData.__enclosureShell === true || object.userData.__excludeFromSectionCap === true || object.userData.__visualizationHelper === true || isVisible( object ) === false ) return;
 		const position = object.geometry.getAttribute( 'position' ); if ( position === undefined ) return;
 		const index = object.geometry.getIndex(); const triangleCount = index === null ? Math.floor( position.count / 3 ) : Math.floor( index.count / 3 );
 		for ( let triangle = 0; triangle < triangleCount; triangle += 1 ) {

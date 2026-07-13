@@ -1,140 +1,84 @@
 import * as THREE from 'three';
-import { describe, expect, it, vi } from 'vitest';
-import {
-	analyzeEnclosureCapturePixels,
-	buildEnclosureShell,
-	createEnclosureBakeMaterial,
-	runEnclosureFaceGeometrySelfCheck,
-	validateEnclosureFaceGeometry,
-	type EnclosureOffscreenRenderer
-} from './enclosure-shell-builder.js';
+import { describe, expect, it } from 'vitest';
+import { buildEnclosureShell, createBoundaryShellMaterial } from './enclosure-shell-builder.js';
+import { resolveModelBoundarySurfaces } from './model-boundary-surface-resolver.js';
 
-describe( 'enclosure shell builder', () => {
+describe( 'model conforming shell', () => {
 
-	it( 'runs the asymmetric five-face geometry check as a test', () => {
+	it( 'uses the five real boundary surfaces of a sloped model instead of Box3 rectangles', () => {
 
-		expect( () => runEnclosureFaceGeometrySelfCheck() ).not.toThrow();
-		expect( validateEnclosureFaceGeometry( new THREE.Box3( new THREE.Vector3( - 2, - 3, - 5 ), new THREE.Vector3( 7, 11, 13 ) ) ) ).toEqual( {
-			ok: true,
-			triangleCount: 10,
-			boundaryCornersConnected: true
-		} );
+		const model = new THREE.Group();
+		model.add( new THREE.Mesh( createSlopedPrismGeometry(), new THREE.MeshStandardMaterial( { color: 0x6f4f35 } ) ) );
+		const resolved = resolveModelBoundarySurfaces( model );
 
-	} );
-
-	it.each( [
-		[ 'empty-model', new THREE.Group() ],
-		[ 'degenerate-bounds', groupWithMesh( new THREE.PlaneGeometry( 2, 2 ) ) ]
-	] )( 'returns %s instead of rendering', ( reason, model ) => {
-
-		const { renderer, render } = createRenderer();
-		const result = buildEnclosureShell( model, { renderer } );
-		expect( result.ok ).toBe( false );
-		if ( result.ok === false ) expect( result.reason ).toBe( reason );
-		expect( render ).not.toHaveBeenCalled();
-
-	} );
-
-	it( 'bakes all eligible source meshes into five fixed double-sided faces', () => {
-
-		const model = groupWithMesh( new THREE.BoxGeometry( 2, 3, 4 ) );
-		const indexExcludedSurface = new THREE.Mesh( new THREE.BoxGeometry( 1, 1, 1 ), new THREE.MeshBasicMaterial() );
-		indexExcludedSurface.position.x = 100;
-		indexExcludedSurface.userData.__excludeFromLayerIndex = true;
-		model.add( indexExcludedSurface );
-		const helper = new THREE.Mesh( new THREE.BoxGeometry( 1, 1, 1 ), new THREE.MeshBasicMaterial() );
-		helper.position.x = 200;
-		helper.userData.__nonSelectableHelper = true;
-		model.add( helper );
-		const { renderer, render } = createRenderer();
-		const result = buildEnclosureShell( model, { renderer } );
-
-		expect( result.ok ).toBe( true );
-		if ( result.ok === true ) {
-			expect( result.renderableCount ).toBe( 2 );
-			expect( result.meshCount ).toBe( 5 );
-			expect( result.bounds.max.x ).toBe( 100.5 );
-			expect( render ).toHaveBeenCalledTimes( 5 );
-			expect( result.root.children.map( ( child ) => child.name ) ).toEqual( [
-				'__enclosure-front', '__enclosure-back', '__enclosure-left', '__enclosure-right', '__enclosure-bottom'
-			] );
-			for ( const child of result.root.children ) expect( ( child as THREE.Mesh ).material ).toMatchObject( { side: THREE.DoubleSide, transparent: true, alphaTest: 0.001, depthWrite: false, toneMapped: false } );
-			expect( Array.from( ( result.root.getObjectByName( '__enclosure-front' ) as THREE.Mesh ).geometry.getAttribute( 'uv' ).array ) ).toEqual( [ 1, 0, 1, 1, 0, 1, 0, 0 ] );
-			expect( Array.from( ( result.root.getObjectByName( '__enclosure-bottom' ) as THREE.Mesh ).geometry.getAttribute( 'uv' ).array ) ).toEqual( [ 1, 1, 0, 1, 0, 0, 1, 0 ] );
+		expect( resolved.ok ).toBe( true );
+		if ( resolved.ok ) {
+			expect( resolved.surfaces.map( ( surface ) => surface.face ) ).toEqual( [ 'front', 'back', 'left', 'right', 'bottom' ] );
+			expect( resolved.surfaces.find( ( surface ) => surface.face === 'left' )?.geometry.boundingBox?.max.y ).toBeCloseTo( 1 );
+			expect( resolved.bounds.max.y ).toBeCloseTo( 3 );
+			for ( const surface of resolved.surfaces ) expect( surface.triangleCount ).toBeGreaterThan( 0 );
 		}
 
 	} );
 
-	it( 'converts source materials to unlit base-color bake materials without touching textures', () => {
+	it( 'creates exactly five double-sided meshes with the original UVs and material groups', () => {
+
+		const geometry = createSlopedPrismGeometry();
+		geometry.clearGroups();
+		geometry.addGroup( 0, 6, 0 );
+		geometry.addGroup( 6, 24, 1 );
+		const sourceMaterials = [ new THREE.MeshStandardMaterial( { color: 0xff0000 } ), new THREE.MeshStandardMaterial( { color: 0x00ff00 } ) ];
+		const model = new THREE.Group();
+		model.add( new THREE.Mesh( geometry, sourceMaterials ) );
+		const result = buildEnclosureShell( model );
+
+		expect( result.ok ).toBe( true );
+		if ( result.ok ) {
+			expect( result.root.name ).toBe( '__model-conforming-shell' );
+			expect( result.meshCount ).toBe( 5 );
+			expect( result.root.children.map( ( child ) => child.name ) ).toEqual( [ '__shell-front', '__shell-back', '__shell-left', '__shell-right', '__shell-bottom' ] );
+			for ( const child of result.root.children ) {
+				const mesh = child as THREE.Mesh;
+				expect( mesh.userData.__modelConformingShell ).toBe( true );
+				expect( mesh.geometry.getAttribute( 'uv' ) ).toBeDefined();
+				for ( const material of Array.isArray( mesh.material ) ? mesh.material : [ mesh.material ] ) expect( material.side ).toBe( THREE.DoubleSide );
+			}
+			expect( result.epsilon ).toBeGreaterThan( 0 );
+		}
+
+	} );
+
+	it( 'uses stable base-color materials without clipping or source texture mutation', () => {
 
 		const map = new THREE.Texture();
 		const alphaMap = new THREE.Texture();
-		const source = new THREE.MeshStandardMaterial( { map, alphaMap, color: 0x7f3210, vertexColors: true, roughness: 0.2, metalness: 0.8 } );
+		const source = new THREE.MeshStandardMaterial( { map, alphaMap, color: 0x7f3210, vertexColors: true } );
 		source.clippingPlanes = [ new THREE.Plane() ];
-		const baked = createEnclosureBakeMaterial( source );
+		const material = createBoundaryShellMaterial( source );
 
-		expect( baked ).toMatchObject( { map, alphaMap, color: new THREE.Color( 0x7f3210 ), vertexColors: true, clippingPlanes: null, toneMapped: false, side: THREE.DoubleSide } );
-		expect( ( baked as unknown as { roughness?: number; metalness?: number; envMap?: THREE.Texture | null } ).roughness ).toBeUndefined();
-		expect( ( baked as unknown as { roughness?: number; metalness?: number; envMap?: THREE.Texture | null } ).metalness ).toBeUndefined();
-		expect( ( baked as unknown as { roughness?: number; metalness?: number; envMap?: THREE.Texture | null } ).envMap ).toBeNull();
-
-	} );
-
-	it( 'keeps material groups when baking a multi-material mesh', () => {
-
-		const geometry = new THREE.BufferGeometry();
-		geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [ - 1, - 1, - 1, 1, - 1, - 1, 0, 1, - 1, - 1, - 1, 1, 1, - 1, 1, 0, 1, 1 ], 3 ) );
-		geometry.addGroup( 0, 3, 0 );
-		geometry.addGroup( 3, 3, 1 );
-		const model = groupWithMesh( new THREE.BoxGeometry( 2, 2, 2 ) );
-		model.add( new THREE.Mesh( geometry, [ new THREE.MeshStandardMaterial( { color: 0xff0000 } ), new THREE.MeshStandardMaterial( { color: 0x00ff00 } ) ] ) );
-		const { renderer, render } = createRenderer();
-
-		const result = buildEnclosureShell( model, { renderer } );
-		expect( result.ok ).toBe( true );
-		const bakedMesh = ( render.mock.calls[ 0 ][ 0 ] as THREE.Scene ).children.find( ( child ) => child instanceof THREE.Mesh && child.geometry === geometry ) as THREE.Mesh;
-		expect( bakedMesh.material ).toHaveLength( 2 );
-		expect( geometry.groups ).toEqual( [ { start: 0, count: 3, materialIndex: 0 }, { start: 3, count: 3, materialIndex: 1 } ] );
-
-	} );
-
-	it( 'distinguishes transparent background from opaque black capture pixels', () => {
-
-		const stats = analyzeEnclosureCapturePixels( 'front', new Uint8Array( [ 0, 0, 0, 0, 0, 0, 0, 255, 12, 18, 24, 255 ] ) );
-		expect( stats.transparentPixelRatio ).toBeCloseTo( 1 / 3 );
-		expect( stats.opaquePixelRatio ).toBeCloseTo( 2 / 3 );
-		expect( stats.opaqueBlackPixelRatio ).toBeCloseTo( 1 / 3 );
+		expect( material ).toMatchObject( { map, alphaMap, color: new THREE.Color( 0x7f3210 ), vertexColors: true, clippingPlanes: null, toneMapped: false, side: THREE.DoubleSide } );
 
 	} );
 
 } );
 
-function createRenderer(): { renderer: EnclosureOffscreenRenderer; render: ReturnType<typeof vi.fn> } {
+function createSlopedPrismGeometry(): THREE.BufferGeometry {
 
-	let target: THREE.RenderTarget | null = null;
-	let clearColor = new THREE.Color();
-	let clearAlpha = 0;
-	const render = vi.fn();
-	return {
-		renderer: {
-			clear: vi.fn(),
-			getClearAlpha: () => clearAlpha,
-			getClearColor: ( color: THREE.Color ) => color.copy( clearColor ),
-			getRenderTarget: () => target,
-			readRenderTargetPixels: ( _target: THREE.WebGLRenderTarget, _x: number, _y: number, _width: number, _height: number, buffer: Uint8Array ) => buffer.fill( 0 ),
-			render: ( scene: THREE.Scene, camera: THREE.Camera ) => render( scene, camera ),
-			setClearColor: ( color: THREE.ColorRepresentation, alpha = 1 ) => { clearColor = new THREE.Color( color ); clearAlpha = alpha; },
-			setRenderTarget: ( nextTarget: THREE.RenderTarget | null ) => { target = nextTarget; }
-		} as unknown as EnclosureOffscreenRenderer,
-		render
-	};
-
-}
-
-function groupWithMesh(geometry: THREE.BufferGeometry): THREE.Group {
-
-	const group = new THREE.Group();
-	group.add( new THREE.Mesh( geometry, new THREE.MeshBasicMaterial() ) );
-	return group;
+	const geometry = new THREE.BufferGeometry();
+	geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [
+		- 1, 0, - 1, 1, 0, - 1, - 1, 1, - 1, 1, 3, - 1,
+		- 1, 0, 1, 1, 0, 1, - 1, 1, 1, 1, 3, 1
+	], 3 ) );
+	geometry.setIndex( [
+		0, 1, 3, 0, 3, 2,
+		4, 7, 5, 4, 6, 7,
+		0, 5, 1, 0, 4, 5,
+		0, 2, 6, 0, 6, 4,
+		1, 5, 7, 1, 7, 3,
+		2, 3, 7, 2, 7, 6
+	] );
+	geometry.setAttribute( 'uv', new THREE.Float32BufferAttribute( [ 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1 ], 2 ) );
+	geometry.computeVertexNormals();
+	return geometry;
 
 }
