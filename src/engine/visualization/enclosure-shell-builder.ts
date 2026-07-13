@@ -16,21 +16,8 @@ interface EnclosureFaceDefinition {
 	points: THREE.Vector3[];
 }
 
-export interface EnclosureFaceDiagnostic {
-	faceName: EnclosureFaceName;
-	fixedAxis: FixedAxis;
-	fixedValue: number;
-	bounds: { min: number[]; max: number[] };
-	averageNormal: number[];
-	expectedNormal: number[];
-	normalDot: number;
-	visible: boolean;
-	materialSource: string;
-}
-
 export interface EnclosureGeometryValidation {
 	ok: boolean;
-	faceDiagnostics: EnclosureFaceDiagnostic[];
 	triangleCount: number;
 	boundaryCornersConnected: boolean;
 }
@@ -46,15 +33,8 @@ export type EnclosureShellBuildResult = {
 	ok: true;
 	root: THREE.Group;
 	meshCount: number;
-	triangleCount: number;
-	materialCount: number;
-	materialSources: Record<EnclosureFaceName, string>;
 	bounds: THREE.Box3;
 	renderableCount: number;
-	axisU: THREE.Vector3;
-	axisV: THREE.Vector3;
-	axisUp: THREE.Vector3;
-	faceDiagnostics: EnclosureFaceDiagnostic[];
 } | {
 	ok: false;
 	reason: EnclosureShellBuildFailureReason;
@@ -118,20 +98,8 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D): EnclosureShellBu
 		ok: true,
 		root,
 		meshCount: 5,
-		triangleCount: validation.triangleCount,
-		materialCount: 5,
-		materialSources: Object.fromEntries(
-			Object.entries( sources ).map( ( [ face, source ] ) => [ face, source.source ] )
-		) as Record<EnclosureFaceName, string>,
 		bounds,
-		renderableCount,
-		axisU: new THREE.Vector3( 1, 0, 0 ),
-		axisV: new THREE.Vector3( 0, 0, 1 ),
-		axisUp: new THREE.Vector3( 0, 1, 0 ),
-		faceDiagnostics: validation.faceDiagnostics.map( ( diagnostic ) => ( {
-			...diagnostic,
-			materialSource: sources[ diagnostic.faceName ].source
-		} ) )
+		renderableCount
 	};
 
 }
@@ -153,14 +121,12 @@ export function runEnclosureFaceGeometrySelfCheck(): void {
 export function validateEnclosureFaceGeometry(bounds: THREE.Box3): EnclosureGeometryValidation {
 
 	const faces = createFaceDefinitions( bounds );
-	const faceDiagnostics = faces.map( ( face ) => validateFaceGeometry( face ) );
 	const triangleCount = faces.reduce( ( total, face ) => total + faceTriangleCount( face.points ), 0 );
 	const boundaryCornersConnected = hasConnectedBoundaryCorners( faces, bounds );
 	return {
-		ok: faceDiagnostics.every( ( diagnostic ) => diagnostic.normalDot > 0.99 )
+		ok: faces.every( validateFaceGeometry )
 			&& triangleCount === 10
 			&& boundaryCornersConnected,
-		faceDiagnostics,
 		triangleCount,
 		boundaryCornersConnected
 	};
@@ -281,7 +247,7 @@ function createBottomFace(bounds: THREE.Box3, size: THREE.Vector3): EnclosureFac
 
 }
 
-function validateFaceGeometry(face: EnclosureFaceDefinition): EnclosureFaceDiagnostic {
+function validateFaceGeometry(face: EnclosureFaceDefinition): boolean {
 
 	const geometry = makeFaceGeometry( face.points, 1, 1 );
 	const normal = geometry.getAttribute( 'normal' );
@@ -297,17 +263,7 @@ function validateFaceGeometry(face: EnclosureFaceDefinition): EnclosureFaceDiagn
 		.distanceTo( expectedFaceSize( face ) ) < 1e-6;
 	const normalDot = averageNormal.dot( expected );
 	geometry.dispose();
-	return {
-		faceName: face.name,
-		fixedAxis: face.fixedAxis,
-		fixedValue: face.fixedValue,
-		bounds: { min: faceBounds.min.toArray(), max: faceBounds.max.toArray() },
-		averageNormal: averageNormal.toArray(),
-		expectedNormal: expected.toArray(),
-		normalDot: fixedPlaneMatches && dimensionsMatch ? normalDot : - 1,
-		visible: true,
-		materialSource: 'none'
-	};
+	return fixedPlaneMatches && dimensionsMatch && normalDot > 0.99;
 
 }
 

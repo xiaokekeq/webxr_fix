@@ -119,17 +119,14 @@ import { validateSiteCalibrationBaselineForStorage } from '@/services/repositori
 import { RealDepthProvider } from '@/engine/depth/real-depth-provider.js';
 import { readPlaceableTemplateReport } from '@/engine/core/model.js';
 import { arInfo } from '@/engine/debug/ar-logger.js';
+import {
+	LocalizationDebugLayer,
+	type LocalizationDebugLayerOptions
+} from '@/engine/debug/localization-debug-layer.js';
 
 const MAX_LOG_ITEMS = 24;
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
 const AUTO_PLACE_AFTER_MARKER_CALIBRATION = import.meta.env.VITE_AUTO_PLACE_AFTER_MARKER_CALIBRATION === 'true';
-
-interface EngineeringDebugLayerOptions {
-	showMarkerExpected: boolean;
-	showMarkerCaptured: boolean;
-	showModelActualControlPoints: boolean;
-	showModelBoundingBox: boolean;
-}
 
 const tempViewerArPosition = new THREE.Vector3();
 const tempMatrix = new THREE.Matrix4();
@@ -272,8 +269,8 @@ export class ThreeEngine {
 	private readonly sceneBundle;
 	private readonly xrButtonWrap: HTMLDivElement;
 	private readonly modelOrientation = new THREE.Quaternion();
-	private readonly registrationDebugRoot = new THREE.Group();
-	private readonly engineeringDebugLayers: EngineeringDebugLayerOptions = {
+	private readonly localizationDebugLayer = new LocalizationDebugLayer();
+	private readonly engineeringDebugLayers: LocalizationDebugLayerOptions = {
 		showMarkerExpected: readDebugLayerFlag( 'VITE_SHOW_MARKER_EXPECTED', false ),
 		showMarkerCaptured: readDebugLayerFlag( 'VITE_SHOW_MARKER_CAPTURED', false ),
 		showModelActualControlPoints: readDebugLayerFlag( 'VITE_SHOW_MODEL_ACTUAL_CONTROL_POINTS', true ),
@@ -374,8 +371,7 @@ export class ThreeEngine {
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
-		this.registrationDebugRoot.name = '__registration-debug-root';
-		this.sceneBundle.scene.add( this.registrationDebugRoot );
+		this.sceneBundle.scene.add( this.localizationDebugLayer.root );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
 
 		const statusRuntime = createStatusRuntime( {
@@ -712,13 +708,8 @@ export class ThreeEngine {
 				this.syncRegistrationChainDebug();
 				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
 			},
-			onRuntimeBundleLoaded: ( bundle, modelLoadRequestId ) => {
-				try {
-					this.activateCoreModelRuntime( bundle );
-					return { ok: true };
-				} catch ( error ) {
-					return { ok: false, stage: 'runtime-activation', reason: 'core-runtime-activation-failed', error };
-				}
+			onRuntimeBundleLoaded: ( bundle ) => {
+				this.activateCoreModelRuntime( bundle );
 			},
 			onRuntimeBundleReady: ( bundle, modelLoadRequestId ) => {
 				this.initializeOptionalModelVisuals( bundle, modelLoadRequestId );
@@ -862,8 +853,6 @@ export class ThreeEngine {
 		try {
 			const result = this.enclosureShell.rebuildForModel( {
 				model: bundle.modelTemplate,
-				modelName: bundle.modelDefinition.name,
-				reason: 'model-loaded',
 				modelRevision: modelLoadRequestId
 			} );
 			if ( result.ok === false ) {
@@ -945,6 +934,7 @@ export class ThreeEngine {
 		this.enclosureShell.dispose();
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();
+		this.localizationDebugLayer.dispose();
 		this.sceneBundle.renderer.dispose();
 
 	}
@@ -1304,7 +1294,7 @@ export class ThreeEngine {
 		this.markerCalibrationCapturedCornersAr = [];
 		this.activeMarkerLocalizationResult = null;
 		this.markerCorrectionFallbackArFromEnuSolution = null;
-		this.clearEngineeringCornerDebug();
+		this.localizationDebugLayer.clear();
 
 		if ( fallbackSolution !== null ) {
 			const appliedToPlacedModel = this.placementSession.applyArLocalizationSolution( {
@@ -2124,39 +2114,15 @@ export class ThreeEngine {
 	}
 
 	private renderEngineeringCornerDebug(
-		arFromEnuSolution: ArFromEnuSolution,
+		arFromEnuSolution: ArFromEnuSolution | null,
 		controlTarget: VisualControlTarget | null,
 		capturedCornersAr: THREE.Vector3[],
 		updateReason = 'unknown'
 	): void {
 
 		this.engineeringDebugRenderAttemptCount += 1;
-		this.clearEngineeringCornerDebug();
-		this.addSiteOriginReferenceMarker( arFromEnuSolution );
-		if ( this.engineeringDebugLayers.showMarkerExpected && controlTarget?.cornersEnu !== undefined ) {
-			this.addDebugQuad( {
-				name: 'marker-expected',
-				points: controlTarget.cornersEnu.map( ( point ) => enuTupleToArVector( point, arFromEnuSolution ) ),
-				labels: [ 'leftTop', 'rightTop', 'rightBottom', 'leftBottom' ],
-				color: 0x00d4ff
-			} );
-		}
-
-		if ( this.engineeringDebugLayers.showMarkerCaptured && capturedCornersAr.length === 4 ) {
-			this.addDebugQuad( {
-				name: 'marker-captured',
-				points: capturedCornersAr.map( ( point ) => point.clone() ),
-				labels: [ 'captured-LT', 'captured-RT', 'captured-RB', 'captured-LB' ],
-				color: 0x32ff8f
-			} );
-		}
+		const markerCornersEnu = ( controlTarget?.cornersEnu ?? [] ).map( tupleToVector3 );
 		if ( controlTarget?.cornersEnu?.length === 4 ) {
-			const markerCornersEnu = controlTarget.cornersEnu.map( tupleToVector3 );
-			this.addDebugPoint(
-				'marker-center',
-				averageVectors( markerCornersEnu ).applyMatrix4( arFromEnuSolution.matrix ),
-				0x00d4ff
-			);
 			const markerPhysicalText = capturedCornersAr.length === 4
 				? `RTK marker 边长 ${computeSideLengths( markerCornersEnu ).map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m；采集边长 ${computeSideLengths( capturedCornersAr ).map( ( value ) => value.toFixed( 2 ) ).join( '/' )}m。请确认 RTK marker 四角和当前采集的三角桶底座四角是同一组物理点。`
 				: '请确认 RTK 测量的 marker 四角和当前采集的三角桶底座四角是同一组物理点。三角桶如果被移动或旋转，校正会稳定但整体偏移。';
@@ -2179,7 +2145,7 @@ export class ThreeEngine {
 			} );
 		}
 
-		if ( this.registrationSolution !== null ) {
+		if ( arFromEnuSolution !== null && this.registrationSolution !== null ) {
 			const footprintControlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
 			const footprintCornersAr = this.getTargetControlPointCornersAr( arFromEnuSolution );
 			const footprintCenterAr = averageVectors( footprintControlPoints.map( ( point ) => point.worldEnu ) )
@@ -2199,23 +2165,11 @@ export class ThreeEngine {
 				footprintControlPointIds: footprintControlPoints.map( ( point ) => point.id ),
 				footprintCornersAr: footprintCornersAr.map( vector3ToRoundedObject )
 			} );
-			this.addDebugQuad( {
-				name: 'footprint-enu',
-				points: footprintCornersAr,
-				labels: footprintControlPoints.map( ( point ) => point.id ),
-				color: 0xffd84d
-			} );
-			const markerCornersEnu = ( controlTarget?.cornersEnu ?? [] ).map( tupleToVector3 );
-			if ( markerCornersEnu.length === 4 ) {
-				const markerCenterAr = averageVectors( markerCornersEnu )
-					.applyMatrix4( arFromEnuSolution.matrix );
-				this.addDebugPoint( 'footprint-center', footprintCenterAr, 0xffd84d );
-				this.addDebugLine( 'marker-to-footprint-center', [ markerCenterAr, footprintCenterAr ], 0xffd84d );
-			}
 		}
 
 		const placedModel = this.placementSession.getArPlacedModel();
-		if ( placedModel !== null && this.registrationSolution !== null ) {
+		let actualModelControlPoints = null;
+		if ( placedModel !== null && this.registrationSolution !== null && arFromEnuSolution !== null ) {
 			const controlPoints = this.registrationSolution.controlPoints.slice( 0, 4 );
 			placedModel.updateMatrixWorld( true );
 			const engineeringPoints = this.getActualModelControlPointCornersAr();
@@ -2229,15 +2183,6 @@ export class ThreeEngine {
 				this.purpleEngineeringInitialCenterWorld = averageVectors( engineeringPoints ).clone();
 			}
 			if ( this.engineeringDebugLayers.showModelActualControlPoints ) {
-				this.addDebugQuad( {
-					name: 'model-cp-actual-engineering',
-					points: engineeringPoints,
-					labels: controlPoints.map( ( point ) => `actual-${point.id}-engineering` ),
-					color: 0xff4dff
-				} );
-				for ( let index = 0; index < Math.min( targetPoints.length, engineeringPoints.length ); index += 1 ) {
-					this.addDebugLine( `residual-${controlPoints[ index ].id}`, [ targetPoints[ index ], engineeringPoints[ index ] ], 0xffffff );
-				}
 				arInfo( 'RegistrationControlPointResiduals', controlPoints.map( ( point, index ) => ( {
 					id: point.id,
 					targetWorldEnu: vector3ToRoundedObject( point.worldEnu ),
@@ -2246,34 +2191,33 @@ export class ThreeEngine {
 					actualAr: vector3ToRoundedObject( engineeringPoints[ index ] ),
 					residualMeters: targetPoints[ index ].distanceTo( engineeringPoints[ index ] )
 				} ) ) );
-				if ( import.meta.env.VITE_AR_DEBUG === 'true' ) {
-					this.addDebugQuad( {
-						name: 'model-cp-current-runtime',
-						points: currentModelActualPoints,
-						labels: controlPoints.map( ( point ) => `current-${point.id}` ),
-						color: 0xf97316
-					} );
-				}
 			}
-			const bbox = new THREE.Box3().setFromObject( placedModel );
-			if ( this.engineeringDebugLayers.showModelBoundingBox && bbox.isEmpty() === false ) {
-				const helper = new THREE.Box3Helper( bbox, 0xffffff );
-				helper.name = 'model-bbox';
-				this.registrationDebugRoot.add( helper );
-			}
+			actualModelControlPoints = {
+				engineering: engineeringPoints,
+				current: currentModelActualPoints,
+				target: targetPoints,
+				boundingBox: new THREE.Box3().setFromObject( placedModel )
+			};
 		}
 
-		const debugMeshes = this.registrationDebugRoot.children.filter( ( child ) => child instanceof THREE.Mesh );
-		const expectedYellowControlPointCount = ( this.registrationSolution?.controlPoints.length ?? 0 ) >= 4 ? 4 : 0;
-		const yellowControlPointCount = debugMeshes.filter( ( child ) => child.name.startsWith( 'footprint-enu-' ) ).length;
-		const markerReferenceSphereExists = debugMeshes.some( ( child ) => child.name === 'marker-center' );
-		const engineeringOriginSphereExists = debugMeshes.some( ( child ) => child.name === 'site-origin-reference-point' );
+		const drawResult = this.localizationDebugLayer.sync( {
+			arFromEnuSolution,
+			controlTarget,
+			registrationSolution: this.registrationSolution,
+			capturedCornersAr,
+			actualModelControlPoints,
+			showCurrentModelControlPoints: import.meta.env.VITE_AR_DEBUG === 'true',
+			showSiteOriginDetail: this.siteOriginReferencePanelOpen,
+			layers: this.engineeringDebugLayers
+		} );
+		const expectedYellowControlPointCount = arFromEnuSolution !== null
+			&& ( this.registrationSolution?.controlPoints.length ?? 0 ) >= 4 ? 4 : 0;
 		console.assert(
-			engineeringOriginSphereExists
-			&& ( controlTarget?.cornersEnu?.length !== 4 || markerReferenceSphereExists )
-			&& yellowControlPointCount === expectedYellowControlPointCount,
+			( arFromEnuSolution === null || drawResult.engineeringOriginSphereExists )
+			&& ( arFromEnuSolution === null || controlTarget?.cornersEnu?.length !== 4 || drawResult.markerReferenceSphereExists )
+			&& drawResult.yellowControlPointCount === expectedYellowControlPointCount,
 			'Localization debug objects are incomplete.',
-			{ engineeringOriginSphereExists, markerReferenceSphereExists, yellowControlPointCount }
+			drawResult
 		);
 
 		arInfo( 'EngineeringCornerDebugDrawn', {
@@ -2281,9 +2225,7 @@ export class ThreeEngine {
 			markerCornerCount: controlTarget?.cornersEnu?.length ?? 0,
 			capturedCornerCount: capturedCornersAr.length,
 			modelControlPointCount: this.registrationSolution?.controlPoints.length ?? 0,
-			markerReferenceSphereExists,
-			engineeringOriginSphereExists,
-			yellowControlPointCount,
+			...drawResult,
 			layers: this.engineeringDebugLayers,
 			placementMode: 'diagnostic-only',
 			affectsPlacement: false,
@@ -2297,10 +2239,6 @@ export class ThreeEngine {
 	private syncLocalizationDebugObjects(updateReason: string): void {
 
 		const markerSolution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
-		if ( markerSolution === null ) {
-			return;
-		}
-
 		this.renderEngineeringCornerDebug(
 			markerSolution,
 			this.getActiveEngineeringControlTarget(),
@@ -2310,132 +2248,10 @@ export class ThreeEngine {
 
 	}
 
-	private addDebugQuad(args: {
-		name: string;
-		points: THREE.Vector3[];
-		labels: string[];
-		color: number;
-	}): void {
-
-		if ( args.points.length !== 4 ) {
-			return;
-		}
-
-		const material = new THREE.LineBasicMaterial( { color: args.color, depthTest: false, depthWrite: false } );
-		const geometry = new THREE.BufferGeometry().setFromPoints( [ ...args.points, args.points[ 0 ] ] );
-		const line = new THREE.Line( geometry, material );
-		line.name = `${args.name}-quad`;
-		line.frustumCulled = false;
-		line.renderOrder = 259;
-		this.registrationDebugRoot.add( line );
-
-		for ( let index = 0; index < args.points.length; index += 1 ) {
-			const sphere = new THREE.Mesh(
-				new THREE.SphereGeometry( 0.08, 12, 8 ),
-				new THREE.MeshBasicMaterial( { color: args.color, depthTest: false, depthWrite: false } )
-			);
-			sphere.position.copy( args.points[ index ] );
-			sphere.name = `${args.name}-${args.labels[ index ]}`;
-			sphere.frustumCulled = false;
-			sphere.renderOrder = 260;
-			this.registrationDebugRoot.add( sphere );
-
-			const label = createDebugTextSprite( args.labels[ index ], args.color );
-			label.position.copy( args.points[ index ] ).add( new THREE.Vector3( 0, 0.08, 0 ) );
-			this.registrationDebugRoot.add( label );
-		}
-
-	}
-
-	private addDebugPoint(labelText: string, position: THREE.Vector3, color: number): void {
-
-		const sphere = new THREE.Mesh(
-			new THREE.SphereGeometry( 0.09, 12, 8 ),
-			new THREE.MeshBasicMaterial( { color, depthTest: false, depthWrite: false } )
-		);
-		sphere.name = labelText;
-		sphere.position.copy( position );
-		sphere.frustumCulled = false;
-		sphere.renderOrder = 260;
-		this.registrationDebugRoot.add( sphere );
-
-		const label = createDebugTextSprite( labelText, color );
-		label.position.copy( position ).add( new THREE.Vector3( 0, 0.1, 0 ) );
-		this.registrationDebugRoot.add( label );
-
-	}
-
-	private addDebugLine(name: string, points: THREE.Vector3[], color: number): void {
-
-		const material = new THREE.LineBasicMaterial( { color, depthTest: false, depthWrite: false } );
-		const geometry = new THREE.BufferGeometry().setFromPoints( points );
-		const line = new THREE.Line( geometry, material );
-		line.name = name;
-		line.frustumCulled = false;
-		line.renderOrder = 259;
-		this.registrationDebugRoot.add( line );
-
-	}
-
-	private addSiteOriginReferenceMarker(arFromEnuSolution: ArFromEnuSolution): void {
-
-		const originAr = new THREE.Vector3( 0, 0, 0 ).applyMatrix4( arFromEnuSolution.matrix );
-		const labelPosition = originAr.clone().add( new THREE.Vector3( 0.22, 0.42, 0 ) );
-		const point = new THREE.Mesh(
-			new THREE.SphereGeometry( 0.11, 16, 10 ),
-			new THREE.MeshBasicMaterial( { color: 0x38bdf8, depthTest: false, depthWrite: false } )
-		);
-		point.name = 'site-origin-reference-point';
-		point.position.copy( originAr );
-		point.frustumCulled = false;
-		point.renderOrder = 260;
-		markSiteOriginReferenceObject( point );
-		this.registrationDebugRoot.add( point );
-
-		this.addDebugLine( 'site-origin-reference-line', [ originAr, labelPosition ], 0x38bdf8 );
-		const label = createCanvasPanelSprite( {
-			title: '参考原点',
-			subtitle: 'siteOrigin / ENU (0,0,0)',
-			width: 0.72,
-			color: '#38bdf8'
-		} );
-		label.name = 'site-origin-reference-label';
-		label.position.copy( labelPosition );
-		markSiteOriginReferenceObject( label );
-		this.registrationDebugRoot.add( label );
-		this.registrationDebugRoot.updateMatrixWorld( true );
-		const displayedOrigin = point.getWorldPosition( new THREE.Vector3() );
-		console.assert(
-			displayedOrigin.distanceTo( originAr ) <= 0.001 && point.parent === this.registrationDebugRoot && this.registrationDebugRoot.parent === this.sceneBundle.scene,
-			'Site origin debug marker must use ENU (0,0,0) -> arFromEnu under registrationDebugRoot.',
-			{
-				expectedSiteOriginAr: vector3ToRoundedObject( originAr ),
-				displayedSiteOriginWorldPosition: vector3ToRoundedObject( displayedOrigin ),
-				parent: point.parent?.name ?? 'none',
-				parentMatrixWorld: this.registrationDebugRoot.matrixWorld.toArray()
-			}
-		);
-
-		if ( this.siteOriginReferencePanelOpen ) {
-			const detail = createCanvasPanelSprite( {
-				title: '工程参考原点',
-				subtitle: `AR ${originAr.x.toFixed( 2 )}, ${originAr.y.toFixed( 2 )}, ${originAr.z.toFixed( 2 )}`,
-				body: '这是 ENU 坐标系原点映射到当前 WebXR AR local 的参考点。再次点击关闭。',
-				width: 1.08,
-				color: '#facc15'
-			} );
-			detail.name = 'site-origin-reference-detail';
-			detail.position.copy( labelPosition ).add( new THREE.Vector3( 0, 0.34, 0 ) );
-			markSiteOriginReferenceObject( detail );
-			this.registrationDebugRoot.add( detail );
-		}
-
-	}
-
 	private handleSiteOriginReferencePick(raycaster: THREE.Raycaster): boolean {
 
-		const hit = raycaster.intersectObjects( this.registrationDebugRoot.children, true )
-			.find( ( intersection ) => hasSiteOriginReferenceObject( intersection.object ) );
+		const hit = raycaster.intersectObjects( this.localizationDebugLayer.root.children, true )
+			.find( ( intersection ) => this.localizationDebugLayer.containsSiteOriginReference( intersection.object ) );
 		if ( hit === undefined ) {
 			return false;
 		}
@@ -2444,17 +2260,6 @@ export class ThreeEngine {
 		this.syncLocalizationDebugObjects( 'site-origin-reference-toggle' );
 		this.setStatus( this.siteOriginReferencePanelOpen ? '已显示参考原点说明。' : '已关闭参考原点说明。' );
 		return true;
-
-	}
-
-	private clearEngineeringCornerDebug(): void {
-
-		while ( this.registrationDebugRoot.children.length > 0 ) {
-			const child = this.registrationDebugRoot.children.pop();
-			if ( child !== undefined ) {
-				disposeDebugObject( child );
-			}
-		}
 
 	}
 
@@ -3986,7 +3791,7 @@ export class ThreeEngine {
 		this.annotationLayer.clear();
 		this.annotationLayer.setSelected( null );
 		this.clearAnnotationDetail();
-		this.clearEngineeringCornerDebug();
+		this.localizationDebugLayer.clear();
 		this.store.clearModelPlacementDebug();
 
 	}
@@ -4977,15 +4782,6 @@ function computeBoundsInLocalSpace(object: THREE.Object3D, localRoot: THREE.Obje
 
 }
 
-function enuTupleToArVector(
-	tuple: [ number, number, number ],
-	arFromEnuSolution: ArFromEnuSolution
-): THREE.Vector3 {
-
-	return new THREE.Vector3( tuple[ 0 ], tuple[ 1 ], tuple[ 2 ] ).applyMatrix4( arFromEnuSolution.matrix );
-
-}
-
 function tupleToVector3(tuple: [ number, number, number ]): THREE.Vector3 {
 
 	return new THREE.Vector3( tuple[ 0 ], tuple[ 1 ], tuple[ 2 ] );
@@ -5173,165 +4969,6 @@ function signedArea2D(points: THREE.Vector3[], plane: 'xy' | 'xz'): number {
 function radToDeg(value: number): number {
 
 	return THREE.MathUtils.radToDeg( value );
-
-}
-
-function createDebugTextSprite(text: string, color: number): THREE.Sprite {
-
-	const canvas = document.createElement( 'canvas' );
-	canvas.width = 256;
-	canvas.height = 96;
-	const context = canvas.getContext( '2d' );
-	if ( context !== null ) {
-		context.font = 'bold 28px sans-serif';
-		context.fillStyle = 'rgba(0,0,0,0.72)';
-		context.fillRect( 0, 0, canvas.width, canvas.height );
-		context.fillStyle = `#${color.toString( 16 ).padStart( 6, '0' )}`;
-		context.fillText( text, 16, 58 );
-	}
-	const texture = new THREE.CanvasTexture( canvas );
-	texture.minFilter = THREE.LinearFilter;
-	texture.magFilter = THREE.LinearFilter;
-	const sprite = new THREE.Sprite( new THREE.SpriteMaterial( {
-		map: texture,
-		depthTest: false,
-		depthWrite: false,
-		toneMapped: false,
-		transparent: true
-	} ) );
-	sprite.scale.set( 0.38, 0.14, 1 );
-	sprite.name = `corner-debug-label-${text}`;
-	sprite.frustumCulled = false;
-	sprite.renderOrder = 261;
-	return sprite;
-
-}
-
-function createCanvasPanelSprite(args: {
-	title: string;
-	subtitle: string;
-	body?: string;
-	width: number;
-	color: string;
-}): THREE.Sprite {
-
-	const canvas = document.createElement( 'canvas' );
-	canvas.width = 768;
-	canvas.height = args.body === undefined ? 256 : 448;
-	const context = canvas.getContext( '2d' );
-	if ( context !== null ) {
-		context.clearRect( 0, 0, canvas.width, canvas.height );
-		context.fillStyle = 'rgba(12, 18, 32, 0.88)';
-		context.fillRect( 0, 0, canvas.width, canvas.height );
-		context.strokeStyle = args.color;
-		context.lineWidth = 8;
-		context.strokeRect( 12, 12, canvas.width - 24, canvas.height - 24 );
-		context.fillStyle = '#ffffff';
-		context.font = 'bold 72px "Microsoft YaHei", sans-serif';
-		context.fillText( args.title, 44, 104 );
-		context.fillStyle = 'rgba(226, 232, 240, 0.96)';
-		context.font = '42px "Microsoft YaHei", sans-serif';
-		context.fillText( args.subtitle, 44, 170 );
-		if ( args.body !== undefined ) {
-			context.fillStyle = 'rgba(250, 204, 21, 0.96)';
-			context.font = '38px "Microsoft YaHei", sans-serif';
-			wrapCanvasText( context, args.body, 44, 250, canvas.width - 88, 52, 3 );
-		}
-	}
-	const texture = new THREE.CanvasTexture( canvas );
-	texture.colorSpace = THREE.SRGBColorSpace;
-	texture.minFilter = THREE.LinearFilter;
-	texture.magFilter = THREE.LinearFilter;
-	const sprite = new THREE.Sprite( new THREE.SpriteMaterial( {
-		map: texture,
-		depthTest: false,
-		depthWrite: false,
-		transparent: true,
-		toneMapped: false
-	} ) );
-	sprite.renderOrder = 260;
-	sprite.frustumCulled = false;
-	sprite.raycast = THREE.Sprite.prototype.raycast;
-	sprite.scale.set( args.width, args.width / ( canvas.width / canvas.height ), 1 );
-	return sprite;
-
-}
-
-function wrapCanvasText(
-	context: CanvasRenderingContext2D,
-	text: string,
-	x: number,
-	y: number,
-	maxWidth: number,
-	lineHeight: number,
-	maxLines: number
-): void {
-
-	let line = '';
-	let lineCount = 0;
-	for ( const char of text ) {
-		const nextLine = line + char;
-		if ( context.measureText( nextLine ).width > maxWidth && line.length > 0 ) {
-			context.fillText( line, x, y + lineCount * lineHeight );
-			line = char;
-			lineCount += 1;
-			if ( lineCount >= maxLines ) {
-				return;
-			}
-			continue;
-		}
-		line = nextLine;
-	}
-	if ( line.length > 0 && lineCount < maxLines ) {
-		context.fillText( line, x, y + lineCount * lineHeight );
-	}
-
-}
-
-function markSiteOriginReferenceObject(object: THREE.Object3D): void {
-
-	object.userData.__siteOriginReference = true;
-	object.userData.__excludeFromLayerIndex = true;
-	object.userData.__visualizationHelper = true;
-
-}
-
-function hasSiteOriginReferenceObject(object: THREE.Object3D): boolean {
-
-	let current: THREE.Object3D | null = object;
-	while ( current !== null ) {
-		if ( current.userData.__siteOriginReference === true ) {
-			return true;
-		}
-		current = current.parent;
-	}
-	return false;
-
-}
-
-function disposeDebugObject(object: THREE.Object3D): void {
-
-	object.traverse( ( child ) => {
-		if ( child instanceof THREE.Mesh || child instanceof THREE.Line ) {
-			child.geometry.dispose();
-			disposeMaterial( child.material );
-		}
-		if ( child instanceof THREE.Sprite ) {
-			disposeMaterial( child.material );
-		}
-	} );
-
-}
-
-function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
-
-	if ( Array.isArray( material ) ) {
-		material.forEach( disposeMaterial );
-		return;
-	}
-	const maybeTextured = material as THREE.Material & { map?: THREE.Texture };
-	maybeTextured.map?.dispose();
-	material.dispose();
 
 }
 

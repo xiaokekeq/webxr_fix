@@ -27,6 +27,10 @@ import {
 	ModelRuntimeLoadError
 } from './runtime.js';
 import { createRegistrationMetricsState } from '@/engine/session/view-state.js';
+import {
+	activateRuntimeBundle,
+	type ModelRuntimeActivationResult
+} from './runtime-bundle-activation.js';
 
 interface CreateModelSessionOptions {
 	store: RegistrationStore;
@@ -34,17 +38,13 @@ interface CreateModelSessionOptions {
 	appendLog(message: string): void;
 	resetPlacement(): void;
 	onRuntimeReset(nextModelId: string): void;
-	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): ModelRuntimeActivationResult;
+	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void;
 	onRuntimeBundleReady(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void;
 	onRuntimeLoadFailed(error: ModelRuntimeLoadError, modelLoadRequestId: number): void;
 	onLoadManualRegistration(modelId: string): void;
 	canRequestAutoPlacement(): boolean;
 	requestAutoPlacement(): void;
 }
-
-export type ModelRuntimeActivationResult =
-	| { ok: true }
-	| { ok: false; stage: 'runtime-activation'; reason: string; error: unknown };
 
 export interface ModelSessionController {
 	initializeCatalog(): Promise<void>;
@@ -124,12 +124,26 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			return;
 		}
 
-		let activationResult: ModelRuntimeActivationResult;
-		try {
-			activationResult = onRuntimeBundleLoaded( bundle, requestId );
-		} catch ( error ) {
-			activationResult = { ok: false, stage: 'runtime-activation', reason: 'callback-threw', error };
-		}
+		const activationResult: ModelRuntimeActivationResult = activateRuntimeBundle(
+			bundle,
+			( runtimeBundle ) => onRuntimeBundleLoaded( runtimeBundle, requestId ),
+			() => {
+				modelLoadCompletedRequestId = requestId;
+				store.patch( {
+					modelRuntimeLoad: {
+						...store.getState().modelRuntimeLoad,
+						modelLoadCompletedRequestId,
+						modelRuntimeLoadState: 'ready',
+						modelRuntimeLoadStage: undefined,
+						modelRuntimeLoadFailureReason: undefined,
+						modelRuntimeLoadErrorMessage: undefined,
+						runtimeBundleState: completeStage( store.getState().modelRuntimeLoad.runtimeBundleState ),
+						modelTemplateRenderableCount: countRenderableMeshes( bundle.modelTemplate )
+					}
+				} );
+				currentModelDefinition = bundle.modelDefinition;
+			}
+		);
 		if ( activationResult.ok === false ) {
 			const failure = new ModelRuntimeLoadError( 'runtime-activation', modelDefinition.id, undefined, undefined, activationResult.error );
 			patchRuntimeLoadFailure( store, requestId, failure );
@@ -139,20 +153,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			throw failure;
 		}
 
-		modelLoadCompletedRequestId = requestId;
-		store.patch( {
-			modelRuntimeLoad: {
-				...store.getState().modelRuntimeLoad,
-				modelLoadCompletedRequestId,
-				modelRuntimeLoadState: 'ready',
-				modelRuntimeLoadStage: undefined,
-				modelRuntimeLoadFailureReason: undefined,
-				modelRuntimeLoadErrorMessage: undefined,
-				runtimeBundleState: completeStage( store.getState().modelRuntimeLoad.runtimeBundleState ),
-				modelTemplateRenderableCount: countRenderableMeshes( bundle.modelTemplate )
-			}
-		} );
-		currentModelDefinition = bundle.modelDefinition;
 		onRuntimeBundleReady( bundle, requestId );
 		onLoadManualRegistration( bundle.demoModelConfig.modelId );
 
