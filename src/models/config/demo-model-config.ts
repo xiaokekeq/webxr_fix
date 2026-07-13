@@ -28,6 +28,20 @@ export interface DemoModelControlPointCorrespondence {
 	world: GeodeticCoordinate;
 }
 
+export interface ModelControlTargetDiagnostics {
+	rawModelControlPointCount: number;
+	normalizedModelControlTargetCount: number;
+	requiredModelControlTargetCount: number;
+	modelControlTargetIds: string[];
+	modelControlTargetValidationState: 'ready' | 'missing' | 'invalid';
+	modelControlTargetFailureReason?:
+		| 'model-control-targets-missing'
+		| 'model-control-target-count-insufficient'
+		| 'model-control-target-order-invalid'
+		| 'model-control-target-model-local-missing'
+		| 'model-control-target-enu-missing';
+}
+
 export interface DemoModelAttachment {
 	assetId: string;
 	world: GeodeticCoordinate;
@@ -126,6 +140,7 @@ export interface DemoModelConfig {
 		minControlPoints: number;
 	};
 	controlPoints: Record<string, DemoModelControlPointCorrespondence>;
+	modelControlTargetDiagnostics: ModelControlTargetDiagnostics;
 	markers: MarkerEngineeringConfig[];
 	attachments: DemoModelAttachment[];
 	rtkSurveyDataset?: RtkSurveyDataset;
@@ -272,6 +287,7 @@ export async function loadDemoModelConfig(
 			configUrl: url,
 			modelId: 'modelId' in raw ? raw.modelId : 'siteId' in raw ? raw.siteId : null,
 			hasSiteFrameOrigin: 'siteFrame' in raw && raw.siteFrame?.origin !== undefined,
+			rawModelControlPointCount: getRawModelControlPointCount( raw ),
 			rawControlTargetsCount: 'controlTargets' in raw && Array.isArray( raw.controlTargets ) ? raw.controlTargets.length : 0,
 			rawMarkersCount: 'markers' in raw && Array.isArray( raw.markers ) ? raw.markers.length : 0,
 			error: error instanceof Error ? error.message : String( error )
@@ -341,19 +357,11 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		};
 	}
 
-	if (
-		Object.keys( normalizedControlPoints ).length < registration.minControlPoints
-		&& normalizedControlPoints.ORIGIN === undefined
-	) {
-		normalizedControlPoints.ORIGIN = {
-			modelLocal: { x: 0, y: 0, z: 0 },
-			world: {
-				lat: anchor.lat,
-				lon: anchor.lon,
-				alt: anchor.alt
-			}
-		};
-	}
+	const modelControlTargetDiagnostics = createModelControlTargetDiagnostics(
+		getRawModelControlPointCount( config ),
+		normalizedControlPoints,
+		registration.minControlPoints
+	);
 
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.modelId );
@@ -367,6 +375,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		scale: config.scale,
 		registration,
 		controlPoints: normalizedControlPoints,
+		modelControlTargetDiagnostics,
 		markers,
 		attachments: normalizeAttachments( config.attachments ),
 		rtkSurveyDataset: normalizeRtkSurveyDataset( config.rtkSurveyDataset, config.modelId ),
@@ -398,6 +407,15 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 
 	const origin = normalizeLocalDebugOrigin( config.origin );
 	const normalizedControlPoints = normalizeLocalDebugControlPoints( config, origin );
+	const registration = {
+		mode: 'rigid-ground-plane' as const,
+		minControlPoints: 3
+	};
+	const modelControlTargetDiagnostics = createModelControlTargetDiagnostics(
+		getRawModelControlPointCount( config ),
+		normalizedControlPoints,
+		registration.minControlPoints
+	);
 
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.siteId );
@@ -412,11 +430,9 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		anchor: origin,
 		yaw: config.yawDeg ?? 0,
 		scale: config.scale ?? 1,
-		registration: {
-			mode: 'rigid-ground-plane',
-			minControlPoints: 3
-		},
+		registration,
 		controlPoints: normalizedControlPoints,
+		modelControlTargetDiagnostics,
 		markers,
 		attachments: normalizeAttachments( config.attachments ),
 		rtkSurveyDataset: normalizeRtkSurveyDataset( config.rtkSurveyDataset, config.siteId ),
@@ -827,6 +843,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 }
 
+function getRawModelControlPointCount(config: RawDemoModelConfig): number {
+
+	const points = config.controlPoints;
+	if ( Array.isArray( points ) ) return points.length;
+	return points !== undefined && typeof points === 'object' ? Object.keys( points ).length : 0;
+
+}
+
+function createModelControlTargetDiagnostics(
+	rawModelControlPointCount: number,
+	controlPoints: Record<string, DemoModelControlPointCorrespondence>,
+	requiredModelControlTargetCount: number
+): ModelControlTargetDiagnostics {
+
+	const modelControlTargetIds = Object.keys( controlPoints );
+	const base = {
+		rawModelControlPointCount,
+		normalizedModelControlTargetCount: modelControlTargetIds.length,
+		requiredModelControlTargetCount,
+		modelControlTargetIds
+	};
+	if ( modelControlTargetIds.length === 0 ) {
+		return { ...base, modelControlTargetValidationState: 'missing', modelControlTargetFailureReason: 'model-control-targets-missing' };
+	}
+	if ( modelControlTargetIds.length < requiredModelControlTargetCount ) {
+		return { ...base, modelControlTargetValidationState: 'invalid', modelControlTargetFailureReason: 'model-control-target-count-insufficient' };
+	}
+	if ( new Set( modelControlTargetIds ).size !== modelControlTargetIds.length || modelControlTargetIds.some( ( id ) => id.length === 0 ) ) {
+		return { ...base, modelControlTargetValidationState: 'invalid', modelControlTargetFailureReason: 'model-control-target-order-invalid' };
+	}
+	if ( Object.values( controlPoints ).some( ( point ) => [ point.modelLocal.x, point.modelLocal.y, point.modelLocal.z ].some( ( value ) => Number.isFinite( value ) === false ) ) ) {
+		return { ...base, modelControlTargetValidationState: 'invalid', modelControlTargetFailureReason: 'model-control-target-model-local-missing' };
+	}
+	if ( Object.values( controlPoints ).some( ( point ) => [ point.world.lat, point.world.lon, point.world.alt ].some( ( value ) => Number.isFinite( value ) === false ) ) ) {
+		return { ...base, modelControlTargetValidationState: 'invalid', modelControlTargetFailureReason: 'model-control-target-enu-missing' };
+	}
+	return { ...base, modelControlTargetValidationState: 'ready' };
+
+}
+
 function validateDemoModelConfig(config: DemoModelConfig): void {
 
 	if ( typeof config.modelId !== 'string' || config.modelId.length === 0 ) {
@@ -863,6 +919,10 @@ function validateDemoModelConfig(config: DemoModelConfig): void {
 
 	if ( typeof config.controlPoints !== 'object' || config.controlPoints === null ) {
 		throw new Error( 'Model config is missing valid controlPoints.' );
+	}
+
+	if ( config.modelControlTargetDiagnostics.modelControlTargetValidationState !== 'ready' ) {
+		throw new Error( config.modelControlTargetDiagnostics.modelControlTargetFailureReason ?? 'model-control-targets-missing' );
 	}
 
 	if ( Array.isArray( config.markers ) === false ) {
@@ -1442,6 +1502,12 @@ function createConfigDebugPayload(configUrl: string, config: DemoModelConfig): R
 	return {
 		modelId: config.modelId,
 		configUrl,
+		rawModelControlPointCount: config.modelControlTargetDiagnostics.rawModelControlPointCount,
+		normalizedModelControlTargetCount: config.modelControlTargetDiagnostics.normalizedModelControlTargetCount,
+		requiredModelControlTargetCount: config.modelControlTargetDiagnostics.requiredModelControlTargetCount,
+		modelControlTargetIds: config.modelControlTargetDiagnostics.modelControlTargetIds,
+		modelControlTargetValidationState: config.modelControlTargetDiagnostics.modelControlTargetValidationState,
+		modelControlTargetFailureReason: config.modelControlTargetDiagnostics.modelControlTargetFailureReason ?? null,
 		siteFrameOriginLoaded: typeof config.siteFrame.origin.lat === 'number' && typeof config.siteFrame.origin.lon === 'number',
 		controlTargetCount: config.controlTargets.length,
 		markersCount: config.markers.length,

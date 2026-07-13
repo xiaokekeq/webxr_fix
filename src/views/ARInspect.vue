@@ -80,7 +80,7 @@ const sessionStatusText = computed( () => {
 const configCards = computed( () => [
 	{ label: '当前模型', value: `${engine.value.selectedModelId || '-'} / ${currentModelName.value}`, wide: true },
 	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? configStatus.value.siteOriginText : '未配置', wide: true },
-	{ label: '模型控制点', value: `${engine.value.registrationChainDebug.engineeringControlRegistration.controlPointCount} 个` },
+	{ label: '模型控制点', value: `${configStatus.value.normalizedModelControlTargetCount} 个` },
 	{ label: '业务标识', value: `${configStatus.value.annotationCount} 个` },
 	{ label: '控制标志', value: formatActiveMarkerText(), wide: true },
 	{ label: '四角 ENU', value: canUseMarkerCorners.value ? '已配置' : '缺失' }

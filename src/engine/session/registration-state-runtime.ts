@@ -214,6 +214,12 @@ export class RegistrationStateRuntime {
 
 		this.options.store.patch( {
 			engineeringConfigStatus: {
+				rawModelControlPointCount: demoModelConfig.modelControlTargetDiagnostics.rawModelControlPointCount,
+				normalizedModelControlTargetCount: demoModelConfig.modelControlTargetDiagnostics.normalizedModelControlTargetCount,
+				requiredModelControlTargetCount: demoModelConfig.modelControlTargetDiagnostics.requiredModelControlTargetCount,
+				modelControlTargetIds: demoModelConfig.modelControlTargetDiagnostics.modelControlTargetIds,
+				modelControlTargetValidationState: demoModelConfig.modelControlTargetDiagnostics.modelControlTargetValidationState,
+				modelControlTargetFailureReason: demoModelConfig.modelControlTargetDiagnostics.modelControlTargetFailureReason,
 				hasSiteOrigin: true,
 				hasModelLocalToEnu: registrationSolution !== null,
 				hasRtkSurveyDataset: demoModelConfig.rtkSurveyDataset !== undefined

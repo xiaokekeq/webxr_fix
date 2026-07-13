@@ -263,6 +263,12 @@ export interface SiteCalibrationBaselineState {
 }
 
 export interface EngineeringConfigStatusState {
+	rawModelControlPointCount: number;
+	normalizedModelControlTargetCount: number;
+	requiredModelControlTargetCount: number;
+	modelControlTargetIds: string[];
+	modelControlTargetValidationState: 'ready' | 'missing' | 'invalid' | 'unknown';
+	modelControlTargetFailureReason?: string;
 	hasSiteOrigin: boolean;
 	hasModelLocalToEnu: boolean;
 	hasRtkSurveyDataset: boolean;
@@ -621,6 +627,11 @@ export function createDefaultSiteCalibrationBaselineState(): SiteCalibrationBase
 export function createDefaultEngineeringConfigStatusState(): EngineeringConfigStatusState {
 
 	return {
+		rawModelControlPointCount: 0,
+		normalizedModelControlTargetCount: 0,
+		requiredModelControlTargetCount: 0,
+		modelControlTargetIds: [],
+		modelControlTargetValidationState: 'unknown',
 		hasSiteOrigin: false,
 		hasModelLocalToEnu: false,
 		hasRtkSurveyDataset: false,
