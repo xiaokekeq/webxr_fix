@@ -39,7 +39,7 @@ describe( 'activateRuntimeBundle', () => {
 	it( 'keeps successful activation independent from an optional enclosure failure', () => {
 
 		const activation = activateRuntimeBundle( bundle, () => {}, () => {} );
-		const enclosure = new TexturedEnclosureShell().rebuildForModel( { model: new THREE.Group() } );
+		const enclosure = new TexturedEnclosureShell().rebuildForModel( { model: new THREE.Group(), renderer: {} as THREE.WebGLRenderer } );
 
 		expect( activation.ok ).toBe( true );
 		expect( enclosure.ok ).toBe( false );

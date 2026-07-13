@@ -853,7 +853,9 @@ export class ThreeEngine {
 		try {
 			const result = this.enclosureShell.rebuildForModel( {
 				model: bundle.modelTemplate,
-				modelRevision: modelLoadRequestId
+				modelRevision: modelLoadRequestId,
+				renderer: this.sceneBundle.renderer,
+				lightingScene: this.sceneBundle.scene
 			} );
 			if ( result.ok === false ) {
 				console.warn( '[EnclosureShellDisabled]', {

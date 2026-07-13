@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { buildEnclosureShell, type EnclosureShellBuildResult } from './enclosure-shell-builder.js';
+import {
+	buildEnclosureShell,
+	type EnclosureOffscreenRenderer,
+	type EnclosureShellBuildResult
+} from './enclosure-shell-builder.js';
 
 export type EnclosureRebuildOutcome =
 	| { ok: true; rebuilt: boolean }
@@ -8,11 +12,14 @@ export type EnclosureRebuildOutcome =
 interface EnclosureRebuildOptions {
 	model: THREE.Object3D;
 	modelRevision?: number;
+	renderer: EnclosureOffscreenRenderer;
+	lightingScene?: THREE.Scene;
 }
 
 export class TexturedEnclosureShell {
 
 	private root: THREE.Group | null = null;
+	private renderTargets: THREE.WebGLRenderTarget[] = [];
 	private sourceModelUuid: string | null = null;
 	private sourceRevision = - 1;
 
@@ -25,10 +32,11 @@ export class TexturedEnclosureShell {
 
 		options.model.updateWorldMatrix( true, true );
 		this.dispose();
-		const result = buildEnclosureShell( options.model );
+		const result = buildEnclosureShell( options.model, options );
 		if ( result.ok === false ) return result;
 
 		this.root = result.root;
+		this.renderTargets = result.renderTargets;
 		this.root.visible = false;
 		this.sourceModelUuid = options.model.uuid;
 		this.sourceRevision = sourceRevision;
@@ -39,7 +47,7 @@ export class TexturedEnclosureShell {
 	sync(root: THREE.Object3D | null, mode: 'complete' | 'layer-peeling' | 'section-cut'): void {
 
 		root?.traverse( ( object ) => {
-			if ( object.userData.__enclosureShell === true ) {
+			if ( object instanceof THREE.Group && object.userData.__enclosureShell === true ) {
 				object.visible = mode !== 'complete';
 			}
 		} );
@@ -61,6 +69,8 @@ export class TexturedEnclosureShell {
 				} );
 			} );
 		}
+		this.renderTargets.forEach( ( target ) => target.dispose() );
+		this.renderTargets = [];
 		this.root = null;
 		this.sourceModelUuid = null;
 		this.sourceRevision = - 1;
