@@ -25,8 +25,8 @@ interface CreateModelSessionOptions {
 	setStatus: SetStatus;
 	appendLog(message: string): void;
 	resetPlacement(): void;
-	onRuntimeReset(): void;
-	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle): void;
+	onRuntimeReset(nextModelId: string): void;
+	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void;
 	onLoadManualRegistration(modelId: string): void;
 	canRequestAutoPlacement(): boolean;
 	requestAutoPlacement(): void;
@@ -37,7 +37,7 @@ export interface ModelSessionController {
 	handleModelSelection(modelId: string): void;
 	loadSelectedModelResources(modelDefinition: ModelCatalogItem): Promise<void>;
 	getCurrentModelDefinition(): ModelCatalogItem | null;
-	getDebug(): { modelLoadRequestId: number; modelLoadCompletedRequestId: number; staleModelBundleDisposeCount: number; lastDisposedStaleModelId: string | null; lastModelLoadAbortReason: string | null };
+	getDebug(): { modelLoadRequestId: number; modelLoadCompletedRequestId: number; staleModelBundleDisposeCount: number; lastDisposedStaleModelId: string | null; staleModelResultDiscardReason: string | null };
 }
 
 export function createModelSession(options: CreateModelSessionOptions): ModelSessionController {
@@ -59,13 +59,14 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 	let modelLoadCompletedRequestId = 0;
 	let staleModelBundleDisposeCount = 0;
 	let lastDisposedStaleModelId: string | null = null;
+	let staleModelResultDiscardReason: string | null = null;
 
 	async function loadSelectedModelResources(modelDefinition: ModelCatalogItem): Promise<void> {
 
 		const requestId = ++modelLoadRequestId;
 
 		resetPlacement();
-		onRuntimeReset();
+		onRuntimeReset( modelDefinition.id );
 		currentModelDefinition = null;
 
 		store.patch( {
@@ -86,14 +87,13 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			disposeModelRuntimeBundle( bundle );
 			staleModelBundleDisposeCount += 1;
 			lastDisposedStaleModelId = bundle.modelDefinition.id;
+			staleModelResultDiscardReason = 'superseded-by-newer-model-load-request';
 			return;
 		}
 
-		bundle.modelTemplate.userData.__modelLoadRequestId = requestId;
 		modelLoadCompletedRequestId = requestId;
-		bundle.modelTemplate.userData.__modelLoadDebug = { modelLoadRequestId, modelLoadCompletedRequestId, staleModelBundleDisposeCount, lastDisposedStaleModelId, lastModelLoadAbortReason: null };
 		currentModelDefinition = bundle.modelDefinition;
-		onRuntimeBundleLoaded( bundle );
+		onRuntimeBundleLoaded( bundle, requestId );
 		onLoadManualRegistration( bundle.demoModelConfig.modelId );
 
 		store.patch( {
@@ -190,7 +190,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 
 		getDebug() {
 
-			return { modelLoadRequestId, modelLoadCompletedRequestId, staleModelBundleDisposeCount, lastDisposedStaleModelId, lastModelLoadAbortReason: null };
+			return { modelLoadRequestId, modelLoadCompletedRequestId, staleModelBundleDisposeCount, lastDisposedStaleModelId, staleModelResultDiscardReason };
 
 		}
 	};

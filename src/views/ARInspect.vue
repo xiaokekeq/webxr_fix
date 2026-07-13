@@ -861,19 +861,19 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 		return;
 	}
 
-	const applied = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
+	const result = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
 	arInfo( 'MarkerCalibrationApplyResult', {
-		applied,
-		message: applied ? 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。' : 'Marker 校正未应用，面板保持打开。',
+		result,
+		message: result.ok ? 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。' : `Marker 校正未应用：${result.reason}`,
 		runtimeStatus: engine.value.runtimeStatus,
 		markerCalibration: engine.value.markerCalibration,
 		createdAt: Date.now()
 	} );
 	await nextTick();
-	if ( applied === false ) {
+	if ( result.ok === false ) {
 		markerApplyFeedback.value = {
 			type: 'error',
-			message: engine.value.runtimeStatus || markerApplyBlockedReason.value || 'Marker 校正失败，请查看控制台日志。',
+			message: result.reason,
 			createdAt: Date.now()
 		};
 		markerCalibrationOverlayOpen.value = true;

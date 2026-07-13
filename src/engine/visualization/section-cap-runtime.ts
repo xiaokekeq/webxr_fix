@@ -12,19 +12,54 @@ export class SectionCapRuntime {
 	private capRoot: THREE.Group | null = null;
 	private sourceModelUuid: string | null = null;
 
-	sync(root: THREE.Object3D | null, plane: THREE.Plane | null, force = false): void {
+	sync(root: THREE.Object3D | null, plane: THREE.Plane | null, force = false, sourceModelUuid: string | null = null): void {
 		if ( root === null || plane === null ) { this.hide(); this.currentRoot = root; return; }
 		const signature = [ root.uuid, ...plane.normal.toArray().map( ( value ) => value.toFixed( 5 ) ), plane.constant.toFixed( 5 ) ].join( ':' );
 		if ( force === false && signature === this.lastSignature ) return;
-		this.currentRoot = root; this.lastSignature = signature; this.rebuild( root, plane );
+		this.currentRoot = root; this.lastSignature = signature; this.rebuild( root, plane, sourceModelUuid );
 	}
 
-	hide(): void { if ( this.capRoot !== null ) this.capRoot.visible = false; this.lastSignature = ''; }
-	dispose(reason = 'dispose'): void { this.removeCap(); this.currentRoot = null; this.sourceModelUuid = null; this.lastSignature = ''; this.disposeCount += 1; this.lastDisposeReason = reason; }
+	hide(): void {
 
-	getDebug() { return { sectionCapExists: this.capRoot !== null, sectionCapEnabled: this.capRoot !== null, sectionCapVisible: this.capRoot?.visible === true, sectionCapSourceModelUuid: this.sourceModelUuid, sectionCapDisposeCount: this.disposeCount, sectionCapLastDisposeReason: this.lastDisposeReason, sectionCapMeshCount: this.capRoot?.children.length ?? 0, sectionCapTriangleCount: this.capRoot?.children.reduce( ( total, child ) => total + ( child instanceof THREE.Mesh ? ( child.geometry.getIndex()?.count ?? child.geometry.getAttribute( 'position' ).count ) / 3 : 0 ), 0 ) ?? 0, sectionCapRevision: this.revision, sectionCapRebuildCount: this.rebuildCount }; }
+		if ( this.capRoot !== null ) this.capRoot.visible = false;
+		this.lastSignature = '';
 
-	private rebuild(root: THREE.Object3D, plane: THREE.Plane): void {
+	}
+
+	dispose(reason = 'dispose'): void {
+
+		this.removeCap();
+		this.currentRoot = null;
+		this.sourceModelUuid = null;
+		this.lastSignature = '';
+		this.disposeCount += 1;
+		this.lastDisposeReason = reason;
+
+	}
+
+	getDebug() {
+
+		const children = this.capRoot?.children ?? [];
+		const triangleCount = children.reduce( ( total, child ) => {
+			if ( child instanceof THREE.Mesh === false ) return total;
+			return total + ( child.geometry.getIndex()?.count ?? child.geometry.getAttribute( 'position' ).count ) / 3;
+		}, 0 );
+		return {
+			sectionCapExists: this.capRoot !== null,
+			sectionCapEnabled: this.capRoot !== null,
+			sectionCapVisible: this.capRoot?.visible === true,
+			sectionCapSourceModelUuid: this.sourceModelUuid,
+			sectionCapDisposeCount: this.disposeCount,
+			sectionCapLastDisposeReason: this.lastDisposeReason,
+			sectionCapMeshCount: children.length,
+			sectionCapTriangleCount: triangleCount,
+			sectionCapRevision: this.revision,
+			sectionCapRebuildCount: this.rebuildCount
+		};
+
+	}
+
+	private rebuild(root: THREE.Object3D, plane: THREE.Plane, sourceModelUuid: string | null): void {
 		this.removeCap();
 		root.updateWorldMatrix( true, true );
 		const segments = collectSegments( root, plane );
@@ -36,7 +71,7 @@ export class SectionCapRuntime {
 		const cap = new THREE.Mesh( geometry, material );
 		cap.name = '__section-cap'; cap.userData.__sectionCap = true; cap.userData.__visualizationHelper = true; cap.userData.__nonSelectableHelper = true;
 		this.capRoot = new THREE.Group(); this.capRoot.name = '__section-cap-root'; this.capRoot.userData.__sectionCap = true; this.capRoot.userData.__visualizationHelper = true; this.capRoot.add( cap ); root.add( this.capRoot );
-		this.sourceModelUuid = typeof root.userData.__enclosureSourceModelUuid === 'string' ? root.userData.__enclosureSourceModelUuid : root.uuid;
+		this.sourceModelUuid = sourceModelUuid ?? root.uuid;
 		this.revision += 1; this.rebuildCount += 1;
 	}
 

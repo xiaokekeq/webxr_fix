@@ -20,6 +20,7 @@ interface VisualizationStateRuntimeOptions {
 	sectionCutController: ArSectionCutController;
 	enclosureShell: TexturedEnclosureShell;
 	sectionCapRuntime: SectionCapRuntime;
+	getActiveModelSourceUuid(): string | null;
 	getUndergroundModelRoot(): THREE.Object3D | null;
 	syncAttachmentInfoBoardVisibility(): void;
 }
@@ -71,7 +72,7 @@ export class VisualizationStateRuntime {
 		}
 		if ( materialDirty ) this.options.materialStateRuntime.applyMaterial( state.undergroundMaterialMode, state.transparentXrayValue );
 		this.options.enclosureShell.sync( undergroundRoot, state.undergroundInspectionTool );
-		this.options.sectionCapRuntime.sync( undergroundRoot, this.sectionPlane, sectionDirty );
+		this.options.sectionCapRuntime.sync( undergroundRoot, this.sectionPlane, sectionDirty, this.options.getActiveModelSourceUuid() );
 
 		this.lastRoot = undergroundRoot;
 		this.lastMaterialMode = state.undergroundMaterialMode;
@@ -102,7 +103,7 @@ export class VisualizationStateRuntime {
 		} );
 		const changed = changedObjectCount > 0 || visibilitySignature !== this.previousLayerVisibilitySignature;
 		this.previousLayerVisibilitySignature = visibilitySignature;
-		if ( changed ) this.options.sectionCapRuntime.sync( root, this.sectionPlane, true );
+		if ( changed ) this.options.sectionCapRuntime.sync( root, this.sectionPlane, true, this.options.getActiveModelSourceUuid() );
 		const nextPatch = {
 			layerNames: modelLayers.length > 0
 				? modelLayers.map( ( layer ) => layer.label )

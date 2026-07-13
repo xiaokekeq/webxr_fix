@@ -8,6 +8,7 @@ import { ThreeEngine } from '@/engine/core/three-engine.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { mapLegacyDisplayMode, type LegacyArDisplayMode, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
+import type { MarkerSolutionApplyResult } from '@/engine/inspection/marker-solution-apply-result.js';
 
 export interface InspectionDraft {
 	result: string;
@@ -48,7 +49,7 @@ export interface LoadModelArController {
 		startCurrentSessionMarkerCalibration(): void;
 		captureCurrentSessionMarkerCorner(): void;
 		resetCurrentSessionMarkerCalibration(): void;
-		solveAndApplyCurrentSessionMarkerCalibration(): boolean;
+		solveAndApplyCurrentSessionMarkerCalibration(): MarkerSolutionApplyResult;
 		clearMarkerLocalizationCorrection(): void;
 		clearSavedMarkerLocalization(): void;
 		resetPlacement(): void;

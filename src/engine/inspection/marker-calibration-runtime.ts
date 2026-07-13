@@ -23,6 +23,12 @@ import type {
 	ArWorkflowMode,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
+import {
+	runMarkerSolutionApplyResultSelfCheck,
+	type MarkerSolutionApplyDiagnostics,
+	type MarkerSolutionApplyResult,
+	type MarkerSolutionApplyStage
+} from './marker-solution-apply-result.js';
 
 export const MARKER_CORNER_SEQUENCE = [
 	{ id: 'top-left', cornerOrderValue: 'leftTop', label: 'leftTop 左上角', pointLabel: 'leftTop', shortPointLabel: 'LT' },
@@ -60,11 +66,17 @@ interface MarkerCalibrationRuntimeOptions {
 		metadata: {
 			markerId: string;
 			markerConfigId: string;
+			calibrationModelId: string | null;
+			calibrationSiteId: string | null;
+			calibrationMarkerId: string;
 			source?: 'marker-calibration';
 			placeModel?: boolean;
 			capturedCornersAr?: THREE.Vector3[];
 		}
 	): boolean;
+	getLastMarkerSolutionApplyResult(): MarkerSolutionApplyResult | null;
+	clearLastMarkerSolutionApplyResult(): void;
+	getLifecycleGenerations(): { arSessionGeneration: number; modelRuntimeGeneration: number };
 	setStatus(message: string): void;
 }
 
@@ -108,10 +120,16 @@ export class MarkerCalibrationRuntime {
 	private currentSessionMarkerSolution: MarkerLocalizationSolution | null = null;
 	private markerCalibrationAttempts: MarkerCalibrationAttempt[] = [];
 	private nextMarkerCalibrationAttemptId = 1;
+	private markerApplyAttemptCount = 0;
+	private markerCalibrationGeneration = 0;
+	private calibrationStartGenerations: { arSessionGeneration: number; modelRuntimeGeneration: number } | null = null;
+	private calibrationIdentity: { modelId: string | null; siteId: string | null; markerId: string } | null = null;
+	private pendingApplyFailure: MarkerSolutionApplyResult | null = null;
 
 	constructor(private readonly options: MarkerCalibrationRuntimeOptions) {
 
 		if ( import.meta.env.DEV ) {
+			runMarkerSolutionApplyResultSelfCheck();
 			(
 				globalThis as typeof globalThis & {
 					replayLastMarkerCalibrationAttempt?: () => MarkerLocalizationSolution | null;
@@ -362,6 +380,30 @@ export class MarkerCalibrationRuntime {
 
 	}
 
+	cancelForModelRuntimeChange(): boolean {
+
+		const state = this.options.store.getState().markerCalibration;
+		if ( state.active === false && this.currentSessionMarkerCornerCaptures.length === 0 ) {
+			return false;
+		}
+
+		const failure = this.createApplyFailure( 'context-validation', 'model-runtime-generation-changed' );
+		this.resetCurrentSessionCalibrationState();
+		this.pendingApplyFailure = failure;
+		this.options.store.patch( {
+			markerCalibration: {
+				...this.options.store.getState().markerCalibration,
+				markerApplyStage: failure.stage,
+				markerApplyResult: 'failure',
+				markerApplyFailureReason: failure.reason,
+				lastUpdatedAt: Date.now()
+			}
+		} );
+		this.options.setStatus( '模型运行时资源已刷新，当前 Marker 四角校正已取消，请重新采集。' );
+		return true;
+
+	}
+
 	syncState(override?: Partial<MarkerCalibrationState>): void {
 
 		const currentState = this.options.store.getState().markerCalibration;
@@ -405,6 +447,10 @@ export class MarkerCalibrationRuntime {
 				rmsErrorMeters: override?.rmsErrorMeters ?? this.currentSessionMarkerSolution?.rmsErrorMeters,
 				headingDeg: override?.headingDeg ?? this.currentSessionMarkerSolution?.headingDeg,
 				looseThresholdAccepted: override?.looseThresholdAccepted ?? currentState.looseThresholdAccepted ?? false,
+				markerApplyStage: override?.markerApplyStage ?? currentState.markerApplyStage,
+				markerApplyResult: override?.markerApplyResult ?? currentState.markerApplyResult,
+				markerApplyFailureReason: override?.markerApplyFailureReason ?? currentState.markerApplyFailureReason,
+				markerApplyAttemptCount: override?.markerApplyAttemptCount ?? currentState.markerApplyAttemptCount,
 				lastUpdatedAt: override?.lastUpdatedAt ?? Date.now()
 			}
 		} );
@@ -439,6 +485,14 @@ export class MarkerCalibrationRuntime {
 		const cornerSequence = resolveMarkerCornerSequenceForTarget( controlTarget );
 
 		this.options.markManualCalibrationStarted();
+		this.markerCalibrationGeneration += 1;
+		this.calibrationStartGenerations = this.options.getLifecycleGenerations();
+		this.calibrationIdentity = {
+			modelId: this.options.getDemoModelConfig()?.modelId ?? null,
+			siteId: this.options.getSiteId(),
+			markerId: markerPose.markerId
+		};
+		this.pendingApplyFailure = null;
 		this.currentSessionMarkerCornerCaptures = [];
 		this.currentSessionMarkerSolution = null;
 		this.syncState( {
@@ -514,6 +568,13 @@ export class MarkerCalibrationRuntime {
 			return;
 		}
 
+		const generations = this.options.getLifecycleGenerations();
+		if ( this.calibrationStartGenerations !== null && ( this.calibrationStartGenerations.arSessionGeneration !== generations.arSessionGeneration || this.calibrationStartGenerations.modelRuntimeGeneration !== generations.modelRuntimeGeneration ) ) {
+			const failure = this.createApplyFailure( 'context-validation', this.calibrationStartGenerations.arSessionGeneration !== generations.arSessionGeneration ? 'ar-session-generation-changed' : 'model-runtime-generation-changed' );
+			this.resetCurrentSessionCalibrationState();
+			this.pendingApplyFailure = failure;
+			return;
+		}
 		const markerState = this.options.store.getState().markerCalibration;
 		const captureTarget = this.getActiveMarkerControlTarget( markerState.markerId );
 		const cornerSequence = resolveMarkerCornerSequenceForTarget( captureTarget );
@@ -639,42 +700,61 @@ export class MarkerCalibrationRuntime {
 
 	}
 
-	solveAndApplyCurrentSessionCalibration(): boolean {
+	solveAndApplyCurrentSessionCalibration(): MarkerSolutionApplyResult {
+
+		this.options.clearLastMarkerSolutionApplyResult();
+		const applied = this.solveAndApplyCurrentSessionCalibrationBoolean();
+		const result = this.options.getLastMarkerSolutionApplyResult();
+		const resolved = result ?? this.pendingApplyFailure ?? this.createApplyFailure( applied ? 'state-commit' : 'solution-validation', applied ? 'marker-apply-result-missing' : 'marker-solve-or-apply-precondition-failed' );
+		resolved.diagnostics.markerCalibrationGeneration = this.markerCalibrationGeneration;
+		this.recordApplyResult( resolved );
+		return resolved;
+
+	}
+
+	private solveAndApplyCurrentSessionCalibrationBoolean(): boolean {
 
 		if ( this.options.isPresenting() === false ) {
 			this.options.setStatus( '请先进入当前 AR 会话，再应用 Marker 校正。' );
-			return false;
+			return this.failSolveOrApply( 'session-validation', 'ar-session-not-presenting' );
 		}
 
 		const demoModelConfig = this.options.getDemoModelConfig();
 		if ( demoModelConfig === null ) {
 			this.options.setStatus( '模型配置尚未准备完成，无法执行 Marker 校正。' );
-			return false;
+			return this.failSolveOrApply( 'solution-validation', 'model-runtime-not-ready' );
 		}
 
 		const currentSessionId = this.options.getCurrentSessionId();
 		if ( currentSessionId === null ) {
 			this.options.setStatus( '当前 AR Session 尚未准备完成，请重新开始。' );
-			return false;
+			return this.failSolveOrApply( 'session-validation', 'current-session-missing' );
 		}
 
+		const generations = this.options.getLifecycleGenerations();
+		if ( this.calibrationStartGenerations !== null && ( this.calibrationStartGenerations.arSessionGeneration !== generations.arSessionGeneration || this.calibrationStartGenerations.modelRuntimeGeneration !== generations.modelRuntimeGeneration ) ) {
+			const failure = this.createApplyFailure( 'context-validation', this.calibrationStartGenerations.arSessionGeneration !== generations.arSessionGeneration ? 'ar-session-generation-changed' : 'model-runtime-generation-changed' );
+			this.resetCurrentSessionCalibrationState();
+			this.pendingApplyFailure = failure;
+			return false;
+		}
 		const markerState = this.options.store.getState().markerCalibration;
 		const markerId = markerState.markerId ?? this.options.getPrimaryConfiguredMarkerPose()?.markerId ?? null;
 		const cornerSequence = this.getMarkerCornerSequence( markerId );
 		if ( markerId === null ) {
 			this.options.setStatus( '当前模型没有可用于 Marker 校正的控制标志配置。' );
-			return false;
+			return this.failSolveOrApply( 'context-validation', 'marker-target-missing' );
 		}
 
 		if ( markerState.currentSessionId !== currentSessionId ) {
 			this.options.setStatus( '当前 Marker 角点采集属于旧会话，请重新开始。' );
 			this.resetCurrentSessionCalibrationState();
-			return false;
+			return this.failSolveOrApply( 'session-validation', 'marker-state-session-mismatch' );
 		}
 
 		if ( this.currentSessionMarkerCornerCaptures.length !== cornerSequence.length ) {
 			this.options.setStatus( '四角点数量不足，无法求解空间校正。' );
-			return false;
+			return this.failSolveOrApply( 'solution-validation', 'captured-corner-count-mismatch' );
 		}
 
 		try {
@@ -821,6 +901,9 @@ export class MarkerCalibrationRuntime {
 			const applied = this.options.applyCurrentSessionMarkerSolution( solution, {
 				markerId,
 				markerConfigId: markerId,
+				calibrationModelId: this.calibrationIdentity?.modelId ?? demoModelConfig.modelId,
+				calibrationSiteId: this.calibrationIdentity?.siteId ?? this.options.getSiteId(),
+				calibrationMarkerId: this.calibrationIdentity?.markerId ?? markerId,
 				source: 'marker-calibration',
 				placeModel: false,
 				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition.clone() )
@@ -866,7 +949,8 @@ export class MarkerCalibrationRuntime {
 					reason: 'applyCurrentSessionMarkerSolution returned false',
 					createdAt: Date.now()
 				} );
-				this.options.setStatus( 'Marker 校正已求解，但应用到当前 AR 会话失败。' );
+				const failure = this.options.getLastMarkerSolutionApplyResult();
+				this.options.setStatus( `Marker 校正未应用：${failure?.ok === false ? failure.reason : 'state-commit-failed'}` );
 			}
 
 			return applied;
@@ -902,8 +986,71 @@ export class MarkerCalibrationRuntime {
 					? error.message
 					: '空间校正失败，请重新采集控制标志四角。'
 			);
+			this.pendingApplyFailure = this.createApplyFailure(
+				'solution-validation',
+				error instanceof Error ? error.message : 'marker-solution-solve-failed'
+			);
 			return false;
 		}
+
+	}
+
+	private createApplyFailure(
+		stage: MarkerSolutionApplyStage,
+		reason: string
+	): Extract<MarkerSolutionApplyResult, { ok: false }> {
+
+		const state = this.options.store.getState().markerCalibration;
+		const config = this.options.getDemoModelConfig();
+		const generations = this.options.getLifecycleGenerations();
+		const diagnostics: MarkerSolutionApplyDiagnostics = {
+			currentSessionId: this.options.getCurrentSessionId(),
+			solutionSessionId: this.currentSessionMarkerSolution?.arFromEnuSolution.sessionId ?? null,
+			markerStateSessionId: state.currentSessionId,
+			contextSessionId: null,
+			isPresenting: this.options.isPresenting(),
+			hasCurrentArSessionContext: false,
+			hasDemoModelConfig: config !== null,
+			hasModelTemplate: false,
+			hasRegistrationSolution: false,
+			hasArCoordinateServiceSolution: false,
+			arCoordinateServiceReady: false,
+			activeMarkerSolutionSessionId: null,
+			activeMarkerSolutionSource: null,
+			solutionSource: this.currentSessionMarkerSolution?.arFromEnuSolution.source ?? null,
+			solutionMatrixFinite: this.currentSessionMarkerSolution?.matrix.elements.every( Number.isFinite ) ?? false,
+			solutionMatrixInvertible: false,
+			activeModelId: config?.modelId ?? null,
+			solutionModelId: this.calibrationIdentity?.modelId ?? config?.modelId ?? null,
+			activeSiteId: this.options.getSiteId(),
+			solutionSiteId: this.calibrationIdentity?.siteId ?? this.options.getSiteId(),
+			activeMarkerId: state.markerId,
+			solutionMarkerId: this.calibrationIdentity?.markerId ?? state.markerId,
+			calibrationModelId: this.calibrationIdentity?.modelId ?? null,
+			calibrationSiteId: this.calibrationIdentity?.siteId ?? null,
+			calibrationMarkerId: this.calibrationIdentity?.markerId ?? null,
+			capturedCornerCount: this.currentSessionMarkerCornerCaptures.length,
+			expectedCornerCount: state.expectedCornerCount,
+			arSessionGeneration: generations.arSessionGeneration,
+			modelRuntimeGeneration: generations.modelRuntimeGeneration,
+			markerCalibrationGeneration: this.markerCalibrationGeneration
+		};
+		return { ok: false, stage, reason, diagnostics };
+
+	}
+
+	private failSolveOrApply(stage: MarkerSolutionApplyStage, reason: string): false {
+
+		this.pendingApplyFailure = this.createApplyFailure( stage, reason );
+		return false;
+
+	}
+
+	private recordApplyResult(result: MarkerSolutionApplyResult): void {
+
+		this.markerApplyAttemptCount += 1;
+		const markerCalibration = this.options.store.getState().markerCalibration;
+		this.options.store.patch( { markerCalibration: { ...markerCalibration, markerApplyStage: result.ok ? 'applied' : result.stage, markerApplyResult: result.ok ? 'success' : 'failure', markerApplyFailureReason: result.ok ? undefined : result.reason, markerApplyAttemptCount: this.markerApplyAttemptCount, lastUpdatedAt: Date.now() } } );
 
 	}
 
@@ -911,6 +1058,9 @@ export class MarkerCalibrationRuntime {
 
 		this.currentSessionMarkerCornerCaptures = [];
 		this.currentSessionMarkerSolution = null;
+		this.calibrationStartGenerations = null;
+		this.calibrationIdentity = null;
+		this.pendingApplyFailure = null;
 		this.options.store.patch( {
 			markerCalibration: {
 				...createDefaultMarkerCalibrationState(),

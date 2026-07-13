@@ -340,6 +340,10 @@ export interface MarkerCalibrationState {
 	rmsErrorMeters?: number;
 	headingDeg?: number;
 	looseThresholdAccepted?: boolean;
+	markerApplyStage?: string;
+	markerApplyResult?: 'success' | 'failure';
+	markerApplyFailureReason?: string;
+	markerApplyAttemptCount?: number;
 	lastUpdatedAt?: number;
 }
 
@@ -683,6 +687,7 @@ export function createDefaultMarkerCalibrationState(): MarkerCalibrationState {
 		canSolve: false,
 		solved: false,
 		applied: false,
+		markerApplyAttemptCount: 0,
 		looseThresholdAccepted: false
 	};
 

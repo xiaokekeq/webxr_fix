@@ -16,6 +16,7 @@ import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import type { LegacyArDisplayMode } from '@/engine/visualization/underground-display-state.js';
+import type { MarkerSolutionApplyResult } from '@/engine/inspection/marker-solution-apply-result.js';
 
 interface ControllerUiState {
 	drawerOpen: boolean;
@@ -215,10 +216,10 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 	}
 
-	function handleSolveAndApplyCurrentSessionMarkerCalibration(): boolean {
+	function handleSolveAndApplyCurrentSessionMarkerCalibration(): MarkerSolutionApplyResult {
 
 		const applied = ensureController().actions.solveAndApplyCurrentSessionMarkerCalibration();
-		if ( applied ) {
+		if ( applied.ok ) {
 			patchUiState( {
 				drawerOpen: true,
 				registrationView: 'overview'
@@ -356,7 +357,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		solveAndApplyCurrentSessionMarkerCalibration(): boolean {
+		solveAndApplyCurrentSessionMarkerCalibration(): MarkerSolutionApplyResult {
 
 			return handleSolveAndApplyCurrentSessionMarkerCalibration();
 

@@ -6,6 +6,7 @@ import type {
 } from '@/features/ar/types/workflow.js';
 
 export interface ArSessionContext {
+	sessionId: string | null;
 	mode: ArWorkflowMode;
 	siteId: string;
 	siteConfig: DemoModelConfig;

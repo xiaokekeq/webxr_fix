@@ -101,6 +101,7 @@ import { createXRSessionRuntime } from '@/engine/platform/xr.js';
 import { getSectionCutPlaneModeLabel } from '@/features/ar/types/display-modes.js';
 import { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-workflow.js';
 import { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
+import type { MarkerSolutionApplyDiagnostics, MarkerSolutionApplyResult, MarkerSolutionApplyStage } from '@/engine/inspection/marker-solution-apply-result.js';
 import { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
 import { composeModelRawLocalToArMatrix } from '@/engine/placement/runtime.js';
 import type {
@@ -151,6 +152,17 @@ interface EngineeringPlacementGuardResult {
 	message?: string;
 	arFromEnuSolution?: ArFromEnuSolution;
 	controlTarget?: VisualControlTarget | null;
+}
+
+interface MarkerSolutionApplyMetadata {
+	markerId: string;
+	markerConfigId: string;
+	calibrationModelId: string | null;
+	calibrationSiteId: string | null;
+	calibrationMarkerId: string;
+	source?: 'marker-calibration';
+	placeModel?: boolean;
+	capturedCornersAr?: THREE.Vector3[];
 }
 
 export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
@@ -298,6 +310,9 @@ export class ThreeEngine {
 	private markerCorrectionFallbackArFromEnuSolution: ArFromEnuSolution | null = null;
 	private currentArSessionContext: ArSessionContext | null = null;
 	private currentArSessionId: string | null = null;
+	private arSessionGeneration = 0;
+	private modelRuntimeGeneration = 0;
+	private lastMarkerSolutionApplyResult: MarkerSolutionApplyResult | null = null;
 	private siteOriginReferencePanelOpen = false;
 	private readonly realDepthProvider = new RealDepthProvider();
 	private readonly frameTaskErrorCounts = new Map<string, number>();
@@ -384,6 +399,7 @@ export class ThreeEngine {
 			sectionCutController: this.sectionCutController,
 			enclosureShell: this.enclosureShell,
 			sectionCapRuntime: this.sectionCapRuntime,
+			getActiveModelSourceUuid: () => this.modelTemplate?.uuid ?? null,
 			getUndergroundModelRoot: () => this.placementSession.getArPlacedModel(),
 			syncAttachmentInfoBoardVisibility: () => {
 				this.syncAttachmentInfoBoardVisibility();
@@ -464,6 +480,9 @@ export class ThreeEngine {
 			applyCurrentSessionMarkerSolution: ( solution, metadata ) => {
 				return this.applyCurrentSessionMarkerSolution( solution, metadata );
 			},
+			getLastMarkerSolutionApplyResult: () => this.lastMarkerSolutionApplyResult,
+			clearLastMarkerSolutionApplyResult: () => { this.lastMarkerSolutionApplyResult = null; },
+			getLifecycleGenerations: () => ( { arSessionGeneration: this.arSessionGeneration, modelRuntimeGeneration: this.modelRuntimeGeneration } ),
 			setStatus: ( message ) => {
 				this.setStatus( message );
 			}
@@ -631,26 +650,34 @@ export class ThreeEngine {
 				this.syncArSessionPhase();
 				this.emit();
 			},
-			onRuntimeReset: () => {
+			onRuntimeReset: ( nextModelId ) => {
+				const preserveCurrentArLocalization = this.currentArSessionId !== null && this.currentArSessionContext?.siteId === nextModelId;
+				this.modelRuntimeGeneration += 1;
+				const calibrationCancelled = this.markerCalibrationRuntime.cancelForModelRuntimeChange();
 				this.sectionCapRuntime.dispose( 'model-switch' );
 				this.enclosureShell.dispose();
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
 				this.registrationSolution = null;
 				this.resolvedMarkerPosesInEnu = [];
-				this.activeSiteCalibrationBaseline = null;
-				this.currentArSessionContext = null;
-				this.lastArSessionContextLogSignature = '';
-				this.siteBaselineLoadRequestId += 1;
-				this.resetMarkerLocalizationCorrection();
-				this.markerCalibrationRuntime.resetRuntimeState();
+				if ( preserveCurrentArLocalization === false ) {
+					this.activeSiteCalibrationBaseline = null;
+					this.currentArSessionContext = null;
+					this.lastArSessionContextLogSignature = '';
+					this.siteBaselineLoadRequestId += 1;
+					this.resetMarkerLocalizationCorrection();
+					this.markerCalibrationRuntime.resetRuntimeState();
+					this.appendLog( '模型工程上下文已切换，已取消当前 Marker 四角校正，请重新采集。' );
+					console.info( '[MarkerCalibrationCancelledForModelContextChange]', { currentSessionId: this.currentArSessionId, nextModelId } );
+				} else if ( calibrationCancelled ) {
+					this.appendLog( '模型资源已刷新，已取消进行中的 Marker 四角校正；当前 AR 会话定位仍保留。' );
+				}
 				this.pipesByName = new Map<string, PipeRecord>();
 				this.layerVisibility.reset();
 				this.visualizationStateRuntime.reset();
 				this.lastAnnotationLabelsSignature = '';
 				this.annotationLabelsController.clear();
 				this.annotationLayer.setAnnotations( [] );
-				this.arCoordinateService.clear( 'runtime-reset' );
 				this.store.patch( {
 					layerNames: STATIC_LAYER_NAMES,
 					modelLayers: [],
@@ -665,11 +692,11 @@ export class ThreeEngine {
 				this.syncRegistrationChainDebug();
 				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
 			},
-			onRuntimeBundleLoaded: ( bundle ) => {
+			onRuntimeBundleLoaded: ( bundle, modelLoadRequestId ) => {
 				this.pipesByName = bundle.pipesByName;
 				this.demoModelConfig = bundle.demoModelConfig;
 				this.modelTemplate = bundle.modelTemplate;
-				this.enclosureShell.rebuildForModel( { model: bundle.modelTemplate, modelName: bundle.modelDefinition.name, reason: 'model-loaded', modelRevision: Number( bundle.modelTemplate.userData.__modelLoadRequestId ?? 0 ) } );
+				this.enclosureShell.rebuildForModel( { model: bundle.modelTemplate, modelName: bundle.modelDefinition.name, reason: 'model-loaded', modelRevision: modelLoadRequestId } );
 				this.registrationSolution = bundle.registrationSolution;
 				this.logGroundAwareArAudit( bundle.demoModelConfig );
 				this.annotationLayer.setAnnotations(
@@ -1163,7 +1190,7 @@ export class ThreeEngine {
 
 	}
 
-	solveAndApplyCurrentSessionMarkerCalibration(): boolean {
+	solveAndApplyCurrentSessionMarkerCalibration(): MarkerSolutionApplyResult {
 
 		return this.markerCalibrationRuntime.solveAndApplyCurrentSessionCalibration();
 
@@ -1628,6 +1655,7 @@ export class ThreeEngine {
 
 		const resolved = this.resolveSessionContextControlTargets();
 		const nextContext: ArSessionContext = {
+			sessionId: this.currentArSessionId,
 			mode: this.workflowMode,
 			siteId: this.demoModelConfig.modelId,
 			siteConfig: this.demoModelConfig,
@@ -3001,13 +3029,93 @@ export class ThreeEngine {
 
 	private applyCurrentSessionMarkerSolution(
 		solution: MarkerLocalizationSolution,
-		metadata: {
-			markerId: string;
-			markerConfigId: string;
-			source?: 'marker-calibration';
-			placeModel?: boolean;
-			capturedCornersAr?: THREE.Vector3[];
+		metadata: MarkerSolutionApplyMetadata
+	): boolean {
+
+		const diagnostics = this.createMarkerSolutionApplyDiagnostics( solution, metadata );
+		const reject = ( stage: MarkerSolutionApplyStage, reason: string ): boolean => {
+			this.lastMarkerSolutionApplyResult = { ok: false, stage, reason, diagnostics };
+			this.setStatus( `Marker 校正未应用：${reason}` );
+			return false;
+		};
+		if ( diagnostics.isPresenting === false || diagnostics.currentSessionId === null ) return reject( 'session-validation', diagnostics.isPresenting ? 'current-session-missing' : 'ar-session-not-presenting' );
+		if ( diagnostics.solutionSessionId !== diagnostics.currentSessionId ) return reject( 'session-validation', 'solution-session-mismatch' );
+		if ( diagnostics.markerStateSessionId !== diagnostics.currentSessionId ) return reject( 'session-validation', 'marker-state-session-mismatch' );
+		if ( diagnostics.hasCurrentArSessionContext === false ) return reject( 'context-validation', 'session-context-missing' );
+		if ( diagnostics.contextSessionId !== diagnostics.currentSessionId ) return reject( 'context-validation', 'context-session-mismatch' );
+		if ( diagnostics.activeSiteId !== diagnostics.solutionSiteId ) return reject( 'context-validation', 'active-site-changed' );
+		if ( diagnostics.activeModelId !== diagnostics.solutionModelId ) return reject( 'context-validation', 'active-model-changed' );
+		if ( diagnostics.activeMarkerId !== diagnostics.solutionMarkerId ) return reject( 'context-validation', 'marker-target-changed' );
+		if ( diagnostics.hasDemoModelConfig === false || diagnostics.hasModelTemplate === false || diagnostics.hasRegistrationSolution === false ) return reject( 'solution-validation', 'model-runtime-not-ready' );
+		if ( diagnostics.solutionMatrixFinite === false || diagnostics.solutionMatrixInvertible === false ) return reject( 'solution-validation', diagnostics.solutionMatrixFinite ? 'solution-matrix-not-invertible' : 'solution-matrix-not-finite' );
+		if ( this.currentArSessionContext?.controlTargets?.some( ( target ) => target.id === metadata.markerId || target.markerId === metadata.markerId ) === false ) return reject( 'context-validation', 'marker-target-changed' );
+		const controlTargets = this.getCurrentControlTargets();
+		if ( this.demoModelConfig !== null && hasMockEngineeringDataInConfig( this.demoModelConfig, controlTargets ) && canApplyMockEngineeringCalibration() === false ) return reject( 'solution-validation', 'mock-engineering-data-rejected' );
+		const previousMarkerSolution = this.activeMarkerArFromEnuSolution;
+		const previousMarkerResult = this.activeMarkerLocalizationResult;
+		const previousFallback = this.markerCorrectionFallbackArFromEnuSolution;
+		const previousCoordinateSolution = this.arCoordinateService.getCurrentSolution();
+		try {
+			const applied = this.applyCurrentSessionMarkerSolutionBoolean( solution, metadata );
+			this.lastMarkerSolutionApplyResult = applied
+				? { ok: true, sessionId: diagnostics.currentSessionId, markerId: metadata.markerId, appliedSource: 'marker', diagnostics: this.createMarkerSolutionApplyDiagnostics( solution, metadata ) }
+				: { ok: false, stage: 'state-commit', reason: 'state-commit-failed', diagnostics: this.createMarkerSolutionApplyDiagnostics( solution, metadata ) };
+			return applied;
+		} catch ( error ) {
+			this.activeMarkerArFromEnuSolution = previousMarkerSolution;
+			this.activeMarkerLocalizationResult = previousMarkerResult;
+			this.markerCorrectionFallbackArFromEnuSolution = previousFallback;
+			this.arCoordinateService.setArFromEnuSolution( previousCoordinateSolution, this.currentArSessionId );
+			return reject( 'state-commit', error instanceof Error ? error.message : 'state-commit-failed' );
 		}
+
+	}
+
+	private createMarkerSolutionApplyDiagnostics(solution: MarkerLocalizationSolution, metadata: MarkerSolutionApplyMetadata): MarkerSolutionApplyDiagnostics {
+
+		const state = this.store.getState().markerCalibration;
+		const matrix = solution.matrix;
+		const determinant = matrix.determinant();
+		const context = this.currentArSessionContext;
+		const activeModelId = this.demoModelConfig?.modelId ?? null;
+		return {
+			currentSessionId: this.currentArSessionId,
+			solutionSessionId: solution.arFromEnuSolution.sessionId ?? null,
+			markerStateSessionId: state.currentSessionId,
+			contextSessionId: context?.sessionId ?? null,
+			isPresenting: this.sceneBundle.renderer.xr.isPresenting,
+			hasCurrentArSessionContext: context !== null,
+			hasDemoModelConfig: this.demoModelConfig !== null,
+			hasModelTemplate: this.modelTemplate !== null,
+			hasRegistrationSolution: this.registrationSolution !== null,
+			hasArCoordinateServiceSolution: this.arCoordinateService.hasCalibration(),
+			arCoordinateServiceReady: true,
+			activeMarkerSolutionSessionId: this.activeMarkerArFromEnuSolution?.sessionId ?? null,
+			activeMarkerSolutionSource: this.activeMarkerArFromEnuSolution?.source ?? null,
+			solutionSource: solution.arFromEnuSolution.source,
+			solutionMatrixFinite: matrix.elements.every( Number.isFinite ),
+			solutionMatrixInvertible: Number.isFinite( determinant ) && Math.abs( determinant ) > 1e-10,
+			activeModelId,
+			solutionModelId: metadata.calibrationModelId,
+			activeSiteId: context?.siteId ?? activeModelId,
+			solutionSiteId: metadata.calibrationSiteId,
+			activeMarkerId: state.markerId,
+			solutionMarkerId: metadata.calibrationMarkerId,
+			calibrationModelId: metadata.calibrationModelId,
+			calibrationSiteId: metadata.calibrationSiteId,
+			calibrationMarkerId: metadata.calibrationMarkerId,
+			capturedCornerCount: state.capturedCornerCount,
+			expectedCornerCount: state.expectedCornerCount,
+			arSessionGeneration: this.arSessionGeneration,
+			modelRuntimeGeneration: this.modelRuntimeGeneration,
+			markerCalibrationGeneration: 0
+		};
+
+	}
+
+	private applyCurrentSessionMarkerSolutionBoolean(
+		solution: MarkerLocalizationSolution,
+		metadata: MarkerSolutionApplyMetadata
 	): boolean {
 
 		return this.applyCurrentSessionMarkerSolutionOnly( solution, metadata );
@@ -3016,13 +3124,7 @@ export class ThreeEngine {
 
 	private applyCurrentSessionMarkerSolutionOnly(
 		solution: MarkerLocalizationSolution,
-		metadata: {
-			markerId: string;
-			markerConfigId: string;
-			source?: 'marker-calibration';
-			placeModel?: boolean;
-			capturedCornersAr?: THREE.Vector3[];
-		}
+		metadata: MarkerSolutionApplyMetadata
 	): boolean {
 
 		if ( this.currentArSessionId === null ) {
@@ -3728,6 +3830,8 @@ export class ThreeEngine {
 		if ( result.depthGranted ) this.realDepthProvider.initialize( result.session );
 		else this.realDepthProvider.dispose();
 		this.sessionLifecycleRuntime.handleXRSessionStart();
+		this.arSessionGeneration += 1;
+		this.syncArSessionContext();
 
 	}
 
@@ -3741,6 +3845,8 @@ export class ThreeEngine {
 		this.clearAnnotationDetail();
 		this.store.clearModelPlacementDebug();
 		this.sessionLifecycleRuntime.handleXRSessionEnd();
+		this.currentArSessionContext = null;
+		this.lastArSessionContextLogSignature = '';
 
 	}
 
