@@ -8,6 +8,14 @@ export interface ResolvedBoundarySurface {
 	geometry: THREE.BufferGeometry;
 	materials: THREE.Material[];
 	triangleCount: number;
+	debug: BoundarySurfaceDebugCounts;
+}
+
+export interface BoundarySurfaceDebugCounts {
+	candidateTriangleCount: number;
+	acceptedTriangleCount: number;
+	rejectedByNormalCount: number;
+	rejectedByPositionCount: number;
 }
 
 export type BoundarySurfaceResolveResult = {
@@ -17,8 +25,10 @@ export type BoundarySurfaceResolveResult = {
 	epsilon: number;
 } | {
 	ok: false;
-	reason: 'empty-model' | 'missing-boundary-surface';
+	reason: 'empty-model' | 'required-boundary-surface-missing' | 'invalid-boundary-surface';
 	message: string;
+	missingFaces?: BoundarySurfaceName[];
+	invalidFaces?: BoundarySurfaceName[];
 };
 
 interface SurfaceTriangle {
@@ -52,18 +62,34 @@ export function resolveModelBoundarySurfaces(modelRoot: THREE.Object3D): Boundar
 
 	const hasExplicitFaces = faceNames.every( ( face ) => triangles.some( ( triangle ) => triangle.explicitFace === face ) );
 	const resolved = new Map<BoundarySurfaceName, SurfaceTriangle[]>();
-	faceNames.forEach( ( face ) => resolved.set( face, [] ) );
+	const debug = new Map<BoundarySurfaceName, BoundarySurfaceDebugCounts>();
+	faceNames.forEach( ( face ) => {
+		resolved.set( face, [] );
+		debug.set( face, { candidateTriangleCount: 0, acceptedTriangleCount: 0, rejectedByNormalCount: 0, rejectedByPositionCount: 0 } );
+	} );
 	for ( const triangle of triangles ) {
-		const face = hasExplicitFaces ? triangle.explicitFace : classifyExposedTriangle( triangle, triangles, epsilon );
-		if ( face !== null ) resolved.get( face )!.push( triangle );
+		const classification = hasExplicitFaces
+			? { face: triangle.explicitFace, rejectedByNormal: false, rejectedByPosition: false }
+			: classifyExposedTriangle( triangle, triangles, bounds, epsilon );
+		if ( classification.face === null ) continue;
+		const counts = debug.get( classification.face )!;
+		counts.candidateTriangleCount += 1;
+		if ( classification.rejectedByNormal ) counts.rejectedByNormalCount += 1;
+		if ( classification.rejectedByPosition ) counts.rejectedByPositionCount += 1;
+		if ( classification.rejectedByNormal || classification.rejectedByPosition ) continue;
+		orientTriangleForFace( triangle, classification.face );
+		resolved.get( classification.face )!.push( triangle );
+		counts.acceptedTriangleCount += 1;
 	}
 	const missing = faceNames.filter( ( face ) => resolved.get( face )!.length === 0 );
-	if ( missing.length > 0 ) return { ok: false, reason: 'missing-boundary-surface', message: `Could not resolve boundary surfaces: ${missing.join( ', ' )}.` };
+	if ( missing.length > 0 ) return { ok: false, reason: 'required-boundary-surface-missing', missingFaces: missing, message: `Could not resolve required boundary surfaces: ${missing.join( ', ' )}.` };
+	const invalid = faceNames.filter( ( face ) => isValidSurfaceTriangles( resolved.get( face )! ) === false );
+	if ( invalid.length > 0 ) return { ok: false, reason: 'invalid-boundary-surface', invalidFaces: invalid, message: `Resolved boundary surfaces are invalid: ${invalid.join( ', ' )}.` };
 	return {
 		ok: true,
 		bounds,
 		epsilon,
-		surfaces: faceNames.map( ( face ) => createResolvedSurface( face, resolved.get( face )!, epsilon ) )
+		surfaces: faceNames.map( ( face ) => createResolvedSurface( face, resolved.get( face )!, epsilon, debug.get( face )! ) )
 	};
 
 }
@@ -167,16 +193,48 @@ function orientTriangleOutward(triangle: SurfaceTriangle, modelCenter: THREE.Vec
 
 }
 
-function classifyExposedTriangle(triangle: SurfaceTriangle, allTriangles: SurfaceTriangle[], epsilon: number): BoundarySurfaceName | null {
+function classifyExposedTriangle(triangle: SurfaceTriangle, allTriangles: SurfaceTriangle[], bounds: THREE.Box3, epsilon: number): { face: BoundarySurfaceName | null; rejectedByNormal: boolean; rejectedByPosition: boolean } {
 
-	if ( isOccludedAlongOutwardNormal( triangle, allTriangles, epsilon ) ) return null;
+	if ( isOccludedAlongOutwardNormal( triangle, allTriangles, epsilon ) ) return { face: null, rejectedByNormal: false, rejectedByPosition: false };
 	const normal = triangle.averageNormal;
 	const horizontal = Math.max( Math.abs( normal.x ), Math.abs( normal.z ) );
-	if ( normal.y < - 0.5 && - normal.y >= horizontal ) return 'bottom';
-	if ( normal.y > 0.5 && normal.y > horizontal ) return null;
-	if ( horizontal < 0.2 ) return null;
-	if ( Math.abs( normal.x ) >= Math.abs( normal.z ) ) return normal.x < 0 ? 'left' : 'right';
-	return normal.z < 0 ? 'front' : 'back';
+	if ( normal.y < - 0.5 && - normal.y >= horizontal ) return { face: 'bottom', rejectedByNormal: false, rejectedByPosition: false };
+	if ( normal.y > 0.5 && normal.y > horizontal ) return { face: null, rejectedByNormal: false, rejectedByPosition: false };
+	const directions: Record<Exclude<BoundarySurfaceName, 'bottom'>, THREE.Vector3> = {
+		front: new THREE.Vector3( 0, 0, - 1 ), back: new THREE.Vector3( 0, 0, 1 ), left: new THREE.Vector3( - 1, 0, 0 ), right: new THREE.Vector3( 1, 0, 0 )
+	};
+	const horizontalFaces: readonly Exclude<BoundarySurfaceName, 'bottom'>[] = [ 'front', 'back', 'left', 'right' ];
+	let face: Exclude<BoundarySurfaceName, 'bottom'> = 'front';
+	for ( const candidate of horizontalFaces ) if ( normal.dot( directions[ candidate ] ) > normal.dot( directions[ face ] ) ) face = candidate;
+	if ( normal.dot( directions[ face ] ) <= 0 ) return { face, rejectedByNormal: true, rejectedByPosition: false };
+	const size = bounds.getSize( new THREE.Vector3() );
+	const positionScore = face === 'right' ? ( triangle.center.x - bounds.min.x ) / Math.max( size.x, epsilon )
+		: face === 'left' ? ( bounds.max.x - triangle.center.x ) / Math.max( size.x, epsilon )
+			: face === 'back' ? ( triangle.center.z - bounds.min.z ) / Math.max( size.z, epsilon )
+				: ( bounds.max.z - triangle.center.z ) / Math.max( size.z, epsilon );
+	return { face, rejectedByNormal: false, rejectedByPosition: positionScore < 0.5 };
+
+}
+
+function orientTriangleForFace(triangle: SurfaceTriangle, face: BoundarySurfaceName): void {
+
+	const expected = face === 'front' ? new THREE.Vector3( 0, 0, - 1 ) : face === 'back' ? new THREE.Vector3( 0, 0, 1 ) : face === 'left' ? new THREE.Vector3( - 1, 0, 0 ) : face === 'right' ? new THREE.Vector3( 1, 0, 0 ) : new THREE.Vector3( 0, - 1, 0 );
+	const geometricNormal = new THREE.Vector3().crossVectors( triangle.positions[ 1 ].clone().sub( triangle.positions[ 0 ] ), triangle.positions[ 2 ].clone().sub( triangle.positions[ 0 ] ) ).normalize();
+	if ( geometricNormal.dot( expected ) < 0 ) {
+		[ triangle.positions[ 1 ], triangle.positions[ 2 ] ] = [ triangle.positions[ 2 ], triangle.positions[ 1 ] ];
+		[ triangle.normals[ 1 ], triangle.normals[ 2 ] ] = [ triangle.normals[ 2 ], triangle.normals[ 1 ] ];
+		if ( triangle.uvs !== null ) [ triangle.uvs[ 1 ], triangle.uvs[ 2 ] ] = [ triangle.uvs[ 2 ], triangle.uvs[ 1 ] ];
+		if ( triangle.colors !== null ) [ triangle.colors[ 1 ], triangle.colors[ 2 ] ] = [ triangle.colors[ 2 ], triangle.colors[ 1 ] ];
+		geometricNormal.negate();
+	}
+	triangle.normals.forEach( ( normal ) => { if ( normal.dot( geometricNormal ) < 0 ) normal.negate(); } );
+	triangle.averageNormal.copy( geometricNormal );
+
+}
+
+function isValidSurfaceTriangles(triangles: SurfaceTriangle[]): boolean {
+
+	return triangles.length > 0 && triangles.every( ( triangle ) => triangle.positions.every( ( position ) => Number.isFinite( position.x ) && Number.isFinite( position.y ) && Number.isFinite( position.z ) ) );
 
 }
 
@@ -193,7 +251,7 @@ function isOccludedAlongOutwardNormal(triangle: SurfaceTriangle, allTriangles: S
 
 }
 
-function createResolvedSurface(face: BoundarySurfaceName, triangles: SurfaceTriangle[], epsilon: number): ResolvedBoundarySurface {
+function createResolvedSurface(face: BoundarySurfaceName, triangles: SurfaceTriangle[], epsilon: number, debug: BoundarySurfaceDebugCounts): ResolvedBoundarySurface {
 
 	const materials: THREE.Material[] = [];
 	const sourceMeshes: THREE.Mesh[] = [];
@@ -228,7 +286,7 @@ function createResolvedSurface(face: BoundarySurfaceName, triangles: SurfaceTria
 	geometry.setAttribute( 'color', new THREE.Float32BufferAttribute( colors, 3 ) );
 	geometry.computeBoundingBox();
 	geometry.computeBoundingSphere();
-	return { face, sourceMeshes, geometry, materials, triangleCount: positions.length / 9 };
+	return { face, sourceMeshes, geometry, materials, triangleCount: positions.length / 9, debug };
 
 }
 

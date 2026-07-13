@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import dz1207Obj from '../../../public/pipe-viewer/dz1207/dizhi1207.obj?raw';
 import { describe, expect, it } from 'vitest';
 import { buildEnclosureShell, createBoundaryShellMaterial } from './enclosure-shell-builder.js';
 import { resolveModelBoundarySurfaces } from './model-boundary-surface-resolver.js';
@@ -57,6 +59,72 @@ describe( 'model conforming shell', () => {
 		const material = createBoundaryShellMaterial( source );
 
 		expect( material ).toMatchObject( { map, alphaMap, color: new THREE.Color( 0x7f3210 ), vertexColors: true, clippingPlanes: null, toneMapped: false, side: THREE.DoubleSide } );
+
+	} );
+
+	it( 'keeps a sloped right surface whose normal x component is below 0.9', () => {
+
+		const geometry = createSlopedPrismGeometry();
+		geometry.getAttribute( 'position' ).setXYZ( 3, - 0.5, 3, - 1 );
+		geometry.getAttribute( 'position' ).setXYZ( 7, - 0.5, 3, 1 );
+		geometry.computeVertexNormals();
+		const resolved = resolveModelBoundarySurfaces( new THREE.Mesh( geometry, new THREE.MeshBasicMaterial() ) );
+
+		expect( resolved.ok ).toBe( true );
+		if ( resolved.ok ) {
+			const right = resolved.surfaces.find( ( surface ) => surface.face === 'right' )!;
+			const normal = right.geometry.getAttribute( 'normal' );
+			const average = new THREE.Vector3();
+			for ( let index = 0; index < normal.count; index += 1 ) average.add( new THREE.Vector3().fromBufferAttribute( normal, index ) );
+			expect( average.normalize().x ).toBeGreaterThan( 0 );
+			expect( average.x ).toBeLessThan( 0.9 );
+			expect( right.triangleCount ).toBeGreaterThan( 0 );
+		}
+
+	} );
+
+	it( 'corrects inward right winding without applying source transforms twice', () => {
+
+		const geometry = createSlopedPrismGeometry();
+		const index = geometry.getIndex()!;
+		[ index.array[ 12 ], index.array[ 13 ] ] = [ index.array[ 13 ], index.array[ 12 ] ];
+		const model = new THREE.Group();
+		const parent = new THREE.Group();
+		parent.position.set( 3, 2, - 4 );
+		parent.scale.set( 2, 3, 4 );
+		const source = new THREE.Mesh( geometry, new THREE.MeshBasicMaterial() );
+		source.position.set( 5, 0, 0 );
+		parent.add( source );
+		model.add( parent );
+		const result = buildEnclosureShell( model );
+
+		expect( result.ok ).toBe( true );
+		if ( result.ok ) {
+			const right = result.root.getObjectByName( '__shell-right' ) as THREE.Mesh;
+			expect( right.position ).toEqual( new THREE.Vector3() );
+			expect( right.scale ).toEqual( new THREE.Vector3( 1, 1, 1 ) );
+			const position = right.geometry.getAttribute( 'position' );
+			const a = new THREE.Vector3().fromBufferAttribute( position, 0 );
+			const b = new THREE.Vector3().fromBufferAttribute( position, 1 );
+			const c = new THREE.Vector3().fromBufferAttribute( position, 2 );
+			expect( new THREE.Vector3().crossVectors( b.sub( a ), c.sub( a ) ).normalize().x ).toBeGreaterThan( 0 );
+			expect( right.geometry.boundingBox!.min.x ).toBeGreaterThan( 4 );
+		}
+
+	} );
+
+	it( 'resolves all five faces from the shipped dz1207 OBJ', () => {
+
+		const model = new OBJLoader().parse( dz1207Obj );
+		const resolved = resolveModelBoundarySurfaces( model );
+
+		expect( resolved.ok ).toBe( true );
+		if ( resolved.ok ) {
+			const right = resolved.surfaces.find( ( surface ) => surface.face === 'right' )!;
+			expect( resolved.surfaces.map( ( surface ) => surface.face ) ).toEqual( [ 'front', 'back', 'left', 'right', 'bottom' ] );
+			expect( right.triangleCount ).toBeGreaterThan( 0 );
+			expect( right.geometry.boundingBox?.isEmpty() ).toBe( false );
+		}
 
 	} );
 

@@ -83,7 +83,7 @@ import { MaterialStateRuntime } from '@/engine/visualization/material-state-runt
 import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
-import { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosure-shell.js';
+import { TexturedEnclosureShell, type ConformingShellDebugSnapshot } from '@/engine/visualization/textured-enclosure-shell.js';
 import { SectionCapRuntime } from '@/engine/visualization/section-cap-runtime.js';
 import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
 import {
@@ -171,6 +171,7 @@ export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
 	hasSelection: boolean;
 	currentStatus: string;
+	conformingShellDebug: ConformingShellDebugSnapshot;
 }
 
 export type ModelPlacementResult =
@@ -812,8 +813,16 @@ export class ThreeEngine {
 		return {
 			...state,
 			hasSelection: hasSelectedPipe( state ),
-			currentStatus: this.currentStatus
+			currentStatus: this.currentStatus,
+			conformingShellDebug: this.enclosureShell.getDebugSnapshot()
 		};
+
+	}
+
+	setConformingShellRightForceDebug(active: boolean): void {
+
+		this.enclosureShell.setRightForceDebug( active );
+		this.emit();
 
 	}
 

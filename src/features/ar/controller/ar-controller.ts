@@ -32,6 +32,7 @@ export interface LoadModelArController {
 		setDisplayMode(mode: LegacyArDisplayMode): void;
 		setUndergroundMaterialMode(mode: UndergroundMaterialMode): void;
 		setUndergroundInspectionTool(tool: UndergroundInspectionTool): void;
+		setConformingShellRightForceDebug(active: boolean): void;
 		setTransparentXrayValue(value: number): void;
 		setLayerPeelingValue(value: number): void;
 		setSectionCutValue(value: number): void;
@@ -139,6 +140,12 @@ export function createLoadModelArController(): LoadModelArController {
 				const state = mapLegacyDisplayMode( mode );
 				if ( state.undergroundMaterialMode !== undefined ) engine.setUndergroundMaterialMode( state.undergroundMaterialMode );
 				if ( state.undergroundInspectionTool !== undefined ) engine.setUndergroundInspectionTool( state.undergroundInspectionTool );
+
+			},
+
+			setConformingShellRightForceDebug(active) {
+
+				engine.setConformingShellRightForceDebug( active );
 
 			},
 
