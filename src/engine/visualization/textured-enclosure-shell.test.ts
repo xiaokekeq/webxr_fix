@@ -14,16 +14,20 @@ describe( 'TexturedEnclosureShell', () => {
 		expect( result.ok ).toBe( true );
 
 		const placedModel = model.clone( true );
+		shell.sync( placedModel, 'complete' );
+		expect( placedModel.getObjectByName( '__textured-enclosure-shell' )?.visible ).toBe( false );
 		shell.sync( placedModel, 'layer-peeling' );
 		expect( placedModel.getObjectByName( '__textured-enclosure-shell' )?.visible ).toBe( true );
 		shell.sync( placedModel, 'section-cut' );
-		expect( placedModel.getObjectByName( '__textured-enclosure-shell' )?.visible ).toBe( false );
+		expect( placedModel.getObjectByName( '__textured-enclosure-shell' )?.visible ).toBe( true );
 		shell.sync( placedModel, 'complete' );
 		expect( placedModel.getObjectByName( '__textured-enclosure-shell' )?.visible ).toBe( false );
 		const materials = new MaterialStateRuntime();
 		materials.setRoot( placedModel );
+		materials.applySection( new THREE.Plane( new THREE.Vector3( 0, 1, 0 ), 0 ) );
 		materials.applyMaterial( 'xray', 50 );
 		expect( ( ( placedModel.getObjectByName( '__enclosure-front' ) as THREE.Mesh ).material as THREE.MeshBasicMaterial ).opacity ).toBe( 1 );
+		expect( ( ( placedModel.getObjectByName( '__enclosure-front' ) as THREE.Mesh ).material as THREE.MeshBasicMaterial ).clippingPlanes ).toBeNull();
 		materials.restore();
 		shell.dispose();
 
@@ -40,6 +44,7 @@ function createRenderer(): THREE.WebGLRenderer {
 		getClearAlpha: () => 0,
 		getClearColor: ( next: THREE.Color ) => next.copy( color ),
 		getRenderTarget: () => target,
+		readRenderTargetPixels: vi.fn(),
 		render: vi.fn(),
 		setClearColor: vi.fn(),
 		setRenderTarget: ( next: THREE.RenderTarget | null ) => { target = next; }

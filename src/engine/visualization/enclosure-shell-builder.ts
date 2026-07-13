@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { computeModelBusinessLocalBounds } from '@/engine/core/model.js';
 
 type FixedAxis = 'x' | 'y' | 'z';
 export type EnclosureFaceName = 'front' | 'back' | 'left' | 'right' | 'bottom';
@@ -20,12 +19,18 @@ export interface EnclosureGeometryValidation {
 	boundaryCornersConnected: boolean;
 }
 
+export interface EnclosureCaptureStats {
+	face: EnclosureFaceName;
+	transparentPixelRatio: number;
+	opaquePixelRatio: number;
+	opaqueBlackPixelRatio: number;
+}
+
 export type EnclosureOffscreenRenderer = Pick<THREE.WebGLRenderer,
-	'clear' | 'getClearAlpha' | 'getClearColor' | 'getRenderTarget' | 'render' | 'setClearColor' | 'setRenderTarget'>;
+	'clear' | 'getClearAlpha' | 'getClearColor' | 'getRenderTarget' | 'readRenderTargetPixels' | 'render' | 'setClearColor' | 'setRenderTarget'>;
 
 export interface EnclosureShellBuildOptions {
 	renderer: EnclosureOffscreenRenderer;
-	lightingScene?: THREE.Scene;
 }
 
 export type EnclosureShellBuildFailureReason =
@@ -42,6 +47,7 @@ export type EnclosureShellBuildResult = {
 	bounds: THREE.Box3;
 	renderableCount: number;
 	renderTargets: THREE.WebGLRenderTarget[];
+	captureStats: EnclosureCaptureStats[];
 } | {
 	ok: false;
 	reason: EnclosureShellBuildFailureReason;
@@ -49,24 +55,33 @@ export type EnclosureShellBuildResult = {
 	message: string;
 };
 
+type BakeReadableMaterial = THREE.Material & {
+	map?: THREE.Texture | null;
+	alphaMap?: THREE.Texture | null;
+	color?: THREE.Color;
+	vertexColors?: boolean;
+};
+
 const ENCLOSURE_BOUNDS_EPSILON = 1e-6;
 const ENCLOSURE_CAPTURE_SIZE = 1024;
+const ENCLOSURE_CAPTURE_DIAGNOSTIC_SIZE = 128;
 const faceNames: EnclosureFaceName[] = [ 'front', 'back', 'left', 'right', 'bottom' ];
 
 export function buildEnclosureShell(modelRoot: THREE.Object3D, options: EnclosureShellBuildOptions): EnclosureShellBuildResult {
 
 	modelRoot.updateWorldMatrix( true, true );
-	const bounds = computeModelBusinessLocalBounds( modelRoot );
-	const renderableCount = countRenderableMeshes( modelRoot );
-	if ( renderableCount === 0 || bounds.isEmpty() ) return buildFailure( 'empty-model', null, 'Model has no renderable geometry.' );
+	const bounds = resolveEnclosureCaptureBounds( modelRoot );
+	const renderableCount = countEnclosureCaptureSourceMeshes( modelRoot );
+	if ( renderableCount === 0 || bounds.isEmpty() ) return buildFailure( 'empty-model', null, 'Model has no enclosure capture geometry.' );
 	if ( [ ...bounds.min.toArray(), ...bounds.max.toArray() ].every( Number.isFinite ) === false ) return buildFailure( 'invalid-bounds', null, 'Model bounds contain non-finite values.' );
 	const size = bounds.getSize( new THREE.Vector3() );
 	if ( size.toArray().some( ( value ) => value <= ENCLOSURE_BOUNDS_EPSILON ) ) return buildFailure( 'degenerate-bounds', bounds, 'Model bounds are degenerate.' );
 	if ( validateEnclosureFaceGeometry( bounds ).ok === false ) return buildFailure( 'invalid-face-geometry', bounds, 'Invalid five-face enclosure geometry.' );
 
 	let captures: Record<EnclosureFaceName, THREE.WebGLRenderTarget>;
+	let captureStats: EnclosureCaptureStats[];
 	try {
-		captures = captureCompleteModel( modelRoot, bounds, options );
+		( { captures, captureStats } = captureCompleteModel( modelRoot, bounds, options.renderer ) );
 	} catch ( error ) {
 		return buildFailure( 'capture-failed', bounds, error instanceof Error ? error.message : String( error ) );
 	}
@@ -76,7 +91,19 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D, options: Enclosur
 	root.userData.__enclosureShell = true;
 	root.userData.__excludeFromLayerIndex = true;
 	for ( const face of createFaceDefinitions( bounds ) ) {
-		const mesh = new THREE.Mesh( makeFaceGeometry( face.points, face.uvs ), new THREE.MeshBasicMaterial( { map: captures[ face.name ].texture, transparent: true, alphaTest: 0.001, depthWrite: false, side: THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: - 1, polygonOffsetUnits: - 1 } ) );
+		const mesh = new THREE.Mesh( makeFaceGeometry( face.points, face.uvs ), new THREE.MeshBasicMaterial( {
+			map: captures[ face.name ].texture,
+			color: 0xffffff,
+			transparent: true,
+			alphaTest: 0.001,
+			depthWrite: false,
+			depthTest: true,
+			side: THREE.DoubleSide,
+			toneMapped: false,
+			polygonOffset: true,
+			polygonOffsetFactor: - 1,
+			polygonOffsetUnits: - 1
+		} ) );
 		mesh.name = `__enclosure-${face.name}`;
 		mesh.userData.__enclosureShell = true;
 		mesh.userData.__excludeFromLayerIndex = true;
@@ -85,7 +112,16 @@ export function buildEnclosureShell(modelRoot: THREE.Object3D, options: Enclosur
 	}
 
 	modelRoot.add( root );
-	return { ok: true, root, meshCount: root.children.length, bounds, renderableCount, renderTargets: Object.values( captures ) };
+	if ( import.meta.env.DEV ) console.info( '[EnclosureShellReady]', {
+		meshCount: root.children.length,
+		faces: root.children.map( ( child ) => ( {
+			name: child.name,
+			face: child.userData.enclosureFace,
+			visible: child.visible,
+			side: child instanceof THREE.Mesh ? normalizeMaterialSide( child.material ) : null
+		} ) )
+	} );
+	return { ok: true, root, meshCount: root.children.length, bounds, renderableCount, renderTargets: Object.values( captures ), captureStats };
 
 }
 
@@ -106,43 +142,111 @@ export function validateEnclosureFaceGeometry(bounds: THREE.Box3): EnclosureGeom
 
 }
 
-function captureCompleteModel(modelRoot: THREE.Object3D, bounds: THREE.Box3, options: EnclosureShellBuildOptions): Record<EnclosureFaceName, THREE.WebGLRenderTarget> {
+export function createEnclosureBakeMaterial(source: THREE.Material): THREE.MeshBasicMaterial {
 
-	const scene = new THREE.Scene();
-	if ( options.lightingScene !== undefined ) {
-		options.lightingScene.traverse( ( object ) => {
-			if ( object instanceof THREE.Light ) scene.add( object.clone() );
-		} );
-		scene.environment = options.lightingScene.environment;
-	}
-	const bakedModel = modelRoot.clone( true );
-	bakedModel.position.set( 0, 0, 0 );
-	bakedModel.quaternion.identity();
-	bakedModel.scale.setScalar( 1 );
-	bakedModel.traverse( ( object ) => {
-		if ( object.userData.__nonSelectableHelper === true || object.userData.__excludeFromLayerIndex === true || object.userData.__visualizationHelper === true ) object.visible = false;
+	const readable = source as BakeReadableMaterial;
+	const material = new THREE.MeshBasicMaterial( {
+		map: readable.map ?? null,
+		alphaMap: readable.alphaMap ?? null,
+		color: readable.color?.clone() ?? new THREE.Color( 0xffffff ),
+		vertexColors: readable.vertexColors === true,
+		transparent: source.transparent || source.opacity < 1 || readable.alphaMap !== null && readable.alphaMap !== undefined,
+		opacity: source.opacity,
+		alphaTest: source.alphaTest,
+		side: THREE.DoubleSide,
+		toneMapped: false,
+		depthTest: true,
+		depthWrite: true
 	} );
-	scene.add( bakedModel );
+	material.clippingPlanes = null;
+	material.clipIntersection = false;
+	material.clipShadows = false;
+	return material;
 
-	const targets = Object.fromEntries( faceNames.map( ( face ) => [ face, new THREE.WebGLRenderTarget( ENCLOSURE_CAPTURE_SIZE, ENCLOSURE_CAPTURE_SIZE, { depthBuffer: true } ) ] ) ) as Record<EnclosureFaceName, THREE.WebGLRenderTarget>;
-	const previousTarget = options.renderer.getRenderTarget();
-	const previousClearColor = options.renderer.getClearColor( new THREE.Color() ).clone();
-	const previousClearAlpha = options.renderer.getClearAlpha();
+}
+
+export function analyzeEnclosureCapturePixels(face: EnclosureFaceName, pixels: Uint8Array): EnclosureCaptureStats {
+
+	const total = pixels.length / 4;
+	if ( total === 0 ) return { face, transparentPixelRatio: 0, opaquePixelRatio: 0, opaqueBlackPixelRatio: 0 };
+	let transparent = 0;
+	let opaqueBlack = 0;
+	for ( let index = 0; index < pixels.length; index += 4 ) {
+		const alpha = pixels[ index + 3 ];
+		if ( alpha <= 8 ) transparent += 1;
+		else if ( pixels[ index ] < 8 && pixels[ index + 1 ] < 8 && pixels[ index + 2 ] < 8 ) opaqueBlack += 1;
+	}
+	return { face, transparentPixelRatio: transparent / total, opaquePixelRatio: 1 - transparent / total, opaqueBlackPixelRatio: opaqueBlack / total };
+
+}
+
+function captureCompleteModel(modelRoot: THREE.Object3D, bounds: THREE.Box3, renderer: EnclosureOffscreenRenderer): { captures: Record<EnclosureFaceName, THREE.WebGLRenderTarget>; captureStats: EnclosureCaptureStats[] } {
+
+	const bakedScene = buildEnclosureBakeScene( modelRoot );
+	const captureSize = import.meta.env.DEV ? ENCLOSURE_CAPTURE_DIAGNOSTIC_SIZE : ENCLOSURE_CAPTURE_SIZE;
+	const targets = Object.fromEntries( faceNames.map( ( face ) => [ face, createCaptureTarget( captureSize ) ] ) ) as Record<EnclosureFaceName, THREE.WebGLRenderTarget>;
+	const previousTarget = renderer.getRenderTarget();
+	const previousClearColor = renderer.getClearColor( new THREE.Color() ).clone();
+	const previousClearAlpha = renderer.getClearAlpha();
+	const captureStats: EnclosureCaptureStats[] = [];
 	try {
-		options.renderer.setClearColor( 0x000000, 0 );
+		renderer.setClearColor( 0x000000, 0 );
 		for ( const face of faceNames ) {
-			options.renderer.setRenderTarget( targets[ face ] );
-			options.renderer.clear();
-			options.renderer.render( scene, createCaptureCamera( face, bounds ) );
+			renderer.setRenderTarget( targets[ face ] );
+			renderer.clear( true, true, false );
+			renderer.render( bakedScene.scene, createCaptureCamera( face, bounds ) );
+			if ( import.meta.env.DEV ) {
+				const pixels = new Uint8Array( captureSize * captureSize * 4 );
+				renderer.readRenderTargetPixels( targets[ face ], 0, 0, captureSize, captureSize, pixels );
+				captureStats.push( analyzeEnclosureCapturePixels( face, pixels ) );
+			}
 		}
-		return targets;
+		if ( import.meta.env.DEV ) console.info( '[EnclosureCaptureStats]', captureStats );
+		return { captures: targets, captureStats };
 	} catch ( error ) {
 		Object.values( targets ).forEach( ( target ) => target.dispose() );
 		throw error;
 	} finally {
-		options.renderer.setRenderTarget( previousTarget );
-		options.renderer.setClearColor( previousClearColor, previousClearAlpha );
+		bakedScene.materials.forEach( ( material ) => material.dispose() );
+		renderer.setRenderTarget( previousTarget );
+		renderer.setClearColor( previousClearColor, previousClearAlpha );
 	}
+
+}
+
+function buildEnclosureBakeScene(modelRoot: THREE.Object3D): { scene: THREE.Scene; materials: THREE.MeshBasicMaterial[] } {
+
+	const scene = new THREE.Scene();
+	const materials: THREE.MeshBasicMaterial[] = [];
+	const inverseRoot = modelRoot.matrixWorld.clone().invert();
+	const meshToRoot = new THREE.Matrix4();
+	modelRoot.traverse( ( object ) => {
+		if ( isEnclosureCaptureSourceMesh( object ) === false ) return;
+		const sourceMaterials = Array.isArray( object.material ) ? object.material : [ object.material ];
+		const bakeMaterials = sourceMaterials.map( createEnclosureBakeMaterial );
+		materials.push( ...bakeMaterials );
+		const bakeMesh = new THREE.Mesh( object.geometry, Array.isArray( object.material ) ? bakeMaterials : bakeMaterials[ 0 ] );
+		meshToRoot.multiplyMatrices( inverseRoot, object.matrixWorld );
+		bakeMesh.matrixAutoUpdate = false;
+		bakeMesh.matrix.copy( meshToRoot );
+		bakeMesh.matrixWorldNeedsUpdate = true;
+		bakeMesh.morphTargetInfluences = object.morphTargetInfluences === undefined ? undefined : [ ...object.morphTargetInfluences ];
+		bakeMesh.morphTargetDictionary = object.morphTargetDictionary;
+		scene.add( bakeMesh );
+	} );
+	return { scene, materials };
+
+}
+
+function createCaptureTarget(size: number): THREE.WebGLRenderTarget {
+
+	const target = new THREE.WebGLRenderTarget( size, size, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType, depthBuffer: true, stencilBuffer: false } );
+	target.texture.wrapS = THREE.ClampToEdgeWrapping;
+	target.texture.wrapT = THREE.ClampToEdgeWrapping;
+	target.texture.minFilter = THREE.LinearFilter;
+	target.texture.magFilter = THREE.LinearFilter;
+	target.texture.generateMipmaps = false;
+	return target;
 
 }
 
@@ -159,13 +263,47 @@ function createCaptureCamera(face: EnclosureFaceName, bounds: THREE.Box3): THREE
 	if ( face === 'back' ) camera.position.set( center.x, center.y, bounds.max.z + margin );
 	if ( face === 'left' ) camera.position.set( bounds.min.x - margin, center.y, center.z );
 	if ( face === 'right' ) camera.position.set( bounds.max.x + margin, center.y, center.z );
-	if ( face === 'bottom' ) {
-		camera.position.set( center.x, bounds.min.y - margin, center.z );
-		camera.up.set( 0, 0, - 1 );
-	}
+	if ( face === 'bottom' ) { camera.position.set( center.x, bounds.min.y - margin, center.z ); camera.up.set( 0, 0, - 1 ); }
 	camera.lookAt( center );
 	camera.updateProjectionMatrix();
 	return camera;
+
+}
+
+function resolveEnclosureCaptureBounds(root: THREE.Object3D): THREE.Box3 {
+
+	const bounds = new THREE.Box3();
+	const inverseRoot = root.matrixWorld.clone().invert();
+	const relative = new THREE.Matrix4();
+	const geometryBounds = new THREE.Box3();
+	root.traverse( ( object ) => {
+		if ( isEnclosureCaptureSourceMesh( object ) === false ) return;
+		if ( object.geometry.boundingBox === null ) object.geometry.computeBoundingBox();
+		if ( object.geometry.boundingBox === null ) return;
+		relative.multiplyMatrices( inverseRoot, object.matrixWorld );
+		geometryBounds.copy( object.geometry.boundingBox ).applyMatrix4( relative );
+		bounds.union( geometryBounds );
+	} );
+	return bounds;
+
+}
+
+function isEnclosureCaptureSourceMesh(object: THREE.Object3D): object is THREE.Mesh {
+
+	return object instanceof THREE.Mesh
+		&& object.visible !== false
+		&& object.userData.__nonSelectableHelper !== true
+		&& object.userData.__visualizationHelper !== true
+		&& object.userData.__enclosureShell !== true
+		&& object.userData.__excludeFromEnclosureCapture !== true;
+
+}
+
+function countEnclosureCaptureSourceMeshes(root: THREE.Object3D): number {
+
+	let count = 0;
+	root.traverse( ( object ) => { if ( isEnclosureCaptureSourceMesh( object ) ) count += 1; } );
+	return count;
 
 }
 
@@ -251,22 +389,9 @@ function faceTriangleCount(points: THREE.Vector3[]): number {
 function hasConnectedBoundaryCorners(faces: EnclosureFaceDefinition[], bounds: THREE.Box3): boolean {
 
 	const counts = new Map<string, number>();
-	faces.flatMap( ( face ) => face.points ).forEach( ( point ) => {
-		const key = point.toArray().join( ',' );
-		counts.set( key, ( counts.get( key ) ?? 0 ) + 1 );
-	} );
+	faces.flatMap( ( face ) => face.points ).forEach( ( point ) => { const key = point.toArray().join( ',' ); counts.set( key, ( counts.get( key ) ?? 0 ) + 1 ); } );
 	for ( const x of [ bounds.min.x, bounds.max.x ] ) for ( const y of [ bounds.min.y, bounds.max.y ] ) for ( const z of [ bounds.min.z, bounds.max.z ] ) if ( ( counts.get( [ x, y, z ].join( ',' ) ) ?? 0 ) !== ( y === bounds.min.y ? 3 : 2 ) ) return false;
 	return true;
-
-}
-
-function countRenderableMeshes(root: THREE.Object3D): number {
-
-	let count = 0;
-	root.traverse( ( object ) => {
-		if ( object instanceof THREE.Mesh && object.userData.__nonSelectableHelper !== true && object.userData.__excludeFromLayerIndex !== true && object.userData.__visualizationHelper !== true && object.userData.__enclosureShell !== true ) count += 1;
-	} );
-	return count;
 
 }
 
@@ -278,5 +403,11 @@ function makeFaceGeometry(points: THREE.Vector3[], uvs: number[]): THREE.BufferG
 	geometry.setAttribute( 'uv', new THREE.Float32BufferAttribute( uvs, 2 ) );
 	geometry.computeVertexNormals();
 	return geometry;
+
+}
+
+function normalizeMaterialSide(material: THREE.Material | THREE.Material[]): THREE.Side | null {
+
+	return ( Array.isArray( material ) ? material[ 0 ] : material )?.side ?? null;
 
 }

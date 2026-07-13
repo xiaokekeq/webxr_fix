@@ -13,7 +13,6 @@ interface EnclosureRebuildOptions {
 	model: THREE.Object3D;
 	modelRevision?: number;
 	renderer: EnclosureOffscreenRenderer;
-	lightingScene?: THREE.Scene;
 }
 
 export class TexturedEnclosureShell {
@@ -22,6 +21,7 @@ export class TexturedEnclosureShell {
 	private renderTargets: THREE.WebGLRenderTarget[] = [];
 	private sourceModelUuid: string | null = null;
 	private sourceRevision = - 1;
+	private lastMode: 'complete' | 'layer-peeling' | 'section-cut' | null = null;
 
 	rebuildForModel(options: EnclosureRebuildOptions): EnclosureRebuildOutcome {
 
@@ -46,11 +46,15 @@ export class TexturedEnclosureShell {
 
 	sync(root: THREE.Object3D | null, mode: 'complete' | 'layer-peeling' | 'section-cut'): void {
 
+		let rootVisible = false;
 		root?.traverse( ( object ) => {
 			if ( object instanceof THREE.Group && object.userData.__enclosureShell === true ) {
-				object.visible = mode === 'layer-peeling';
+				object.visible = mode === 'layer-peeling' || mode === 'section-cut';
+				rootVisible = object.visible;
 			}
 		} );
+		if ( import.meta.env.DEV && this.lastMode !== mode ) console.info( '[EnclosureShellMode]', { mode, rootVisible } );
+		this.lastMode = mode;
 
 	}
 
@@ -74,6 +78,7 @@ export class TexturedEnclosureShell {
 		this.root = null;
 		this.sourceModelUuid = null;
 		this.sourceRevision = - 1;
+		this.lastMode = null;
 
 	}
 
