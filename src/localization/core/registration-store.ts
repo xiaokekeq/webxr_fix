@@ -238,6 +238,10 @@ export interface ModelPlacementDebugState {
 	placementAnchorMatrixWorldElements?: number[];
 	arFromEnuMatrixElements?: number[];
 	engineeringPlacementCallCount?: number;
+	modelPlacementAttemptCount?: number;
+	modelPlacementSuccessCount?: number;
+	lastModelPlacementReason?: string;
+	lastAppliedMarkerSolutionId?: string;
 	lastPlacementReason?: string;
 	lastPlacementTimestamp?: number;
 	replacedModelCount?: number;

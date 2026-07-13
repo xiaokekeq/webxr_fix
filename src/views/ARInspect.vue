@@ -864,7 +864,11 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	const result = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
 	arInfo( 'MarkerCalibrationApplyResult', {
 		result,
-		message: result.ok ? 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。' : `Marker 校正未应用：${result.reason}`,
+		message: result.ok
+			? result.placementState === 'marker-applied-model-runtime-pending'
+				? 'Marker 校正成功，正在等待模型资源。'
+				: 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。'
+			: `Marker 校正未应用：${result.reason}`,
 		runtimeStatus: engine.value.runtimeStatus,
 		markerCalibration: engine.value.markerCalibration,
 		createdAt: Date.now()
@@ -886,7 +890,9 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 	}
 	markerApplyFeedback.value = {
 		type: 'success',
-		message: 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。',
+		message: result.placementState === 'marker-applied-model-runtime-pending'
+			? 'Marker 校正成功，正在等待模型资源。'
+			: 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。',
 		createdAt: Date.now()
 	};
 	markerCalibrationOverlayOpen.value = engine.value.markerCalibration.active;

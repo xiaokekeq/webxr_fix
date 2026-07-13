@@ -41,7 +41,14 @@ export interface MarkerSolutionApplyDiagnostics {
 }
 
 export type MarkerSolutionApplyResult =
-	| { ok: true; sessionId: string; markerId: string; appliedSource: 'marker'; diagnostics: MarkerSolutionApplyDiagnostics; }
+	| {
+		ok: true;
+		sessionId: string;
+		markerId: string;
+		appliedSource: 'marker';
+		placementState: 'ready' | 'marker-applied-model-runtime-pending';
+		diagnostics: MarkerSolutionApplyDiagnostics;
+	}
 	| { ok: false; stage: MarkerSolutionApplyStage; reason: string; diagnostics: MarkerSolutionApplyDiagnostics; };
 
 /** A dependency-free contract check callable from a browser console or dev runtime. */
@@ -53,15 +60,24 @@ export function runMarkerSolutionApplyResultSelfCheck(): void {
 		sessionId: 'session-a',
 		markerId: 'marker-a',
 		appliedSource: 'marker',
+		placementState: 'ready',
 		diagnostics
 	};
 	const failure: MarkerSolutionApplyResult = {
 		ok: false,
 		stage: 'context-validation',
 		reason: 'session-context-missing',
-		diagnostics
+		 diagnostics
 	};
-	if ( success.sessionId !== 'session-a' || failure.reason !== 'session-context-missing' ) {
+	const pending: MarkerSolutionApplyResult = {
+		...success,
+		placementState: 'marker-applied-model-runtime-pending'
+	};
+	if (
+		success.sessionId !== 'session-a'
+		|| pending.placementState !== 'marker-applied-model-runtime-pending'
+		|| failure.reason !== 'session-context-missing'
+	) {
 		throw new Error( 'MarkerSolutionApplyResult contract self-check failed.' );
 	}
 

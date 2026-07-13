@@ -722,7 +722,7 @@ export class MarkerCalibrationRuntime {
 		const demoModelConfig = this.options.getDemoModelConfig();
 		if ( demoModelConfig === null ) {
 			this.options.setStatus( '模型配置尚未准备完成，无法执行 Marker 校正。' );
-			return this.failSolveOrApply( 'solution-validation', 'model-runtime-not-ready' );
+			return this.failSolveOrApply( 'solution-validation', 'model-config-loading' );
 		}
 
 		const currentSessionId = this.options.getCurrentSessionId();

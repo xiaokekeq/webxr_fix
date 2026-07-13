@@ -341,6 +341,9 @@ export class ThreeEngine {
 	private groundAwareArAuditLogged = false;
 	private placementDebugLastWorldLockUpdateAt = 0;
 	private engineeringPlacementCallCount = 0;
+	private modelPlacementAttemptCount = 0;
+	private modelPlacementSuccessCount = 0;
+	private lastAppliedMarkerSolutionId: string | null = null;
 	private replacedModelCount = 0;
 	private lastPlacementReason = '-';
 	private lastPlacementTimestamp = 0;
@@ -437,7 +440,7 @@ export class ThreeEngine {
 			getWorkflowMode: () => this.workflowMode,
 			getInspectionPlacementSource: () => this.store.getState().inspectionPlacementSource,
 			getCurrentSessionId: () => this.currentArSessionId,
-			getSiteId: () => this.demoModelConfig?.modelId ?? null,
+			getSiteId: () => this.demoModelConfig?.modelId ?? this.currentArSessionContext?.siteId ?? null,
 			getControlTargets: () => this.getCurrentControlTargets(),
 			getPrimaryTargetId: () => this.getCurrentControlTargets()[ 0 ]?.id ?? null,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
@@ -465,7 +468,7 @@ export class ThreeEngine {
 			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
 			getHitPosition: ( target ) => this.xrRuntime.getHitTestController().getHitPosition( target ),
-			getDemoModelConfig: () => this.demoModelConfig,
+			getDemoModelConfig: () => this.demoModelConfig ?? this.currentArSessionContext?.siteConfig ?? null,
 			getPrimaryConfiguredMarkerPose: () => this.getPrimaryConfiguredMarkerPose(),
 			getControlTargets: () => this.getCurrentControlTargets(),
 			hasAppliedMarkerSolutionForCurrentSession: () => (
@@ -692,7 +695,7 @@ export class ThreeEngine {
 				this.syncRegistrationChainDebug();
 				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
 			},
-			onRuntimeBundleLoaded: ( bundle, modelLoadRequestId ) => {
+				onRuntimeBundleLoaded: ( bundle, modelLoadRequestId ) => {
 				this.pipesByName = bundle.pipesByName;
 				this.demoModelConfig = bundle.demoModelConfig;
 				this.modelTemplate = bundle.modelTemplate;
@@ -712,6 +715,7 @@ export class ThreeEngine {
 				this.markerCalibrationRuntime.syncState();
 				this.syncRegistrationChainDebug();
 				this.syncModelPlacementDebug( this.getActiveArFromEnuSolution() );
+				this.tryAutoPlaceAppliedMarkerSolution();
 			},
 			onLoadManualRegistration: () => {},
 			canRequestAutoPlacement: () => false,
@@ -1322,6 +1326,34 @@ export class ThreeEngine {
 		}
 
 		await this.placeModelFromCurrentMarkerSolution( guard );
+
+	}
+
+	private tryAutoPlaceAppliedMarkerSolution(): void {
+
+		const arFromEnuSolution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
+		if (
+			arFromEnuSolution === null
+			|| this.modelTemplate === null
+			|| this.registrationSolution === null
+			|| this.placementSession.getArPlacedModel() !== null
+		) {
+			return;
+		}
+
+		const solutionId = `${arFromEnuSolution.sessionId ?? 'none'}:${arFromEnuSolution.timestamp}`;
+		if ( this.lastAppliedMarkerSolutionId === solutionId ) {
+			return;
+		}
+
+		const guard = this.validateEngineeringPlacementPreconditions();
+		if ( guard.ok === false ) {
+			this.logEngineeringPlacementBlocked( guard.reason ?? 'model-registration-missing' );
+			return;
+		}
+
+		this.lastAppliedMarkerSolutionId = solutionId;
+		void this.placeModelFromCurrentMarkerSolution( guard, 'marker-applied-model-runtime-ready' );
 
 	}
 
@@ -3046,7 +3078,7 @@ export class ThreeEngine {
 		if ( diagnostics.activeSiteId !== diagnostics.solutionSiteId ) return reject( 'context-validation', 'active-site-changed' );
 		if ( diagnostics.activeModelId !== diagnostics.solutionModelId ) return reject( 'context-validation', 'active-model-changed' );
 		if ( diagnostics.activeMarkerId !== diagnostics.solutionMarkerId ) return reject( 'context-validation', 'marker-target-changed' );
-		if ( diagnostics.hasDemoModelConfig === false || diagnostics.hasModelTemplate === false || diagnostics.hasRegistrationSolution === false ) return reject( 'solution-validation', 'model-runtime-not-ready' );
+		if ( diagnostics.hasDemoModelConfig === false ) return reject( 'context-validation', 'session-context-missing' );
 		if ( diagnostics.solutionMatrixFinite === false || diagnostics.solutionMatrixInvertible === false ) return reject( 'solution-validation', diagnostics.solutionMatrixFinite ? 'solution-matrix-not-invertible' : 'solution-matrix-not-finite' );
 		if ( this.currentArSessionContext?.controlTargets?.some( ( target ) => target.id === metadata.markerId || target.markerId === metadata.markerId ) === false ) return reject( 'context-validation', 'marker-target-changed' );
 		const controlTargets = this.getCurrentControlTargets();
@@ -3057,8 +3089,11 @@ export class ThreeEngine {
 		const previousCoordinateSolution = this.arCoordinateService.getCurrentSolution();
 		try {
 			const applied = this.applyCurrentSessionMarkerSolutionBoolean( solution, metadata );
+			const placementState = this.modelTemplate !== null && this.registrationSolution !== null
+				? 'ready'
+				: 'marker-applied-model-runtime-pending';
 			this.lastMarkerSolutionApplyResult = applied
-				? { ok: true, sessionId: diagnostics.currentSessionId, markerId: metadata.markerId, appliedSource: 'marker', diagnostics: this.createMarkerSolutionApplyDiagnostics( solution, metadata ) }
+				? { ok: true, sessionId: diagnostics.currentSessionId, markerId: metadata.markerId, appliedSource: 'marker', placementState, diagnostics: this.createMarkerSolutionApplyDiagnostics( solution, metadata ) }
 				: { ok: false, stage: 'state-commit', reason: 'state-commit-failed', diagnostics: this.createMarkerSolutionApplyDiagnostics( solution, metadata ) };
 			return applied;
 		} catch ( error ) {
@@ -3077,7 +3112,8 @@ export class ThreeEngine {
 		const matrix = solution.matrix;
 		const determinant = matrix.determinant();
 		const context = this.currentArSessionContext;
-		const activeModelId = this.demoModelConfig?.modelId ?? null;
+		const activeConfig = this.demoModelConfig ?? context?.siteConfig ?? null;
+		const activeModelId = activeConfig?.modelId ?? null;
 		return {
 			currentSessionId: this.currentArSessionId,
 			solutionSessionId: solution.arFromEnuSolution.sessionId ?? null,
@@ -3085,7 +3121,7 @@ export class ThreeEngine {
 			contextSessionId: context?.sessionId ?? null,
 			isPresenting: this.sceneBundle.renderer.xr.isPresenting,
 			hasCurrentArSessionContext: context !== null,
-			hasDemoModelConfig: this.demoModelConfig !== null,
+			hasDemoModelConfig: activeConfig !== null,
 			hasModelTemplate: this.modelTemplate !== null,
 			hasRegistrationSolution: this.registrationSolution !== null,
 			hasArCoordinateServiceSolution: this.arCoordinateService.hasCalibration(),
@@ -3145,11 +3181,6 @@ export class ThreeEngine {
 				solutionSessionId: solution.arFromEnuSolution.sessionId ?? null
 			} );
 			this.setStatus( 'Marker 校正结果属于旧会话，不能应用到当前 AR Session。' );
-			return false;
-		}
-
-		if ( this.registrationSolution === null || this.modelTemplate === null ) {
-			this.setStatus( '模型工程配准尚未准备完成，暂时无法应用 Marker 校正。' );
 			return false;
 		}
 
@@ -3245,12 +3276,14 @@ export class ThreeEngine {
 		const modelVisibleBefore = placedModelBefore?.visible === true;
 		const placeModel = metadata.placeModel === true;
 		this.placementSession.cancelAutoPlacement();
-		this.renderEngineeringCornerDebug(
-			solution.arFromEnuSolution,
-			currentTarget ?? null,
-			metadata.capturedCornersAr ?? [],
-			'marker-calibration'
-		);
+		if ( this.registrationSolution !== null ) {
+			this.renderEngineeringCornerDebug(
+				solution.arFromEnuSolution,
+				currentTarget ?? null,
+				metadata.capturedCornersAr ?? [],
+				'marker-calibration'
+			);
+		}
 		const appliedToPlacedModel = false;
 		const autoPlacementPendingAfter = this.placementSession.getAutoPlacementPending();
 		const placedModelAfter = this.placementSession.getPlacedModel();
@@ -3339,7 +3372,9 @@ export class ThreeEngine {
 		} );
 		this.logRegistrationFinal();
 		this.setStatus(
-			'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。'
+			this.modelTemplate === null || this.registrationSolution === null
+				? 'Marker 校正成功，正在等待模型资源。'
+				: 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。'
 		);
 		this.emit();
 		return true;
@@ -3359,7 +3394,10 @@ export class ThreeEngine {
 
 	}
 
-	private async placeModelFromCurrentMarkerSolution(guard: EngineeringPlacementGuardResult): Promise<void> {
+	private async placeModelFromCurrentMarkerSolution(
+		guard: EngineeringPlacementGuardResult,
+		reason = 'engineering-place-button'
+	): Promise<void> {
 
 		const arFromEnuSolution = guard.arFromEnuSolution ?? this.getActiveMarkerArFromEnuSolutionForCurrentSession();
 		if ( arFromEnuSolution === null ) {
@@ -3369,14 +3407,16 @@ export class ThreeEngine {
 
 		const hadPlacedModel = this.placementSession.getPlacedModel() !== null;
 		this.engineeringPlacementCallCount += 1;
+		this.modelPlacementAttemptCount += 1;
 		this.replacedModelCount += hadPlacedModel ? 1 : 0;
-		this.lastPlacementReason = 'engineering-place-button';
+		this.lastPlacementReason = reason;
 		this.lastPlacementTimestamp = Date.now();
 		await this.placementWorkflow.placeLocalizedModel();
 		if ( this.placementSession.getPlacedModel() === null ) {
 			this.syncModelPlacementDebug( arFromEnuSolution );
 			return;
 		}
+		this.modelPlacementSuccessCount += 1;
 
 		this.resetModelPlacementWorldLockBaseline();
 		this.logModelHierarchyCoordinateSpaceCheck();
@@ -3457,6 +3497,10 @@ export class ThreeEngine {
 			updatedAt: Date.now(),
 			diagnosticSampleCount: this.diagnosticSampleCount,
 			engineeringPlacementCallCount: this.engineeringPlacementCallCount,
+			modelPlacementAttemptCount: this.modelPlacementAttemptCount,
+			modelPlacementSuccessCount: this.modelPlacementSuccessCount,
+			lastModelPlacementReason: this.lastPlacementReason,
+			lastAppliedMarkerSolutionId: this.lastAppliedMarkerSolutionId ?? undefined,
 			lastPlacementReason: this.lastPlacementReason,
 			lastPlacementTimestamp: this.lastPlacementTimestamp || undefined,
 			replacedModelCount: this.replacedModelCount,
