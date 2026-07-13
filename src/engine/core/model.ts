@@ -194,11 +194,12 @@ async function loadObjModelTemplate(
 		loader.setPath( basePath );
 
 		return await new Promise<THREE.Group>( ( resolve, reject ) => {
-			loader.load(
-				fileName,
-				( object ) => {
-					normalizeObjModelStructure( object );
-					const { template, report } = createPlaceableTemplate( object, perModelScaleFactor, assetTransform );
+		loader.load(
+			fileName,
+			async ( object ) => {
+				normalizeObjModelStructure( object );
+				await waitForModelTextures( object );
+				const { template, report } = createPlaceableTemplate( object, perModelScaleFactor, assetTransform );
 					attachModelSourceMetadata( template, extractModelSourceMetadata( object, 'obj' ) );
 					logPlaceableTemplateReport( report );
 
@@ -679,6 +680,44 @@ const TEXTURE_PROPERTY_KEYS = [
 	'roughnessMap',
 	'specularMap'
 ] as const;
+
+async function waitForModelTextures(root: THREE.Object3D): Promise<void> {
+
+	const images = new Set<LoadableImage>();
+	root.traverse( ( object ) => {
+		if ( object instanceof THREE.Mesh === false ) return;
+		const materials = Array.isArray( object.material ) ? object.material : [ object.material ];
+		for ( const material of materials ) for ( const key of TEXTURE_PROPERTY_KEYS ) {
+			const texture = ( material as THREE.Material & Record<string, unknown> )[ key ];
+			if ( texture instanceof THREE.Texture && isLoadableImage( texture.image ) ) images.add( texture.image );
+		}
+	} );
+	await Promise.all( [ ...images ].map( waitForImage ) );
+
+}
+
+interface LoadableImage {
+	complete: boolean;
+	addEventListener(type: 'load' | 'error', listener: () => void, options: { once: true }): void;
+}
+
+function isLoadableImage(value: unknown): value is LoadableImage {
+
+	return typeof value === 'object' && value !== null
+		&& 'complete' in value && typeof value.complete === 'boolean'
+		&& 'addEventListener' in value && typeof value.addEventListener === 'function';
+
+}
+
+function waitForImage(image: LoadableImage): Promise<void> {
+
+	if ( image.complete ) return Promise.resolve();
+	return new Promise( ( resolve ) => {
+		image.addEventListener( 'load', resolve, { once: true } );
+		image.addEventListener( 'error', resolve, { once: true } );
+	} );
+
+}
 
 export function placeModelAt(
 	modelTemplate: THREE.Group,

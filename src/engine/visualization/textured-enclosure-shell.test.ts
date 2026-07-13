@@ -14,8 +14,10 @@ describe( 'TexturedEnclosureShell', () => {
 		expect( result.ok ).toBe( true );
 
 		const placedModel = model.clone( true );
-		shell.sync( placedModel, 'section-cut' );
+		shell.sync( placedModel, 'layer-peeling' );
 		expect( placedModel.getObjectByName( '__textured-enclosure-shell' )?.visible ).toBe( true );
+		shell.sync( placedModel, 'section-cut' );
+		expect( placedModel.getObjectByName( '__textured-enclosure-shell' )?.visible ).toBe( false );
 		shell.sync( placedModel, 'complete' );
 		expect( placedModel.getObjectByName( '__textured-enclosure-shell' )?.visible ).toBe( false );
 		const materials = new MaterialStateRuntime();

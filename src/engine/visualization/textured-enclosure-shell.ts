@@ -48,7 +48,7 @@ export class TexturedEnclosureShell {
 
 		root?.traverse( ( object ) => {
 			if ( object instanceof THREE.Group && object.userData.__enclosureShell === true ) {
-				object.visible = mode !== 'complete';
+				object.visible = mode === 'layer-peeling';
 			}
 		} );
 
