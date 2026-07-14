@@ -35,6 +35,7 @@ export class VisualizationStateRuntime {
 	private lastSectionMode: SectionCutPlaneMode | undefined;
 	private previousLayerVisibilitySignature = '';
 	private sectionPlane: THREE.Plane | null = null;
+	private lastSectionPlaneSignature = '';
 
 	constructor(private readonly options: VisualizationStateRuntimeOptions) {}
 
@@ -49,6 +50,7 @@ export class VisualizationStateRuntime {
 		this.lastSectionMode = undefined;
 		this.previousLayerVisibilitySignature = '';
 		this.sectionPlane = null;
+		this.lastSectionPlaneSignature = '';
 
 	}
 
@@ -67,12 +69,20 @@ export class VisualizationStateRuntime {
 		if ( sectionDirty ) {
 			this.options.sectionCutController.restore();
 			this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
-			this.sectionPlane = sectionEnabled ? this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ) : null;
-			this.options.materialStateRuntime.applySection( this.sectionPlane );
 		}
+		this.sectionPlane = sectionEnabled ? this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ) : null;
+		const sectionPlaneSignature = getSectionPlaneSignature( this.sectionPlane );
+		const sectionPlaneDirty = sectionPlaneSignature !== this.lastSectionPlaneSignature;
+		if ( sectionDirty || sectionPlaneDirty ) this.options.materialStateRuntime.applySection( this.sectionPlane );
 		if ( materialDirty ) this.options.materialStateRuntime.applyMaterial( state.undergroundMaterialMode, state.transparentXrayValue );
 		this.options.enclosureShell.sync( undergroundRoot, state.undergroundInspectionTool );
-		this.options.sectionCapRuntime.sync( undergroundRoot, this.sectionPlane, sectionDirty, this.options.getActiveModelSourceUuid() );
+		this.options.sectionCapRuntime.sync( undergroundRoot, this.sectionPlane, {
+			geometryDirty: sectionDirty || sectionPlaneDirty,
+			materialDirty,
+			sourceModelUuid: this.options.getActiveModelSourceUuid(),
+			materialMode: state.undergroundMaterialMode,
+			opacity: state.transparentXrayValue
+		} );
 
 		this.lastRoot = undergroundRoot;
 		this.lastMaterialMode = state.undergroundMaterialMode;
@@ -80,6 +90,7 @@ export class VisualizationStateRuntime {
 		this.lastSectionEnabled = sectionEnabled;
 		this.lastSectionValue = state.sectionCutValue;
 		this.lastSectionMode = state.sectionCutPlaneMode;
+		this.lastSectionPlaneSignature = sectionPlaneSignature;
 
 	}
 
@@ -103,7 +114,12 @@ export class VisualizationStateRuntime {
 		} );
 		const changed = changedObjectCount > 0 || visibilitySignature !== this.previousLayerVisibilitySignature;
 		this.previousLayerVisibilitySignature = visibilitySignature;
-		if ( changed ) this.options.sectionCapRuntime.sync( root, this.sectionPlane, true, this.options.getActiveModelSourceUuid() );
+		if ( changed ) this.options.sectionCapRuntime.sync( root, this.sectionPlane, {
+			geometryDirty: true,
+			sourceModelUuid: this.options.getActiveModelSourceUuid(),
+			materialMode: state.undergroundMaterialMode,
+			opacity: state.transparentXrayValue
+		} );
 		const nextPatch = {
 			layerNames: modelLayers.length > 0
 				? modelLayers.map( ( layer ) => layer.label )
@@ -123,5 +139,12 @@ export class VisualizationStateRuntime {
 		this.options.sectionCapRuntime.hide();
 
 	}
+
+}
+
+function getSectionPlaneSignature(plane: THREE.Plane | null): string {
+
+	if ( plane === null ) return 'none';
+	return [ ...plane.normal.toArray().map( ( value ) => value.toFixed( 5 ) ), plane.constant.toFixed( 5 ) ].join( ':' );
 
 }

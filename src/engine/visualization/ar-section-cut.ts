@@ -3,6 +3,9 @@ import type { SectionCutPlaneMode } from '@/localization/core/registration-store
 
 export const SECTION_CUT_SEMANTICS = 'open-clipping' as const;
 
+// Three.js local clipping discards plane.distanceToPoint( point ) < 0, so the
+// plane normal always points at the retained half-space and away from the opening.
+
 export interface ArSectionCutController {
 	setPlaneMode(mode: SectionCutPlaneMode): void;
 	apply(modelRoot: THREE.Object3D | null, value: number): THREE.Plane | null;
