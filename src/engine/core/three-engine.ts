@@ -830,6 +830,7 @@ export class ThreeEngine {
 		this.demoModelConfig = bundle.demoModelConfig;
 		this.modelTemplate = bundle.modelTemplate;
 		this.registrationSolution = bundle.registrationSolution;
+		this.enclosureShell.prepareModel( bundle.modelTemplate, bundle.demoModelConfig.enclosureShell );
 		this.resolvedMarkerPosesInEnu = this.resolveConfiguredMarkerPoses( bundle.demoModelConfig );
 		this.logGroundAwareArAudit( bundle.demoModelConfig );
 		this.annotationLayer.setAnnotations(
@@ -851,27 +852,13 @@ export class ThreeEngine {
 	private initializeOptionalModelVisuals(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void {
 
 		try {
-			const result = this.enclosureShell.rebuildForModel( {
+			this.enclosureShell.rebuildForModel( {
 				model: bundle.modelTemplate,
-				modelRevision: modelLoadRequestId
+				modelRevision: modelLoadRequestId,
+				enclosureShell: bundle.demoModelConfig.enclosureShell
 			} );
-			if ( result.ok === false ) {
-				console.warn( '[EnclosureShellDisabled]', {
-					modelId: bundle.modelDefinition.id,
-					modelName: bundle.modelDefinition.name,
-					reason: result.reason,
-					message: result.message
-				} );
-				this.appendLog( '纹理包围壳构建失败，已自动关闭；模型配准和放置不受影响。' );
-			}
-		} catch ( error ) {
+		} catch {
 			this.enclosureShell.dispose();
-			console.warn( '[EnclosureShellDisabled]', {
-				modelId: bundle.modelDefinition.id,
-				modelName: bundle.modelDefinition.name,
-				error
-			} );
-			this.appendLog( '纹理包围壳构建失败，已自动关闭；模型配准和放置不受影响。' );
 		}
 
 	}

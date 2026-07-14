@@ -128,6 +128,15 @@ export interface UndergroundDisplayConfig {
 	showDepthGuideLines?: boolean;
 }
 
+export type EnclosureShellSource = 'disabled' | 'auto' | 'model-object';
+
+export interface EnclosureShellConfig {
+	source: EnclosureShellSource;
+	objectName?: string;
+}
+
+export const DEFAULT_ENCLOSURE_SHELL_SOURCE: EnclosureShellSource = 'disabled';
+
 export interface DemoModelConfig {
 	modelId: string;
 	siteId: string;
@@ -152,6 +161,7 @@ export interface DemoModelConfig {
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
 	undergroundDisplay?: UndergroundDisplayConfig;
+	enclosureShell: EnclosureShellConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
 	modelInstances: ModelInstanceConfig[];
@@ -205,6 +215,11 @@ interface LocalDebugControlPointShape {
 	siteENU: PointLike;
 }
 
+interface RawEnclosureShellConfig {
+	source?: unknown;
+	objectName?: unknown;
+}
+
 interface LocalDebugModelConfig {
 	siteId: string;
 	origin: LocalDebugOriginShape;
@@ -221,6 +236,7 @@ interface LocalDebugModelConfig {
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
 	undergroundDisplay?: UndergroundDisplayConfig;
+	enclosureShell?: RawEnclosureShellConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
 	modelInstances?: ModelInstanceConfig[];
@@ -232,7 +248,7 @@ interface LocalDebugModelConfig {
 	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'enclosureShell' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	modelControlPointOrder?: string[];
@@ -252,6 +268,7 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
 	undergroundDisplay?: UndergroundDisplayConfig;
+	enclosureShell?: RawEnclosureShellConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
 	modelInstances?: ModelInstanceConfig[];
@@ -399,6 +416,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
+		enclosureShell: normalizeEnclosureShellConfig( config.enclosureShell ),
 		groundClassification: normalizeGroundClassificationConfig( config.groundClassification ),
 		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay ),
 		modelInstances: normalizeModelInstances( config.modelInstances, config.modelId, config.undergroundDisplay, config.groundClassification, config.display ),
@@ -457,6 +475,7 @@ function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoMode
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
+		enclosureShell: normalizeEnclosureShellConfig( config.enclosureShell ),
 		groundClassification: normalizeGroundClassificationConfig( config.groundClassification ),
 		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay ),
 		modelInstances: normalizeModelInstances( config.modelInstances, config.siteId, config.undergroundDisplay, config.groundClassification, config.display ),
@@ -1298,6 +1317,17 @@ function normalizeUndergroundDisplayConfig(value: UndergroundDisplayConfig | und
 	}
 
 	return Object.keys( config ).length === 0 ? undefined : config;
+
+}
+
+function normalizeEnclosureShellConfig(value: RawEnclosureShellConfig | undefined): EnclosureShellConfig {
+
+	const source = value?.source === 'auto' || value?.source === 'model-object' || value?.source === 'disabled'
+		? value.source
+		: DEFAULT_ENCLOSURE_SHELL_SOURCE;
+	const objectName = typeof value?.objectName === 'string' ? value.objectName.trim() : '';
+
+	return objectName.length > 0 ? { source, objectName } : { source };
 
 }
 
