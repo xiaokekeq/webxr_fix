@@ -92,12 +92,11 @@ describe( 'TexturedEnclosureShell', () => {
 		}
 
 		shell.sync( model, 'complete' );
-		expect( enclosure.visible ).toBe( false );
+		expect( enclosure.visible ).toBe( true );
 		shell.sync( model, 'layer-peeling' );
 		expect( enclosure.visible ).toBe( true );
 		shell.sync( model, 'section-cut' );
-		expect( enclosure.visible ).toBe( false );
-		enclosure.visible = true;
+		expect( enclosure.visible ).toBe( true );
 		const caps = new SectionCapRuntime();
 		caps.sync( model, new THREE.Plane( new THREE.Vector3( 0, 1, 0 ), 0 ) );
 		expect( caps.getDebug().sectionCapExists ).toBe( false );

@@ -45,8 +45,7 @@ export class TexturedEnclosureShell {
 		this.dispose();
 		if ( config.source === 'disabled' ) return;
 
-		const result = resolveExplicitEnclosureShell( model, config.objectName );
-		if ( result.ok ) result.object.visible = false;
+		resolveExplicitEnclosureShell( model, config.objectName );
 
 	}
 
@@ -73,7 +72,6 @@ export class TexturedEnclosureShell {
 			const result = resolveExplicitEnclosureShell( options.model, config.objectName );
 			if ( result.ok === false ) return result;
 
-			result.object.visible = false;
 			this.rememberSource( options.model, sourceRevision, sourceSignature );
 			return { ok: true, rebuilt: false, source: config.source };
 		}
@@ -94,8 +92,7 @@ export class TexturedEnclosureShell {
 
 		root?.traverse( ( object ) => {
 			if ( object.userData.__enclosureShell !== true || object.parent?.userData.__enclosureShell === true ) return;
-			object.visible = mode === 'layer-peeling'
-				|| mode === 'section-cut' && object.userData.__enclosureShellShowInSectionCut === true;
+			object.visible = object.userData.__enclosureShellShowInSectionCut !== true || mode !== 'complete';
 		} );
 
 	}
