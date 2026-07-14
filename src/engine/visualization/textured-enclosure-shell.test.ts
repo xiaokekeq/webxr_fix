@@ -34,4 +34,59 @@ describe( 'TexturedEnclosureShell', () => {
 
 	} );
 
+	it( 'keeps layer-peeling and section-cut shells free of internal horizontal faces', () => {
+
+		const model = new THREE.Group();
+		model.add( new THREE.Mesh( createLayeredBaseGeometry(), new THREE.MeshBasicMaterial() ) );
+		const upperLayer = new THREE.Mesh( createTriangleGeometry( [ 0, 2, 0, 0, 2, 1, 1, 2, 0 ] ), new THREE.MeshBasicMaterial() );
+		upperLayer.name = 'upper-layer';
+		model.add( upperLayer );
+		const shell = new TexturedEnclosureShell();
+
+		expect( shell.rebuildForModel( { model } ).ok ).toBe( true );
+		const placedModel = model.clone( true );
+		const placedUpperLayer = placedModel.getObjectByName( 'upper-layer' );
+		placedUpperLayer!.visible = false;
+		shell.sync( placedModel, 'layer-peeling' );
+		const shellRoot = placedModel.getObjectByName( '__model-conforming-shell' )!;
+		const surface = placedModel.getObjectByName( '__model-conforming-shell-surface' ) as THREE.Mesh;
+
+		expect( placedUpperLayer!.visible ).toBe( false );
+		expect( shellRoot.visible ).toBe( true );
+		expect( hasHorizontalTriangleAtY( surface.geometry, 1 ) ).toBe( false );
+		shell.sync( placedModel, 'section-cut' );
+		expect( shellRoot.visible ).toBe( true );
+		expect( hasHorizontalTriangleAtY( surface.geometry, 1 ) ).toBe( false );
+		shell.dispose();
+
+	} );
+
 } );
+
+function createLayeredBaseGeometry(): THREE.BufferGeometry {
+
+	return createTriangleGeometry( [
+		0, 0, 0, 1, 0, 0, 0, 0, 1,
+		0, 1, 0, 1, 1, 0, 0, 1, 1,
+		2, 0, 0, 2, 1, 0, 2, 0, 1
+	] );
+
+}
+
+function createTriangleGeometry(positions: number[]): THREE.BufferGeometry {
+
+	const geometry = new THREE.BufferGeometry();
+	geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( positions, 3 ) );
+	return geometry;
+
+}
+
+function hasHorizontalTriangleAtY(geometry: THREE.BufferGeometry, y: number): boolean {
+
+	const position = geometry.getAttribute( 'position' );
+	for ( let index = 0; index < position.count; index += 3 ) {
+		if ( [ position.getY( index ), position.getY( index + 1 ), position.getY( index + 2 ) ].every( ( value ) => Math.abs( value - y ) < 1e-5 ) ) return true;
+	}
+	return false;
+
+}

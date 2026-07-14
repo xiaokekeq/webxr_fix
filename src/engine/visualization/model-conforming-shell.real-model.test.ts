@@ -55,10 +55,9 @@ describe( 'dz1207 conforming shell coverage', () => {
 			expect( coverage.front ).toBeGreaterThan( 0 );
 			expect( coverage.back ).toBeGreaterThan( 0 );
 			expect( coverage.bottom ).toBeGreaterThan( 0 );
-			expect( resolved.surface.excludedTopTriangleCount ).toBeGreaterThan( 0 );
 			expect( countUnblockedTopTriangles( position, sourceTriangles, resolved.bounds ) ).toBe( 0 );
-			expect( resolved.surface.sourceTriangleCount ).toBe( sourceTriangles.length );
-			expect( resolved.surface.sourceTriangleCount ).toBe( resolved.surface.excludedTopTriangleCount + resolved.surface.triangleCount );
+			expect( countInteriorHorizontalTriangles( position, resolved.bounds ) ).toBe( 0 );
+			expect( resolved.surface.triangleCount ).toBeLessThan( sourceTriangles.length );
 		}
 
 	} );
@@ -100,6 +99,24 @@ function countUnblockedTopTriangles(position: THREE.BufferAttribute | THREE.Inte
 		const ray = new THREE.Ray( origin, new THREE.Vector3( 0, 1, 0 ) );
 		const hit = new THREE.Vector3();
 		if ( sourceTriangles.some( ( other ) => ray.intersectTriangle( other[ 0 ], other[ 1 ], other[ 2 ], false, hit ) !== null && hit.distanceTo( origin ) > epsilon && hit.distanceTo( origin ) <= size.y + epsilon ) === false ) count += 1;
+	}
+	return count;
+
+}
+
+function countInteriorHorizontalTriangles(position: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, bounds: THREE.Box3): number {
+
+	const size = bounds.getSize( new THREE.Vector3() );
+	const bottomTolerance = Math.max( size.y * 1e-4, 1e-5 );
+	const boundaryTolerance = Math.max( Math.max( size.x, size.z ) * 0.01, 1e-4 );
+	let count = 0;
+	for ( let index = 0; index < position.count; index += 3 ) {
+		const triangle = [ new THREE.Vector3().fromBufferAttribute( position, index ), new THREE.Vector3().fromBufferAttribute( position, index + 1 ), new THREE.Vector3().fromBufferAttribute( position, index + 2 ) ] as Triangle;
+		if ( Math.max( triangle[ 0 ].y, triangle[ 1 ].y, triangle[ 2 ].y ) <= bounds.min.y + bottomTolerance ) continue;
+		const normal = new THREE.Vector3().crossVectors( triangle[ 1 ].clone().sub( triangle[ 0 ] ), triangle[ 2 ].clone().sub( triangle[ 0 ] ) ).normalize();
+		const horizontalMagnitude = Math.hypot( normal.x, normal.z );
+		const nearBoundary = triangle.some( ( point ) => Math.abs( point.x - bounds.min.x ) <= boundaryTolerance || Math.abs( point.x - bounds.max.x ) <= boundaryTolerance || Math.abs( point.z - bounds.min.z ) <= boundaryTolerance || Math.abs( point.z - bounds.max.z ) <= boundaryTolerance );
+		if ( Math.abs( normal.y ) > horizontalMagnitude && nearBoundary === false ) count += 1;
 	}
 	return count;
 

@@ -21,8 +21,6 @@ describe( 'model conforming shell', () => {
 		expect( resolved.ok ).toBe( true );
 		if ( resolved.ok ) {
 			expect( resolved.surface.triangleCount ).toBe( 10 );
-			expect( resolved.surface.sourceTriangleCount ).toBe( 12 );
-			expect( resolved.surface.excludedTopTriangleCount ).toBe( 2 );
 			expect( resolved.surface.geometry.getAttribute( 'uv' ).count ).toBe( 30 );
 			expect( resolved.surface.geometry.getAttribute( 'color' ).count ).toBe( 30 );
 			expect( resolved.surface.geometry.groups ).toHaveLength( 2 );
@@ -43,7 +41,7 @@ describe( 'model conforming shell', () => {
 		const resolved = resolveTriangles( [ ...VERTICAL_SIDE, 0, 1, 0, 1, 1, 0, 0, 1, 1 ] );
 
 		expect( resolved.ok ).toBe( true );
-		if ( resolved.ok ) expect( resolved.surface ).toMatchObject( { sourceTriangleCount: 2, excludedTopTriangleCount: 1, triangleCount: 1 } );
+		if ( resolved.ok ) expect( resolved.surface.triangleCount ).toBe( 1 );
 
 	} );
 
@@ -52,16 +50,16 @@ describe( 'model conforming shell', () => {
 		const resolved = resolveTriangles( [ ...VERTICAL_SIDE, 0, 1, 0, 1, 2, 0, 0, 1, 1 ] );
 
 		expect( resolved.ok ).toBe( true );
-		if ( resolved.ok ) expect( resolved.surface ).toMatchObject( { sourceTriangleCount: 2, excludedTopTriangleCount: 1, triangleCount: 1 } );
+		if ( resolved.ok ) expect( resolved.surface.triangleCount ).toBe( 1 );
 
 	} );
 
 	it( 'removes a top triangle with reversed winding', () => {
 
-		const resolved = resolveTriangles( [ ...VERTICAL_SIDE, 0, 1, 0, 0, 1, 1, 1, 1, 0 ] );
+		const resolved = resolveTriangles( [ ...VERTICAL_SIDE, 0, 1, 0, 0, 1, 1, 1, 2, 0 ] );
 
 		expect( resolved.ok ).toBe( true );
-		if ( resolved.ok ) expect( resolved.surface ).toMatchObject( { sourceTriangleCount: 2, excludedTopTriangleCount: 1, triangleCount: 1 } );
+		if ( resolved.ok ) expect( resolved.surface.triangleCount ).toBe( 1 );
 
 	} );
 
@@ -70,7 +68,19 @@ describe( 'model conforming shell', () => {
 		const resolved = resolveTriangles( VERTICAL_SIDE, [ 0, 1, 0, 0, 1, 0, 0, 1, 0 ] );
 
 		expect( resolved.ok ).toBe( true );
-		if ( resolved.ok ) expect( resolved.surface ).toMatchObject( { excludedTopTriangleCount: 0, triangleCount: 1 } );
+		if ( resolved.ok ) expect( resolved.surface.triangleCount ).toBe( 1 );
+
+	} );
+
+	it( 'keeps a sloped lateral boundary surface', () => {
+
+		const resolved = resolveTriangles( [
+			1, 0, 0, 1, 1, 2, 0, 0, 1,
+			0, 2, 0, 0, 2, 3, 2, 2, 0
+		] );
+
+		expect( resolved.ok ).toBe( true );
+		if ( resolved.ok ) expect( resolved.surface.triangleCount ).toBe( 1 );
 
 	} );
 
@@ -79,11 +89,11 @@ describe( 'model conforming shell', () => {
 		const resolved = resolveTriangles( [ 0, 0, 0, 0.1, 1, 0, 1, 0, 1 ] );
 
 		expect( resolved.ok ).toBe( true );
-		if ( resolved.ok ) expect( resolved.surface ).toMatchObject( { excludedTopTriangleCount: 0, triangleCount: 1 } );
+		if ( resolved.ok ) expect( resolved.surface.triangleCount ).toBe( 1 );
 
 	} );
 
-	it( 'keeps a bottom triangle when model geometry lies above it', () => {
+	it( 'keeps only the global lowest bottom triangle', () => {
 
 		const resolved = resolveTriangles( [
 			0, 0, 0, 1, 0, 0, 0, 0, 1,
@@ -91,11 +101,14 @@ describe( 'model conforming shell', () => {
 		] );
 
 		expect( resolved.ok ).toBe( true );
-		if ( resolved.ok ) expect( resolved.surface ).toMatchObject( { sourceTriangleCount: 2, excludedTopTriangleCount: 1, triangleCount: 1 } );
+		if ( resolved.ok ) {
+			expect( resolved.surface.triangleCount ).toBe( 1 );
+			expect( hasHorizontalTriangleAtY( resolved.surface.geometry, 0 ) ).toBe( true );
+		}
 
 	} );
 
-	it( 'keeps an internal horizontal layer when another layer lies above it', () => {
+	it( 'excludes an internal horizontal layer when another layer lies above it', () => {
 
 		const resolved = resolveTriangles( [
 			0, 0, 0, 1, 0, 0, 0, 0, 1,
@@ -104,7 +117,28 @@ describe( 'model conforming shell', () => {
 		] );
 
 		expect( resolved.ok ).toBe( true );
-		if ( resolved.ok ) expect( resolved.surface ).toMatchObject( { sourceTriangleCount: 3, excludedTopTriangleCount: 1, triangleCount: 2 } );
+		if ( resolved.ok ) {
+			expect( resolved.surface.triangleCount ).toBe( 1 );
+			expect( hasHorizontalTriangleAtY( resolved.surface.geometry, 0 ) ).toBe( true );
+			expect( hasHorizontalTriangleAtY( resolved.surface.geometry, 1 ) ).toBe( false );
+		}
+
+	} );
+
+	it( 'excludes a middle-layer bottom surface', () => {
+
+		const resolved = resolveTriangles( [
+			0, 0, 0, 1, 0, 0, 0, 0, 1,
+			0, 1, 0, 0, 1, 1, 1, 1, 0,
+			0, 2, 0, 0, 2, 1, 1, 2, 0
+		] );
+
+		expect( resolved.ok ).toBe( true );
+		if ( resolved.ok ) {
+			expect( resolved.surface.triangleCount ).toBe( 1 );
+			expect( hasHorizontalTriangleAtY( resolved.surface.geometry, 0 ) ).toBe( true );
+			expect( hasHorizontalTriangleAtY( resolved.surface.geometry, 1 ) ).toBe( false );
+		}
 
 	} );
 
@@ -197,5 +231,15 @@ function resolveTriangles(positions: number[], normals?: number[]): ReturnType<t
 	geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( positions, 3 ) );
 	if ( normals !== undefined ) geometry.setAttribute( 'normal', new THREE.Float32BufferAttribute( normals, 3 ) );
 	return resolveModelConformingSurface( new THREE.Mesh( geometry, new THREE.MeshBasicMaterial() ) );
+
+}
+
+function hasHorizontalTriangleAtY(geometry: THREE.BufferGeometry, y: number): boolean {
+
+	const position = geometry.getAttribute( 'position' );
+	for ( let index = 0; index < position.count; index += 3 ) {
+		if ( [ position.getY( index ), position.getY( index + 1 ), position.getY( index + 2 ) ].every( ( value ) => Math.abs( value - y ) < 1e-5 ) ) return true;
+	}
+	return false;
 
 }
