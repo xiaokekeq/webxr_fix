@@ -1358,7 +1358,10 @@ export class ThreeEngine {
 		placedModel?.updateMatrixWorld( true );
 		const model = placedModel === null || this.registrationSolution === null
 			? []
-			: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => ( { position: placedModel.localToWorld( point.modelLocal.clone() ), label: `模型-${point.id}` } ) );
+			: [
+				...this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => ( { position: placedModel.localToWorld( point.modelLocal.clone() ), label: `模型-${point.id}` } ) ),
+				{ position: placedModel.localToWorld( new THREE.Vector3() ), label: '模型原点' }
+			];
 		this.localizationDebugLayer.sync( {
 			marker: solution === null || target === null ? [] : [ { position: new THREE.Vector3( ...target.centerEnu ).applyMatrix4( solution.matrix ), label: 'Marker' } ],
 			rtk,
@@ -1925,7 +1928,7 @@ export class ThreeEngine {
 		this.placementSession.cancelAutoPlacement();
 		this.syncRegistrationChainDebug();
 		this.syncLocalizationDebug();
-		this.tryAutoPlaceAppliedMarkerSolution();
+		queueMicrotask( () => this.tryAutoPlaceAppliedMarkerSolution() );
 		this.setStatus(
 			this.modelTemplate === null || this.registrationSolution === null
 				? 'Marker 校正成功，正在等待模型资源。'
