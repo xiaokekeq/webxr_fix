@@ -76,7 +76,6 @@ export function isConformingSurfaceSourceMesh(object: THREE.Object3D): object is
 		&& object.userData.__enclosureShell !== true
 		&& object.userData.__modelConformingShell !== true
 		&& object.userData.__excludeFromBoundarySurface !== true
-		&& object.userData.__sectionCap !== true
 		&& object.userData.__annotationItem === undefined
 		&& name.includes( 'marker' ) === false
 		&& name.includes( 'annotation' ) === false

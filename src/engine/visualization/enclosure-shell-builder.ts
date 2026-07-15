@@ -75,6 +75,5 @@ function applyShellFlags(object: THREE.Object3D): void {
 	object.userData.__enclosureShell = true;
 	object.userData.__excludeFromLayerIndex = true;
 	object.userData.__excludeFromPicking = true;
-	object.userData.__excludeFromSectionCap = true;
 
 }

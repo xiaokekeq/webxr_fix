@@ -73,7 +73,6 @@ import { createArSectionCutController } from '@/engine/visualization/ar-section-
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosure-shell.js';
-import { SectionCapRuntime } from '@/engine/visualization/section-cap-runtime.js';
 import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
 import {
 	createArAnnotationLabelController,
@@ -248,7 +247,6 @@ export class ThreeEngine {
 	private readonly localizationDebugLayer = new LocalizationDebugLayer();
 	private readonly materialStateRuntime = new MaterialStateRuntime();
 	private readonly enclosureShell = new TexturedEnclosureShell();
-	private readonly sectionCapRuntime = new SectionCapRuntime();
 	private readonly sectionCutController;
 	private readonly annotationLabelsController;
 	private readonly annotationLayer = new AnnotationLayer();
@@ -347,8 +345,6 @@ export class ThreeEngine {
 			materialStateRuntime: this.materialStateRuntime,
 			sectionCutController: this.sectionCutController,
 			enclosureShell: this.enclosureShell,
-			sectionCapRuntime: this.sectionCapRuntime,
-			getActiveModelSourceUuid: () => this.modelTemplate?.uuid ?? null,
 			getUndergroundModelRoot: () => this.placementSession.getArPlacedModel(),
 			syncAttachmentInfoBoardVisibility: () => {
 				this.syncAttachmentInfoBoardVisibility();
@@ -600,7 +596,6 @@ export class ThreeEngine {
 				const preserveCurrentArLocalization = this.canPreserveMarkerLocalizationForRuntimeRefresh( nextModelId );
 				this.modelRuntimeGeneration += 1;
 				const calibrationCancelled = this.markerCalibrationRuntime.cancelForModelRuntimeChange();
-				this.sectionCapRuntime.dispose( 'model-switch' );
 				this.enclosureShell.dispose();
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
@@ -821,7 +816,6 @@ export class ThreeEngine {
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.materialStateRuntime.dispose();
 		this.sectionCutController.dispose();
-		this.sectionCapRuntime.dispose( 'engine-dispose' );
 		this.enclosureShell.dispose();
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();

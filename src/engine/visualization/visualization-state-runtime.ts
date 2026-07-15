@@ -10,7 +10,6 @@ import type { LayerVisibilityController } from '@/engine/visualization/layer-vis
 import type { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
 import type { ArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import type { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosure-shell.js';
-import type { SectionCapRuntime } from '@/engine/visualization/section-cap-runtime.js';
 
 interface VisualizationStateRuntimeOptions {
 	store: RegistrationStore;
@@ -19,8 +18,6 @@ interface VisualizationStateRuntimeOptions {
 	materialStateRuntime: MaterialStateRuntime;
 	sectionCutController: ArSectionCutController;
 	enclosureShell: TexturedEnclosureShell;
-	sectionCapRuntime: SectionCapRuntime;
-	getActiveModelSourceUuid(): string | null;
 	getUndergroundModelRoot(): THREE.Object3D | null;
 	syncAttachmentInfoBoardVisibility(): void;
 }
@@ -76,13 +73,6 @@ export class VisualizationStateRuntime {
 		if ( sectionDirty || sectionPlaneDirty ) this.options.materialStateRuntime.applySection( this.sectionPlane );
 		if ( materialDirty ) this.options.materialStateRuntime.applyMaterial( state.undergroundMaterialMode, state.transparentXrayValue );
 		this.options.enclosureShell.sync( undergroundRoot, state.undergroundInspectionTool );
-		this.options.sectionCapRuntime.sync( undergroundRoot, this.sectionPlane, {
-			geometryDirty: sectionDirty || sectionPlaneDirty,
-			materialDirty,
-			sourceModelUuid: this.options.getActiveModelSourceUuid(),
-			materialMode: state.undergroundMaterialMode,
-			opacity: state.transparentXrayValue
-		} );
 
 		this.lastRoot = undergroundRoot;
 		this.lastMaterialMode = state.undergroundMaterialMode;
@@ -114,12 +104,6 @@ export class VisualizationStateRuntime {
 		} );
 		const changed = changedObjectCount > 0 || visibilitySignature !== this.previousLayerVisibilitySignature;
 		this.previousLayerVisibilitySignature = visibilitySignature;
-		if ( changed ) this.options.sectionCapRuntime.sync( root, this.sectionPlane, {
-			geometryDirty: true,
-			sourceModelUuid: this.options.getActiveModelSourceUuid(),
-			materialMode: state.undergroundMaterialMode,
-			opacity: state.transparentXrayValue
-		} );
 		const nextPatch = {
 			layerNames: modelLayers.length > 0
 				? modelLayers.map( ( layer ) => layer.label )
@@ -136,7 +120,6 @@ export class VisualizationStateRuntime {
 
 		this.options.materialStateRuntime.restore();
 		this.options.sectionCutController.restore();
-		this.options.sectionCapRuntime.hide();
 
 	}
 

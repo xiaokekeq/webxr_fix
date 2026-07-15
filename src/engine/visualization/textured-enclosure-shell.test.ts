@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { createLayerVisibilityController } from './layer-visibility.js';
 import { MaterialStateRuntime } from './material-state-runtime.js';
-import { SectionCapRuntime } from './section-cap-runtime.js';
 import { TexturedEnclosureShell } from './textured-enclosure-shell.js';
 
 describe( 'TexturedEnclosureShell', () => {
@@ -86,7 +85,6 @@ describe( 'TexturedEnclosureShell', () => {
 				__enclosureShell: true,
 				__excludeFromLayerIndex: true,
 				__excludeFromPicking: true,
-				__excludeFromSectionCap: true,
 				__excludeFromBoundarySurface: true
 			} );
 		}
@@ -97,11 +95,6 @@ describe( 'TexturedEnclosureShell', () => {
 		expect( enclosure.visible ).toBe( true );
 		shell.sync( model, 'section-cut' );
 		expect( enclosure.visible ).toBe( true );
-		const caps = new SectionCapRuntime();
-		caps.sync( model, new THREE.Plane( new THREE.Vector3( 0, 1, 0 ), 0 ) );
-		expect( caps.getDebug().sectionCapExists ).toBe( false );
-		caps.dispose();
-
 	} );
 
 	it( 'fails soft when the requested explicit object does not exist', () => {
