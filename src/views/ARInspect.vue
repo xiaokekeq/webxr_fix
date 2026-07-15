@@ -9,6 +9,7 @@ import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.v
 import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { useUndergroundDisplayControls } from '@/features/ar/composables/use-underground-display-controls.js';
+import { resolveArSceneProfile, type ArSceneProfile } from '@/features/ar/config/ar-scene-profile.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
 
 type InspectPanelView = 'display' | 'localization' | 'record';
@@ -22,6 +23,7 @@ const PANEL_OPTIONS: Array<{ value: InspectPanelView; label: string }> = [
 const route = useRoute();
 const router = useRouter();
 const store = useArShellStore();
+const sceneProfile = computed( () => resolveArSceneProfile( route ) );
 
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
@@ -40,7 +42,39 @@ const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
 const currentModel = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )
 );
-const currentModelName = computed( () => currentModel.value?.name ?? '未选择站点' );
+const currentModelName = computed( () => currentModel.value?.name ?? '未选择模型' );
+const requestedModelId = computed( () => {
+	const routeModelId = sceneProfile.value.showModelSelector && typeof route.query.siteId === 'string'
+		? route.query.siteId
+		: '';
+	return routeModelId || sceneProfile.value.defaultModelId;
+} );
+const isConfiguredModelAvailable = computed(
+	() => engine.value.availableModels.some( ( model ) => model.id === requestedModelId.value )
+);
+const sceneReady = computed( () => (
+	isConfiguredModelAvailable.value
+	&& engine.value.selectedModelId === requestedModelId.value
+	&& runtimeLoad.value.modelRuntimeLoadState === 'ready'
+) );
+const sceneUnavailableMessage = computed( () => {
+	if ( isConfiguredModelAvailable.value === false ) {
+		return sceneProfile.value.id === 'water-network' ? '水管模型配置不可用' : 'AR 模型配置不可用';
+	}
+	if ( runtimeLoad.value.modelRuntimeLoadState === 'failed' ) {
+		return runtimeLoad.value.modelRuntimeLoadErrorMessage ?? '模型配置不可用';
+	}
+	return sceneReady.value ? '' : '正在加载模型配置';
+} );
+const showDisplayControls = computed( () => {
+	const capabilities = sceneProfile.value.capabilities;
+	return capabilities.sectionCut || capabilities.layerControl || capabilities.xray;
+} );
+const panelOptions = computed( () => PANEL_OPTIONS.filter( ( option ) => (
+	option.value !== 'display' || showDisplayControls.value
+) && (
+	option.value !== 'record' || sceneProfile.value.capabilities.inspectionRecord
+) ) );
 const configStatus = computed( () => engine.value.engineeringConfigStatus );
 const runtimeLoad = computed( () => engine.value.modelRuntimeLoad );
 const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
@@ -271,6 +305,14 @@ const workflowHint = computed( () => {
 } );
 
 watch( hasArSession, syncArOverlayClass, { immediate: true } );
+watch( panelOptions, ( options ) => {
+	if ( options.some( ( option ) => option.value === activePanelView.value ) === false ) {
+		activePanelView.value = 'localization';
+	}
+}, { immediate: true } );
+watch( requestedModelId, () => {
+	void initializeSceneModel( sceneProfile.value );
+} );
 watch(
 	() => engine.value.markerCalibration.active,
 	(active) => {
@@ -292,11 +334,8 @@ function formatActiveMarkerText(): string {
 }
 
 async function mountEngineHosts(): Promise<void> {
-	await store.initialize();
+	await initializeSceneModel( sceneProfile.value );
 	store.actions.setWorkflowMode( 'ar-inspection' );
-	if ( typeof route.query.siteId === 'string' && route.query.siteId.length > 0 ) {
-		store.actions.selectModel( route.query.siteId );
-	}
 	await nextTick();
 	if ( canvasHost.value === null || xrButtonHost.value === null ) {
 		return;
@@ -308,8 +347,21 @@ async function mountEngineHosts(): Promise<void> {
 	} );
 }
 
+async function initializeSceneModel(profile: ArSceneProfile): Promise<void> {
+
+	await store.initialize();
+	if ( profile.id !== sceneProfile.value.id || isConfiguredModelAvailable.value === false ) {
+		return;
+	}
+	if ( engine.value.selectedModelId !== requestedModelId.value ) {
+		store.actions.selectModel( requestedModelId.value );
+	}
+
+}
+
 async function startArSession(): Promise<void> {
 	await mountEngineHosts();
+	if ( sceneReady.value === false ) return;
 	await nextTick();
 	store.actions.setWorkflowMode( 'ar-inspection' );
 	store.actions.enterAr();
@@ -486,8 +538,8 @@ function setArOverlayClass(active: boolean): void {
 				@click.stop
 			>
 				<div>
-					<div class="page-title">堤防 AR 巡查</div>
-					<div class="page-subtitle">{{ currentModelName }}</div>
+					<div class="page-title">{{ sceneProfile.pageTitle }}</div>
+					<div class="page-subtitle">{{ sceneProfile.pageSubtitle ?? currentModelName }}</div>
 				</div>
 				<div class="status-chip">状态：{{ sessionStatusText }}</div>
 			</header>
@@ -503,11 +555,11 @@ function setArOverlayClass(active: boolean): void {
 					@click.stop
 				>
 					<div class="launch-badge">AR</div>
-					<div class="launch-title">进入 AR 巡查</div>
+					<div class="launch-title">{{ sceneProfile.enterArLabel }}</div>
 					<p class="launch-subtitle">
-						读取工程配置后进入 AR；现场需要采集控制标志四角点。
+						{{ sceneUnavailableMessage || '模型配置已就绪，进入 AR 后采集控制标志四角点。' }}
 					</p>
-					<label class="model-field">
+					<label v-if="sceneProfile.showModelSelector" class="model-field">
 						<span>选择站点</span>
 						<select class="select-field" :value="engine.selectedModelId" @change="handleModelChange">
 							<option v-for="model in engine.availableModels" :key="model.id" :value="model.id">
@@ -515,8 +567,8 @@ function setArOverlayClass(active: boolean): void {
 							</option>
 						</select>
 					</label>
-					<button type="button" class="launch-button" @click.stop="startArSession">
-						进入 AR
+					<button type="button" class="launch-button" :disabled="sceneReady === false" @click.stop="startArSession">
+						{{ sceneProfile.enterArLabel }}
 					</button>
 				</div>
 			</section>
@@ -545,7 +597,7 @@ function setArOverlayClass(active: boolean): void {
 		</nav>
 
 		<ArFloatingValueRail
-			v-if="hasArSession && ui.drawerOpen === false && floatingAdjustment !== null && showMarkerCalibrationOverlay === false"
+			v-if="hasArSession && showDisplayControls && ui.drawerOpen === false && floatingAdjustment !== null && showMarkerCalibrationOverlay === false"
 			:model-value="floatingAdjustment.value"
 			:ariaLabel="floatingAdjustment.label"
 			@update:model-value="updateFloatingValue"
@@ -567,7 +619,7 @@ function setArOverlayClass(active: boolean): void {
 				<div class="sheet-header">
 					<div class="sheet-tabs">
 						<button
-							v-for="item in PANEL_OPTIONS"
+						v-for="item in panelOptions"
 							:key="item.value"
 							type="button"
 							class="sheet-tab"
@@ -582,7 +634,7 @@ function setArOverlayClass(active: boolean): void {
 					</button>
 				</div>
 
-				<template v-if="activePanelView === 'display'">
+				<template v-if="activePanelView === 'display' && showDisplayControls">
 					<UndergroundDisplayControls :material-mode="engine.undergroundMaterialMode" :inspection-tool="engine.undergroundInspectionTool" :section-mode="engine.sectionCutPlaneMode" @material="selectMaterialMode" @tool="selectInspectionTool" @section="selectSectionMode" />
 				</template>
 
@@ -595,7 +647,7 @@ function setArOverlayClass(active: boolean): void {
 											</ArPanelSection>
 
 					<ArPlacementStatusSection :state="engine" title="AR 定位" />
-					<div class="action-row placement-action-row">
+					<div v-if="sceneProfile.capabilities.modelPlacement" class="action-row placement-action-row">
 						<button
 							type="button"
 							class="action-button primary"
@@ -603,6 +655,9 @@ function setArOverlayClass(active: boolean): void {
 							@click="handlePlaceEngineeringModel()"
 						>
 							按校正结果放置模型
+						</button>
+						<button type="button" class="action-button" @click="store.actions.resetPlacement()">
+							重置模型
 						</button>
 					</div>
 					<div v-if="placementBlockedText" class="runtime-banner warning">
@@ -633,7 +688,7 @@ function setArOverlayClass(active: boolean): void {
 					</ArPanelSection>
 				</template>
 
-				<template v-else>
+				<template v-else-if="activePanelView === 'record' && sceneProfile.capabilities.inspectionRecord">
 					<div class="sheet-section">
 						<div class="section-label">巡查记录</div>
 						<div class="form-grid">

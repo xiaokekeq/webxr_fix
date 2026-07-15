@@ -10,7 +10,13 @@ const routes: RouteRecordRaw[] = [
 	{
 		path: '/ar',
 		component: () => import( '@/views/ARInspect.vue' ),
-		meta: { title: '堤防 AR 巡查', tab: 1, workflowMode: 'ar-inspection' }
+		meta: { title: '堤防 AR 巡查', tab: 1, workflowMode: 'ar-inspection', arSceneType: 'dam' }
+	},
+	{
+		path: '/water-network/ar',
+		name: 'water-network-ar',
+		component: () => import( '@/views/ARInspect.vue' ),
+		meta: { title: '自来水管网 AR 核查', workflowMode: 'ar-inspection', arSceneType: 'water-network' }
 	},
 	{
 		path: '/model-calibration',
