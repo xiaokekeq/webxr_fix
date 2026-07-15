@@ -1359,14 +1359,14 @@ export class ThreeEngine {
 		const target = this.getActiveEngineeringControlTarget();
 		const rtk = solution === null || this.registrationSolution === null
 			? []
-			: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => point.worldEnu.clone().applyMatrix4( solution.matrix ) );
+			: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => ( { position: point.worldEnu.clone().applyMatrix4( solution.matrix ), label: `RTK-${point.id}` } ) );
 		const placedModel = this.placementSession.getArPlacedModel();
 		placedModel?.updateMatrixWorld( true );
 		const model = placedModel === null || this.registrationSolution === null
 			? []
-			: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) );
+			: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => ( { position: placedModel.localToWorld( point.modelLocal.clone() ), label: `模型-${point.id}` } ) );
 		this.localizationDebugLayer.sync( {
-			marker: solution === null || target === null ? [] : [ new THREE.Vector3( ...target.centerEnu ).applyMatrix4( solution.matrix ) ],
+			marker: solution === null || target === null ? [] : [ { position: new THREE.Vector3( ...target.centerEnu ).applyMatrix4( solution.matrix ), label: 'Marker' } ],
 			rtk,
 			model
 		} );

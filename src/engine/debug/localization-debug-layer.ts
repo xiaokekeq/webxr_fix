@@ -14,6 +14,7 @@ const materials = Object.fromEntries(
 		toneMapped: false
 	} ) ] )
 ) as Record<keyof typeof colors, THREE.MeshBasicMaterial>;
+type DebugPoint = { position: THREE.Vector3; label: string; };
 
 export class LocalizationDebugLayer {
 
@@ -25,9 +26,9 @@ export class LocalizationDebugLayer {
 
 	}
 
-	sync(points: { marker: THREE.Vector3[]; rtk: THREE.Vector3[]; model: THREE.Vector3[]; }): void {
+	sync(points: { marker: DebugPoint[]; rtk: DebugPoint[]; model: DebugPoint[]; }): void {
 
-		this.root.clear();
+		this.clear();
 		this.add( 'marker', points.marker );
 		this.add( 'rtk', points.rtk );
 		this.add( 'model', points.model );
@@ -36,22 +37,58 @@ export class LocalizationDebugLayer {
 
 	dispose(): void {
 
-		this.root.clear();
+		this.clear();
 		this.root.removeFromParent();
 		geometry.dispose();
 		Object.values( materials ).forEach( ( material ) => material.dispose() );
 
 	}
 
-	private add(kind: keyof typeof colors, points: THREE.Vector3[]): void {
+	private clear(): void {
+
+		this.root.traverse( ( object ) => {
+			if ( object instanceof THREE.Sprite ) {
+				object.material.map?.dispose();
+				object.material.dispose();
+			}
+		} );
+		this.root.clear();
+
+	}
+
+	private add(kind: keyof typeof colors, points: DebugPoint[]): void {
 
 		for ( const point of points ) {
 			const sphere = new THREE.Mesh( geometry, materials[ kind ] );
 			sphere.name = `registration-${kind}-point`;
-			sphere.position.copy( point );
+			sphere.position.copy( point.position );
 			this.root.add( sphere );
+			const label = createLabel( point.label, colors[ kind ] );
+			label.position.copy( point.position ).add( new THREE.Vector3( 0, 0.1, 0 ) );
+			this.root.add( label );
 		}
 
 	}
+
+}
+
+function createLabel(text: string, color: number): THREE.Sprite {
+
+	const canvas = document.createElement( 'canvas' );
+	canvas.width = 256;
+	canvas.height = 64;
+	const context = canvas.getContext( '2d' );
+	if ( context !== null ) {
+		context.font = 'bold 26px sans-serif';
+		context.fillStyle = 'rgba(0,0,0,0.72)';
+		context.fillRect( 0, 0, canvas.width, canvas.height );
+		context.fillStyle = `#${color.toString( 16 ).padStart( 6, '0' )}`;
+		context.fillText( text, 12, 42 );
+	}
+	const sprite = new THREE.Sprite( new THREE.SpriteMaterial( {
+		map: new THREE.CanvasTexture( canvas ), transparent: true, depthTest: false, depthWrite: false, toneMapped: false
+	} ) );
+	sprite.scale.set( 0.32, 0.08, 1 );
+	return sprite;
 
 }
