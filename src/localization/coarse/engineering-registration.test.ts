@@ -47,4 +47,26 @@ describe( 'solveGroundPlaneRigidTransform', () => {
 
 	} );
 
+	it( 'aligns the dz1207 top bounding-box plane to the current surveyed footprint controls', () => {
+
+		const topBoundingBoxCorners = [
+			new THREE.Vector3( -2.1663, 2.787714, -1.1963 ),
+			new THREE.Vector3( 2.5463, 2.787714, -1.1963 ),
+			new THREE.Vector3( 2.5463, 2.787714, 1.1963 ),
+			new THREE.Vector3( -2.1663, 2.787714, 1.1963 )
+		];
+		const surveyedGroundControls = [
+			new THREE.Vector3( -6.0526, -1.2592, -0.037 ),
+			new THREE.Vector3( -2.8461, 1.9322, -0.0899 ),
+			new THREE.Vector3( -0.9282, 0.0018, -0.0376 ),
+			new THREE.Vector3( -4.1142, -3.1775, -0.0126 )
+		];
+
+		const solution = solveGroundPlaneRigidTransform( topBoundingBoxCorners, surveyedGroundControls );
+		expect( solution.rmsErrorMeters ).toBeCloseTo( 0.195781, 6 );
+		expect( solution.rmsErrorMeters ).toBeLessThan( 0.2 );
+		expect( new THREE.Vector3( 0, 0, 0 ).applyMatrix4( solution.matrix ).z ).toBeCloseTo( -2.831989, 6 );
+
+	} );
+
 } );

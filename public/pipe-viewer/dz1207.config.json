@@ -107,7 +107,7 @@
       "cornerRole": "leftTop",
       "modelLocal": {
         "x": -2.1663,
-        "y": 0,
+        "y": 2.787714,
         "z": -1.1963
       },
       "world": {
@@ -121,14 +121,14 @@
         -1.2592,
         -0.037
       ],
-      "modelLocalSource": "derived from dizhi1207.obj bottom bounding-box corner; mapped so 707-1 matches the physical footprint corner"
+      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
     },
     "707-2": {
       "name": "模型控制点 707-2",
       "cornerRole": "rightTop",
       "modelLocal": {
         "x": 2.5463,
-        "y": 0,
+        "y": 2.787714,
         "z": -1.1963
       },
       "world": {
@@ -142,14 +142,14 @@
         1.9322,
         -0.0899
       ],
-      "modelLocalSource": "derived from dizhi1207.obj bottom bounding-box corner; mapped so 707-2 matches the physical footprint corner"
+      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
     },
     "707-3": {
       "name": "模型控制点 707-3",
       "cornerRole": "rightBottom",
       "modelLocal": {
         "x": 2.5463,
-        "y": 0,
+        "y": 2.787714,
         "z": 1.1963
       },
       "world": {
@@ -163,14 +163,14 @@
         0.0018,
         -0.0376
       ],
-      "modelLocalSource": "derived from dizhi1207.obj bottom bounding-box corner; mapped so 707-3 matches the physical footprint corner"
+      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
     },
     "707-4": {
       "name": "模型控制点 707-4",
       "cornerRole": "leftBottom",
       "modelLocal": {
         "x": -2.1663,
-        "y": 0,
+        "y": 2.787714,
         "z": 1.1963
       },
       "world": {
@@ -184,7 +184,7 @@
         -3.1775,
         -0.0126
       ],
-      "modelLocalSource": "derived from dizhi1207.obj bottom bounding-box corner; mapped so 707-4 matches the physical footprint corner"
+      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
     }
   },
   "markers": [
