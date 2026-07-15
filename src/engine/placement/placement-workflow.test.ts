@@ -54,6 +54,7 @@ function createOptions(
 		onPlacementBaseResolved: vi.fn(),
 		applyModelLayerVisibility: vi.fn(),
 		syncRegistrationChainDebug: vi.fn(),
+		syncLocalizationDebug: vi.fn(),
 		syncArSessionPhase: vi.fn(),
 		emit: vi.fn(),
 		setStatus,

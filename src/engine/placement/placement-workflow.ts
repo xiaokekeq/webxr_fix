@@ -24,6 +24,7 @@ interface PlacementWorkflowOptions {
 	onPlacementBaseResolved(headingDeg: number): void;
 	applyModelLayerVisibility(): void;
 	syncRegistrationChainDebug(): void;
+	syncLocalizationDebug(): void;
 	syncArSessionPhase(): void;
 	emit(): void;
 	setStatus(message: string): void;
@@ -71,6 +72,7 @@ export class PlacementWorkflow {
 		if ( placed ) {
 			this.options.applyModelLayerVisibility();
 			this.options.syncRegistrationChainDebug();
+			this.options.syncLocalizationDebug();
 			if ( hadPlacedModel === false ) {
 				this.options.onPlacementCompleted();
 			}
@@ -126,6 +128,7 @@ export class PlacementWorkflow {
 		} );
 		this.options.applyModelLayerVisibility();
 		this.options.syncRegistrationChainDebug();
+		this.options.syncLocalizationDebug();
 
 		const placedModel = this.options.placementSession.getPlacedModel();
 		if ( hadPlacedModel === false && placedModel !== null ) {

@@ -105,6 +105,7 @@ import { repositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
 import { RealDepthProvider } from '@/engine/depth/real-depth-provider.js';
+import { LocalizationDebugLayer } from '@/engine/debug/localization-debug-layer.js';
 
 const MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS = 0.2;
 const tempViewerArPosition = new THREE.Vector3();
@@ -244,6 +245,7 @@ export class ThreeEngine {
 	private readonly sceneBundle;
 	private readonly xrButtonWrap: HTMLDivElement;
 	private readonly modelOrientation = new THREE.Quaternion();
+	private readonly localizationDebugLayer = new LocalizationDebugLayer();
 	private readonly materialStateRuntime = new MaterialStateRuntime();
 	private readonly enclosureShell = new TexturedEnclosureShell();
 	private readonly sectionCapRuntime = new SectionCapRuntime();
@@ -307,6 +309,7 @@ export class ThreeEngine {
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
+		this.sceneBundle.scene.add( this.localizationDebugLayer.root );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
 
 		const statusRuntime = createStatusRuntime( {
@@ -479,6 +482,9 @@ export class ThreeEngine {
 			},
 			syncRegistrationChainDebug: () => {
 				this.syncRegistrationChainDebug();
+			},
+			syncLocalizationDebug: () => {
+				this.syncLocalizationDebug();
 			},
 			syncArSessionPhase: () => {
 				this.syncArSessionPhase();
@@ -745,6 +751,7 @@ export class ThreeEngine {
 		this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
 		this.markerCalibrationRuntime.syncState();
 		this.syncRegistrationChainDebug();
+		this.syncLocalizationDebug();
 
 	}
 
@@ -818,6 +825,7 @@ export class ThreeEngine {
 		this.enclosureShell.dispose();
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();
+		this.localizationDebugLayer.dispose();
 		this.sceneBundle.renderer.dispose();
 
 	}
@@ -1074,6 +1082,7 @@ export class ThreeEngine {
 		this.markerCorrectionFallbackArFromEnuSolution = null;
 
 		this.syncRegistrationChainDebug();
+		this.syncLocalizationDebug();
 		this.markerCalibrationRuntime.syncState( {
 			applied: false,
 			lastUpdatedAt: Date.now()
@@ -1341,6 +1350,26 @@ export class ThreeEngine {
 	private syncRegistrationChainDebug(): void {
 
 		this.registrationStateRuntime.syncRegistrationChainDebug();
+
+	}
+
+	private syncLocalizationDebug(): void {
+
+		const solution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
+		const target = this.getActiveEngineeringControlTarget();
+		const rtk = solution === null || this.registrationSolution === null
+			? []
+			: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => point.worldEnu.clone().applyMatrix4( solution.matrix ) );
+		const placedModel = this.placementSession.getArPlacedModel();
+		placedModel?.updateMatrixWorld( true );
+		const model = placedModel === null || this.registrationSolution === null
+			? []
+			: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => placedModel.localToWorld( point.modelLocal.clone() ) );
+		this.localizationDebugLayer.sync( {
+			marker: solution === null || target === null ? [] : [ new THREE.Vector3( ...target.centerEnu ).applyMatrix4( solution.matrix ) ],
+			rtk,
+			model
+		} );
 
 	}
 
@@ -1901,6 +1930,7 @@ export class ThreeEngine {
 		};
 		this.placementSession.cancelAutoPlacement();
 		this.syncRegistrationChainDebug();
+		this.syncLocalizationDebug();
 		this.setStatus(
 			this.modelTemplate === null || this.registrationSolution === null
 				? 'Marker 校正成功，正在等待模型资源。'
