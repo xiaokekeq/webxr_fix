@@ -1,5 +1,9 @@
 import type { SetStatus } from '@/features/ar/types/runtime-types.js';
-import type { GeodeticCoordinate } from '@/localization/core/geodesy.js';
+import {
+	createEnuFrame,
+	geodeticToEnu,
+	type GeodeticCoordinate
+} from '@/localization/core/geodesy.js';
 import { convertGeodeticToWgs84 } from '@/localization/core/coordinate-systems.js';
 import type { RtkSurveyDataset } from '@/localization/rtk/rtk-survey-dataset.js';
 import type { VisualControlTarget } from '@/localization/baseline/site-calibration-baseline.js';
@@ -18,10 +22,30 @@ export interface DemoModelLocalPoint {
 	z: number;
 }
 
+export type HeightDatum = 'ellipsoidal' | 'orthometric' | 'local-engineering' | 'unspecified';
+export type EnuTuple = readonly [ east: number, north: number, up: number ];
+
+export interface RawGeodeticCoordinate {
+	lat: number;
+	lon?: number;
+	lng?: number;
+	alt?: number;
+	height?: number;
+	coordType?: string;
+}
+
+export interface RawModelControlPoint {
+	modelLocal: DemoModelLocalPoint;
+	world: RawGeodeticCoordinate;
+	enu?: [ number, number, number ];
+	cornerRole?: string;
+}
+
 export interface DemoModelControlPointCorrespondence {
 	modelLocal: DemoModelLocalPoint;
-	enu: [ number, number, number ];
+	enu: EnuTuple;
 	world: GeodeticCoordinate;
+	coordinateSource: 'geodetic';
 	cornerRole?: string;
 }
 
@@ -138,6 +162,7 @@ export interface DemoModelConfig {
 	siteFrame: {
 		origin: GeodeticCoordinate;
 		axes: 'enu';
+		heightDatum: HeightDatum;
 	};
 	anchor: GeodeticCoordinate;
 	yaw: number;
@@ -174,7 +199,7 @@ export interface DemoModelConfig {
 		hasExplicitSiteId: boolean;
 		hasSiteName: boolean;
 		hasExplicitModelLocalToEnu: boolean;
-		controlPointsHaveEnu: boolean;
+		controlPointsUseWorld: boolean;
 	};
 }
 
@@ -184,13 +209,12 @@ interface LegacyControlPointShape {
 	z: number;
 }
 
-interface RawGeodeticCoordinateShape {
-	lat: number;
-	lon?: number;
-	lng?: number;
-	alt?: number;
-	height?: number;
-	coordType?: string;
+type RawGeodeticCoordinateShape = RawGeodeticCoordinate;
+
+interface RawSiteFrame {
+	origin?: RawGeodeticCoordinate;
+	axes?: 'enu';
+	heightDatum?: HeightDatum;
 }
 
 interface RawEnclosureShellConfig {
@@ -198,17 +222,13 @@ interface RawEnclosureShellConfig {
 	objectName?: unknown;
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'enclosureShell' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
-	siteFrame?: DemoModelConfig['siteFrame'];
+export interface RawDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'anchor' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'enclosureShell' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
+	siteFrame?: RawSiteFrame;
+	anchor?: RawGeodeticCoordinate;
 	registration?: DemoModelConfig['registration'];
 	modelControlPointOrder?: string[];
 	modelControlPointCornerOrder?: string[];
-	controlPoints: Record<string, {
-		modelLocal: DemoModelLocalPoint;
-		enu?: [ number, number, number ];
-		world: RawGeodeticCoordinateShape;
-		cornerRole?: string;
-	} | LegacyControlPointShape>;
+	controlPoints: Record<string, RawModelControlPoint | LegacyControlPointShape>;
 	markers?: RawMarkerEngineeringConfig[];
 	attachments?: RawDemoModelAttachmentShape[];
 	attachmentsUrl?: string;
@@ -229,7 +249,6 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	annotationStyleRules?: unknown[];
 }
 
-type RawDemoModelConfig = LegacyDemoModelConfig;
 type RawAttachmentCollection = RawDemoModelAttachmentShape[] | {
 	attachments: RawDemoModelAttachmentShape[];
 };
@@ -284,18 +303,18 @@ export function getFirstGeodeticPointFromDemoModelConfig(
 
 }
 
-function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
+export function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 
-	const anchor = normalizeGeodeticShape( config.anchor as RawGeodeticCoordinateShape, 'anchor' );
-	const siteOrigin = normalizeGeodeticShape(
-		( config.siteFrame?.origin ?? config.anchor ) as RawGeodeticCoordinateShape,
-		'siteFrame.origin'
-	);
+	const rawSiteOrigin = config.siteFrame?.origin ?? config.anchor;
+	const siteOrigin = normalizeGeodeticShape( rawSiteOrigin, 'invalid-site-origin' );
+	const anchor = normalizeGeodeticShape( config.anchor ?? rawSiteOrigin, 'anchor' );
+	const enuFrame = createEnuFrame( siteOrigin );
 
 	const siteFrame = {
 		...( config.siteFrame ?? {} ),
 		origin: siteOrigin,
-		axes: 'enu' as const
+		axes: 'enu' as const,
+		heightDatum: normalizeHeightDatum( config.siteFrame?.heightDatum )
 	};
 
 	const registration = config.registration ?? {
@@ -304,6 +323,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 	};
 
 	const normalizedControlPoints: Record<string, DemoModelControlPointCorrespondence> = {};
+	const legacyEnuMismatches: Array<{ id: string; differenceMeters: number }> = [];
 	const controlPointOrder = config.modelControlPointOrder;
 	if ( Array.isArray( controlPointOrder ) === false || controlPointOrder.length === 0 ) {
 		throw new Error( 'model-control-point-order-missing' );
@@ -314,21 +334,44 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		if ( point === undefined ) {
 			throw new Error( `model-control-point-record-missing:${id}` );
 		}
-		if ( isControlPointCorrespondence( point ) ) {
-			const enu = normalizeEnuTuple( point.enu );
-			if ( enu === undefined ) {
-				throw new Error( `model-control-point-enu-missing:${id}` );
+		if ( isRawModelControlPoint( point ) ) {
+			const world = normalizeGeodeticShape( point.world, `invalid-control-point-world:${id}` );
+			const enuVector = geodeticToEnu( world, enuFrame );
+			if ( [ enuVector.x, enuVector.y, enuVector.z ].some( ( value ) => Number.isFinite( value ) === false ) ) {
+				throw new Error( `enu-computation-failed:${id}` );
+			}
+			const configuredEnu = normalizeEnuTuple( point.enu );
+			if ( configuredEnu !== undefined ) {
+				const differenceMeters = Math.hypot(
+					configuredEnu[ 0 ] - enuVector.x,
+					configuredEnu[ 1 ] - enuVector.y,
+					configuredEnu[ 2 ] - enuVector.z
+				);
+				if ( differenceMeters > LEGACY_ENU_VALIDATION_TOLERANCE_METERS ) {
+					legacyEnuMismatches.push( { id, differenceMeters } );
+				}
 			}
 			normalizedControlPoints[ id ] = {
 				...( point as unknown as Record<string, unknown> ),
-				modelLocal: point.modelLocal,
-				enu,
-				world: normalizeGeodeticShape( point.world, `${id}.world` )
+				modelLocal: normalizeModelLocal( point.modelLocal, id ),
+				enu: [ enuVector.x, enuVector.y, enuVector.z ],
+				world,
+				coordinateSource: 'geodetic'
 			};
 			continue;
 		}
 
 		throw new Error( `model-control-point-model-local-missing:${id}` );
+	}
+	if ( legacyEnuMismatches.length > 0 ) {
+		arWarn( 'LegacyControlPointEnuMismatch', {
+			modelId: config.modelId,
+			toleranceMeters: LEGACY_ENU_VALIDATION_TOLERANCE_METERS,
+			controlPoints: legacyEnuMismatches.map( ( mismatch ) => ( {
+				id: mismatch.id,
+				differenceMeters: Number( mismatch.differenceMeters.toFixed( 4 ) )
+			} ) )
+		} );
 	}
 
 	const modelControlTargetDiagnostics = createModelControlTargetDiagnostics(
@@ -373,7 +416,7 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 			hasExplicitSiteId: hasOwnObjectKey( config, 'siteId' ),
 			hasSiteName: hasOwnObjectKey( config, 'siteName' ),
 			hasExplicitModelLocalToEnu: hasOwnObjectKey( config, 'modelLocalToEnu' ),
-			controlPointsHaveEnu: Object.values( config.controlPoints ).every( hasControlPointEnu )
+			controlPointsUseWorld: Object.values( config.controlPoints ).every( hasControlPointWorld )
 		}
 	};
 
@@ -922,7 +965,7 @@ function deriveCenterEnuFromCorners(
 
 }
 
-function normalizeEnuTuple(value: [ number, number, number ] | number[] | undefined): [ number, number, number ] | undefined {
+function normalizeEnuTuple(value: readonly number[] | undefined): [ number, number, number ] | undefined {
 
 	if (
 		Array.isArray( value ) === false
@@ -942,13 +985,11 @@ function hasOwnObjectKey(value: object, key: string): boolean {
 
 }
 
-function hasControlPointEnu(value: unknown): boolean {
+const LEGACY_ENU_VALIDATION_TOLERANCE_METERS = 0.02;
 
-	if ( typeof value !== 'object' || value === null ) {
-		return false;
-	}
+function hasControlPointWorld(value: unknown): boolean {
 
-	return hasOwnObjectKey( value, 'enu' );
+	return typeof value === 'object' && value !== null && hasOwnObjectKey( value, 'world' );
 
 }
 
@@ -1291,28 +1332,22 @@ function normalizeMarkerSizeMeters(marker: RawMarkerEngineeringConfig): number |
 
 }
 
-function isControlPointCorrespondence(
-	point:
-		| DemoModelControlPointCorrespondence
-		| LegacyControlPointShape
-		| {
-			modelLocal: DemoModelLocalPoint;
-			enu?: [ number, number, number ];
-			world: RawGeodeticCoordinateShape;
-		}
-): point is DemoModelControlPointCorrespondence {
+function isRawModelControlPoint(
+	point: RawModelControlPoint | LegacyControlPointShape
+): point is RawModelControlPoint {
 
 	return 'modelLocal' in point && 'world' in point;
 
 }
 
 function normalizeGeodeticShape(
-	coordinate: RawGeodeticCoordinateShape,
+	coordinate: RawGeodeticCoordinateShape | undefined,
 	label: string
 ): GeodeticCoordinate {
 
-	if ( typeof coordinate.lat !== 'number' ) {
-		throw new Error( `${label} is missing a valid latitude.` );
+	if ( coordinate === undefined || typeof coordinate !== 'object' ) throw new Error( `${label}:invalid-geodetic-coordinate` );
+	if ( typeof coordinate.lat !== 'number' || Number.isFinite( coordinate.lat ) === false || coordinate.lat < -90 || coordinate.lat > 90 ) {
+		throw new Error( `${label}:invalid-latitude` );
 	}
 
 	const longitude = typeof coordinate.lon === 'number'
@@ -1320,21 +1355,41 @@ function normalizeGeodeticShape(
 		: typeof coordinate.lng === 'number'
 			? coordinate.lng
 			: null;
-	if ( longitude === null ) {
-		throw new Error( `${label} is missing a valid longitude.` );
-	}
+	if ( longitude === null || Number.isFinite( longitude ) === false || longitude < -180 || longitude > 180 ) throw new Error( `${label}:invalid-longitude` );
 
 	const altitude = typeof coordinate.alt === 'number'
 		? coordinate.alt
 		: typeof coordinate.height === 'number'
 			? coordinate.height
-			: 0;
+			: null;
+	if ( altitude === null || Number.isFinite( altitude ) === false ) throw new Error( `${label}:invalid-height` );
 
-	return convertGeodeticToWgs84( {
+	const wgs84 = convertGeodeticToWgs84( {
 		lat: coordinate.lat,
 		lon: longitude,
 		alt: altitude
 	}, coordinate.coordType );
+	if ( [ wgs84.lat, wgs84.lon, wgs84.alt ].some( ( value ) => Number.isFinite( value ) === false ) ) {
+		throw new Error( `${label}:enu-computation-failed` );
+	}
+	return wgs84;
+
+}
+
+function normalizeModelLocal(point: DemoModelLocalPoint, id: string): DemoModelLocalPoint {
+
+	if ( [ point.x, point.y, point.z ].some( ( value ) => Number.isFinite( value ) === false ) ) {
+		throw new Error( `model-control-point-model-local-missing:${id}` );
+	}
+	return { x: point.x, y: point.y, z: point.z };
+
+}
+
+function normalizeHeightDatum(value: unknown): HeightDatum {
+
+	return value === 'ellipsoidal' || value === 'orthometric' || value === 'local-engineering'
+		? value
+		: 'unspecified';
 
 }
 

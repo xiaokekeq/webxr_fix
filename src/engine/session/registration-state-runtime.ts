@@ -593,8 +593,8 @@ function resolveRecommendedFieldHints(config: DemoModelConfig): string[] {
 	if ( config.configCompleteness.hasSiteName === false ) {
 		hints.push( '建议补充 siteName' );
 	}
-	if ( config.configCompleteness.controlPointsHaveEnu === false ) {
-		hints.push( '建议补充 controlPoints[].enu' );
+	if ( config.configCompleteness.controlPointsUseWorld === false ) {
+		hints.push( '建议补充 controlPoints[].world' );
 	}
 
 	return hints;

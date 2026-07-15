@@ -8,6 +8,16 @@
     "height": 24.33046,
     "coordType": "WGS84"
   },
+  "siteFrame": {
+    "origin": {
+      "lng": 118.7359443694,
+      "lat": 31.9400473778,
+      "height": 24.33046,
+      "coordType": "WGS84"
+    },
+    "axes": "enu",
+    "heightDatum": "unspecified"
+  },
   "yaw": 0,
   "scale": 1,
   "registration": {
@@ -116,11 +126,6 @@
         "height": 24.29345,
         "coordType": "WGS84"
       },
-      "enu": [
-        -6.0526,
-        -1.2592,
-        -0.037
-      ],
       "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
     },
     "707-2": {
@@ -137,11 +142,6 @@
         "height": 24.24052,
         "coordType": "WGS84"
       },
-      "enu": [
-        -2.8461,
-        1.9322,
-        -0.0899
-      ],
       "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
     },
     "707-3": {
@@ -158,11 +158,6 @@
         "height": 24.29282,
         "coordType": "WGS84"
       },
-      "enu": [
-        -0.9282,
-        0.0018,
-        -0.0376
-      ],
       "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
     },
     "707-4": {
@@ -179,11 +174,6 @@
         "height": 24.31788,
         "coordType": "WGS84"
       },
-      "enu": [
-        -4.1142,
-        -3.1775,
-        -0.0126
-      ],
       "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
     }
   },
