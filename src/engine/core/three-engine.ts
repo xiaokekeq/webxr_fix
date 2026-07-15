@@ -73,7 +73,6 @@ import { createArSectionCutController } from '@/engine/visualization/ar-section-
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosure-shell.js';
-import { ModelViewModeRuntime } from '@/engine/visualization/model-view-mode-runtime.js';
 import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
 import {
 	createArAnnotationLabelController,
@@ -248,7 +247,6 @@ export class ThreeEngine {
 	private readonly localizationDebugLayer = new LocalizationDebugLayer();
 	private readonly materialStateRuntime = new MaterialStateRuntime();
 	private readonly enclosureShell = new TexturedEnclosureShell();
-	private readonly modelViewModeRuntime;
 	private readonly sectionCutController;
 	private readonly annotationLabelsController;
 	private readonly annotationLayer = new AnnotationLayer();
@@ -309,7 +307,6 @@ export class ThreeEngine {
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
-		this.modelViewModeRuntime = new ModelViewModeRuntime( this.sceneBundle.arModelPresentationRoot );
 		this.sceneBundle.scene.add( this.localizationDebugLayer.root );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
 
@@ -334,9 +331,6 @@ export class ThreeEngine {
 			},
 			updateRegistrationStatusDetail: ( message ) => {
 				statusRuntime.updateRegistrationStatusDetail( message );
-			},
-			onModelPlaced: ( model ) => {
-				this.modelViewModeRuntime.apply( model, this.demoModelConfig?.modelView ?? {} );
 			}
 		} );
 
@@ -603,7 +597,6 @@ export class ThreeEngine {
 				this.modelRuntimeGeneration += 1;
 				const calibrationCancelled = this.markerCalibrationRuntime.cancelForModelRuntimeChange();
 				this.enclosureShell.dispose();
-				this.modelViewModeRuntime.reset();
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
 				this.registrationSolution = null;
@@ -2081,7 +2074,6 @@ export class ThreeEngine {
 	private syncSceneHost(): void {
 
 		this.sceneBundle.arPlacementAnchor.visible = this.sceneBundle.renderer.xr.isPresenting;
-		this.sceneBundle.arModelPresentationRoot.visible = this.sceneBundle.renderer.xr.isPresenting;
 		this.sceneBundle.arModelAnchor.visible = this.sceneBundle.renderer.xr.isPresenting;
 		this.syncAttachmentInfoBoardVisibility();
 		this.sceneHostRuntime.sync();

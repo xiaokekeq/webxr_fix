@@ -34,16 +34,11 @@ export function createARScene(canvasContainer: HTMLElement): ARSceneBundle {
 	arPlacementAnchor.name = '__ar-placement-anchor';
 	scene.add( arPlacementAnchor );
 
-	const arModelPresentationRoot = new THREE.Group();
-	arModelPresentationRoot.name = '__ar-model-presentation-root';
-	arModelPresentationRoot.matrixAutoUpdate = false;
-	scene.add( arModelPresentationRoot );
-
 	const arModelAnchor = new THREE.Group();
 	arModelAnchor.name = '__ar-model-anchor';
-	arModelPresentationRoot.add( arModelAnchor );
+	scene.add( arModelAnchor );
 
-	return { scene, camera, renderer, reticle, arPlacementAnchor, arModelPresentationRoot, arModelAnchor };
+	return { scene, camera, renderer, reticle, arPlacementAnchor, arModelAnchor };
 
 }
 

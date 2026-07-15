@@ -123,23 +123,6 @@ export interface UndergroundDisplayConfig {
 	showDepthGuideLines?: boolean;
 }
 
-export type ModelSpatialType = 'underground' | 'above-ground';
-export type ModelViewMode = 'registered-ar' | 'elevated-camera-offset';
-
-export interface CameraHeightOffsetConfig {
-	heightFactor?: number;
-	additionalHeightMeters?: number;
-	minimumOffsetMeters?: number;
-	maximumOffsetMeters?: number;
-}
-
-export interface ModelViewConfig {
-	spatialType?: ModelSpatialType;
-	defaultViewMode?: ModelViewMode;
-	cameraHeightOffset?: CameraHeightOffsetConfig;
-	invalidCameraHeightOffset?: boolean;
-}
-
 export type EnclosureShellSource = 'disabled' | 'auto' | 'model-object';
 
 export interface EnclosureShellConfig {
@@ -173,7 +156,6 @@ export interface DemoModelConfig {
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
 	undergroundDisplay?: UndergroundDisplayConfig;
-	modelView: ModelViewConfig;
 	enclosureShell: EnclosureShellConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
@@ -216,7 +198,7 @@ interface RawEnclosureShellConfig {
 	objectName?: unknown;
 }
 
-interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'modelView' | 'enclosureShell' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
+interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'enclosureShell' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
 	siteFrame?: DemoModelConfig['siteFrame'];
 	registration?: DemoModelConfig['registration'];
 	modelControlPointOrder?: string[];
@@ -236,9 +218,6 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	placementAnchorMeaning?: string;
 	placementAnchorModelLocal?: [ number, number, number ];
 	undergroundDisplay?: UndergroundDisplayConfig;
-	spatialType?: ModelSpatialType;
-	defaultViewMode?: ModelViewMode;
-	cameraHeightOffset?: CameraHeightOffsetConfig;
 	enclosureShell?: RawEnclosureShellConfig;
 	groundClassification?: ModelGroundClassificationConfig;
 	display?: ModelDisplayConfig;
@@ -380,7 +359,6 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
 		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
 		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
-		modelView: normalizeModelViewConfig( config ),
 		enclosureShell: normalizeEnclosureShellConfig( config.enclosureShell ),
 		groundClassification: normalizeGroundClassificationConfig( config.groundClassification ),
 		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay ),
@@ -1082,40 +1060,6 @@ function normalizeUndergroundDisplayConfig(value: UndergroundDisplayConfig | und
 	}
 
 	return Object.keys( config ).length === 0 ? undefined : config;
-
-}
-
-function normalizeModelViewConfig(config: Pick<LegacyDemoModelConfig, 'spatialType' | 'defaultViewMode' | 'cameraHeightOffset'>): ModelViewConfig {
-
-	const cameraHeightOffset = config.cameraHeightOffset;
-	const invalidCameraHeightOffset = cameraHeightOffset !== undefined && (
-		typeof cameraHeightOffset !== 'object'
-		|| cameraHeightOffset === null
-		|| Object.values( cameraHeightOffset ).some( ( value ) => typeof value !== 'number' || Number.isFinite( value ) === false )
-	);
-	return {
-		spatialType: config.spatialType === 'underground' || config.spatialType === 'above-ground'
-			? config.spatialType
-			: undefined,
-		defaultViewMode: config.defaultViewMode === 'registered-ar' || config.defaultViewMode === 'elevated-camera-offset'
-			? config.defaultViewMode
-			: undefined,
-		cameraHeightOffset: invalidCameraHeightOffset || cameraHeightOffset === undefined
-			? undefined
-			: {
-				heightFactor: finiteNumber( cameraHeightOffset.heightFactor ),
-				additionalHeightMeters: finiteNumber( cameraHeightOffset.additionalHeightMeters ),
-				minimumOffsetMeters: finiteNumber( cameraHeightOffset.minimumOffsetMeters ),
-				maximumOffsetMeters: finiteNumber( cameraHeightOffset.maximumOffsetMeters )
-			},
-		invalidCameraHeightOffset
-	};
-
-}
-
-function finiteNumber(value: unknown): number | undefined {
-
-	return typeof value === 'number' && Number.isFinite( value ) ? value : undefined;
 
 }
 
