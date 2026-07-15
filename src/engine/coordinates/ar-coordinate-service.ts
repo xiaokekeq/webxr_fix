@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { EnuPoint } from '@/engine/annotation/annotation-types.js';
-import { arInfo } from '@/engine/debug/ar-logger.js';
 
 export class ArCoordinateService {
 
@@ -12,23 +11,13 @@ export class ArCoordinateService {
 
 		this.solution = solution;
 		this.sessionId = sessionId ?? solution?.sessionId ?? null;
-		arInfo( 'ArCoordinateServiceUpdated', {
-			hasCalibration: this.solution !== null,
-			sessionId: this.sessionId,
-			source: this.solution?.source ?? null
-		} );
 
 	}
 
-	clear(reason = 'clear'): void {
+	clear(): void {
 
-		const hadCalibration = this.solution !== null;
 		this.solution = null;
 		this.sessionId = null;
-		arInfo( 'ArCoordinateServiceCleared', {
-			hadCalibration,
-			reason
-		} );
 
 	}
 

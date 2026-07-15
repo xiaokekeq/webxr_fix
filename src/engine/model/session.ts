@@ -1,4 +1,5 @@
-﻿import type { PipeRecord } from '@/models/types/pipe-record.js';
+import { arError } from '@/engine/debug/ar-logger.js';
+import type { PipeRecord } from '@/models/types/pipe-record.js';
 import * as THREE from 'three';
 import {
 	createDefaultPlacementSummaryState,
@@ -35,7 +36,6 @@ import {
 interface CreateModelSessionOptions {
 	store: RegistrationStore;
 	setStatus: SetStatus;
-	appendLog(message: string): void;
 	resetPlacement(): void;
 	onRuntimeReset(nextModelId: string): void;
 	onRuntimeBundleLoaded(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void;
@@ -51,7 +51,6 @@ export interface ModelSessionController {
 	handleModelSelection(modelId: string): void;
 	loadSelectedModelResources(modelDefinition: ModelCatalogItem): Promise<void>;
 	getCurrentModelDefinition(): ModelCatalogItem | null;
-	getDebug(): { modelLoadRequestId: number; modelLoadCompletedRequestId: number; staleModelBundleDisposeCount: number; lastDisposedStaleModelId: string | null; staleModelResultDiscardReason: string | null };
 }
 
 export function createModelSession(options: CreateModelSessionOptions): ModelSessionController {
@@ -59,7 +58,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 	const {
 		store,
 		setStatus,
-		appendLog,
 		resetPlacement,
 		onRuntimeReset,
 		onRuntimeBundleLoaded,
@@ -72,10 +70,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 
 	let currentModelDefinition: ModelCatalogItem | null = null;
 	let modelLoadRequestId = 0;
-	let modelLoadCompletedRequestId = 0;
-	let staleModelBundleDisposeCount = 0;
-	let lastDisposedStaleModelId: string | null = null;
-	let staleModelResultDiscardReason: string | null = null;
 
 	async function loadSelectedModelResources(modelDefinition: ModelCatalogItem): Promise<void> {
 
@@ -97,8 +91,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			modelRuntimeLoad: createLoadingRuntimeStatus( requestId )
 		} );
 
-		appendLog( `\u6b63\u5728\u52a0\u8f7d\u6a21\u578b\uff1a${modelDefinition.name}` );
-
 		let bundle: LoadedModelRuntimeBundle;
 		try {
 			bundle = await loadModelRuntimeBundle( modelDefinition, setStatus, ( event ) => {
@@ -111,16 +103,13 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			if ( requestId === modelLoadRequestId ) {
 				patchRuntimeLoadFailure( store, requestId, failure );
 				onRuntimeLoadFailed( failure, requestId );
-				console.error( '[ModelRuntimeLoadFailed]', { failure, cause: failure.cause } );
+				arError( '[ModelRuntimeLoadFailed]', { failure, cause: failure.cause } );
 				setStatus( formatRuntimeLoadFailure( failure ) );
 			}
 			throw failure;
 		}
 		if ( requestId !== modelLoadRequestId ) {
 			disposeModelRuntimeBundle( bundle );
-			staleModelBundleDisposeCount += 1;
-			lastDisposedStaleModelId = bundle.modelDefinition.id;
-			staleModelResultDiscardReason = 'superseded-by-newer-model-load-request';
 			return;
 		}
 
@@ -128,11 +117,9 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			bundle,
 			( runtimeBundle ) => onRuntimeBundleLoaded( runtimeBundle, requestId ),
 			() => {
-				modelLoadCompletedRequestId = requestId;
 				store.patch( {
 					modelRuntimeLoad: {
 						...store.getState().modelRuntimeLoad,
-						modelLoadCompletedRequestId,
 						modelRuntimeLoadState: 'ready',
 						modelRuntimeLoadStage: undefined,
 						modelRuntimeLoadFailureReason: undefined,
@@ -148,7 +135,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			const failure = new ModelRuntimeLoadError( 'runtime-activation', modelDefinition.id, undefined, undefined, activationResult.error );
 			patchRuntimeLoadFailure( store, requestId, failure );
 			onRuntimeLoadFailed( failure, requestId );
-			console.error( '[ModelRuntimeActivationFailed]', { failure, reason: activationResult.reason, cause: activationResult.error } );
+			arError( '[ModelRuntimeActivationFailed]', { failure, reason: activationResult.reason, cause: activationResult.error } );
 			setStatus( formatRuntimeLoadFailure( failure ) );
 			throw failure;
 		}
@@ -170,19 +157,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			bundle.modelTemplate,
 			bundle.registrationSolution.controlPoints
 		);
-
-		appendLog( `\u6a21\u578b\u52a0\u8f7d\u5b8c\u6210\uff1a${modelDefinition.name}` );
-		appendModelSourceMetadataLog( bundle, appendLog );
-		appendModelPlacementLog( bundle.modelPlacementReport, appendLog );
-		appendLog(
-			`\u5de5\u7a0b\u914d\u51c6\u6c42\u89e3\u5b8c\u6210\uff0c\u63a7\u5236\u70b9\u6570\u91cf\uff1a${bundle.registrationSolution.controlPoints.length}`
-		);
-		if ( controlPointDiagnostics.length > 0 ) {
-			appendLog( '\u68c0\u6d4b\u5230\u63a7\u5236\u70b9\u6570\u636e\u4e0e\u6a21\u578b\u51e0\u4f55\u53ef\u80fd\u4e0d\u5339\u914d\uff0c\u8bf7\u4f18\u5148\u590d\u6838 controlPoints \u914d\u7f6e\u3002' );
-			for ( const diagnostic of controlPointDiagnostics ) {
-				appendLog( diagnostic );
-			}
-		}
 
 		store.patch( {
 			registrationStatusDetail: controlPointDiagnostics.length > 0
@@ -244,59 +218,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			return currentModelDefinition;
 
 		},
-
-		getDebug() {
-
-			return { modelLoadRequestId, modelLoadCompletedRequestId, staleModelBundleDisposeCount, lastDisposedStaleModelId, staleModelResultDiscardReason };
-
-		}
 	};
-
-}
-
-function appendModelSourceMetadataLog(
-	bundle: LoadedModelRuntimeBundle,
-	appendLog: (message: string) => void
-): void {
-
-	const metadata = bundle.modelSourceMetadata;
-	if ( metadata === null ) {
-		return;
-	}
-
-	const sourceName = metadata.originalName ?? bundle.modelDefinition.modelUrl;
-	const unitText = metadata.unitScaleFactor === null
-		? '\u672a\u63d0\u4f9b'
-		: metadata.unitScaleFactor.toFixed( 3 );
-
-	appendLog( `模型源信息：${metadata.format.toUpperCase()} / ${sourceName} / UnitScaleFactor=${unitText}` );
-
-	if ( metadata.embeddedGeoOrigin !== null ) {
-		appendLog(
-			`\u68c0\u6d4b\u5230\u6a21\u578b\u5185\u5d4c\u5750\u6807\u5019\u9009\uff1a${metadata.embeddedGeoOrigin.lon.toFixed( 6 )}, ${metadata.embeddedGeoOrigin.lat.toFixed( 6 )}\uff0c\u6765\u6e90 ${metadata.embeddedGeoOrigin.sourcePath}\u3002\u5f53\u524d\u4ecd\u4ee5 configUrl \u4e3a\u51c6\u3002`
-		);
-		return;
-	}
-
-	if ( metadata.format === 'fbx' ) {
-		appendLog( '\u5f53\u524d FBX \u672a\u68c0\u6d4b\u5230\u53ef\u76f4\u63a5\u7528\u4e8e\u5de5\u7a0b\u914d\u51c6\u7684\u7ecf\u7eac\u5ea6\u5143\u6570\u636e\uff0c\u4ecd\u9700\u5916\u90e8 config \u63d0\u4f9b\u7ad9\u70b9\u5750\u6807\u3002' );
-	}
-
-}
-
-function appendModelPlacementLog(
-	report: PlaceableTemplateReport | null,
-	appendLog: (message: string) => void
-): void {
-
-	if ( report === null ) {
-		return;
-	}
-
-	appendLog( `模型尺度模式：${report.calibrationMode} / unitScale=${report.unitScale.toFixed( 3 )}` );
-	appendLog( `模型原始包围盒：${formatVector3AsMeters( report.originalSize )}` );
-	appendLog( `模型最终包围盒：${formatVector3AsMeters( report.finalSize )}` );
-	appendLog( `模型 pivot offset：${formatVector3( report.pivotOffset )}` );
 
 }
 

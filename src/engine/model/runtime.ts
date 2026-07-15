@@ -194,15 +194,6 @@ function getErrorMessage(error: unknown): string {
 
 }
 
-export function runModelRuntimeLoadErrorSelfCheck(): void {
-
-	const error = new ModelRuntimeLoadError( 'asset-stake-marker', 'dz1207', 'stake-marker', '/pipe-viewer/dz1207/stake-marker.glb', new Error( '404' ) );
-	console.assert( error.stage === 'asset-stake-marker' && error.assetId === 'stake-marker' && error.resourceUrl?.endsWith( '.glb' ) === true, 'ModelRuntimeLoadError must retain its failed asset context.' );
-
-}
-
-if ( import.meta.env.DEV ) runModelRuntimeLoadErrorSelfCheck();
-
 export async function loadModelRuntimeBundle(
 	modelDefinition: ModelCatalogItem,
 	setStatus: SetStatus,

@@ -1,3 +1,4 @@
+import { arWarn } from '@/engine/debug/ar-logger.js';
 import type {
 	ModelAssetTransform,
 	ModelCatalogAssetItem,
@@ -113,7 +114,7 @@ function normalizeAssetTransform(value: unknown): ModelAssetTransform | undefine
 			: undefined;
 
 	if ( typeof legacyScaleFactor === 'number' && Number.isFinite( legacyScaleFactor ) ) {
-		console.warn( '[Model Catalog] assetTransform.scaleFactor is deprecated, please rename it to unitScale.' );
+		arWarn( '[Model Catalog] assetTransform.scaleFactor is deprecated, please rename it to unitScale.' );
 	}
 
 	if ( upAxis === undefined && unitScale === undefined ) {

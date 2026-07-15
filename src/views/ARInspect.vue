@@ -10,7 +10,6 @@ import { canApplyMockEngineeringCalibration } from '@/engine/session/registratio
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { useUndergroundDisplayControls } from '@/features/ar/composables/use-underground-display-controls.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
-import { arInfo, arWarn, isArDebugEnabled } from '@/engine/debug/ar-logger.js';
 
 type InspectPanelView = 'display' | 'localization' | 'record';
 
@@ -33,11 +32,6 @@ const markerApplyFeedback = ref<{
 	message: string;
 	createdAt: number;
 } | null>( null );
-const arDebugMode = isArDebugEnabled();
-const debugInfoOpen = ref( false );
-const registrationDiagnosticOpen = ref( false );
-const modelPlacementDiagnosticOpen = ref( false );
-const diagnosticCopyFeedback = ref( '' );
 
 const engine = computed( () => store.engine );
 const { activeAdjustment, floatingAdjustment, selectMaterial, selectTool } = useUndergroundDisplayControls( engine );
@@ -47,7 +41,6 @@ const currentModel = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )
 );
 const currentModelName = computed( () => currentModel.value?.name ?? '未选择站点' );
-const currentConfigUrl = computed( () => currentModel.value?.configUrl ?? '-' );
 const configStatus = computed( () => engine.value.engineeringConfigStatus );
 const runtimeLoad = computed( () => engine.value.modelRuntimeLoad );
 const localizationReady = computed( () => engine.value.registrationChainDebug.arSessionLocalization.available );
@@ -87,14 +80,6 @@ const configCards = computed( () => [
 	{ label: '四角 ENU', value: canUseMarkerCorners.value ? '已配置' : '缺失' }
 ] );
 
-const debugCards = computed( () => [
-	{ label: '配置 JSON', value: currentConfigUrl.value, wide: true },
-	{ label: '数据来源', value: configStatus.value.hasMockEngineeringData ? 'mock/demo' : configStatus.value.engineeringDataSourceText },
-	{ label: 'RTK 点数', value: configStatus.value.hasRtkSurveyDataset ? `${configStatus.value.rtkPointCount}` : '未加载' },
-	{ label: '控制标志来源', value: configStatus.value.controlTargetSourceText },
-	{ label: 'mock note', value: configStatus.value.mockWarningText || '-', wide: true }
-] );
-
 const activeControlTargetSummary = computed( () => {
 	const activeId = configStatus.value.activeControlTargetId;
 	if ( activeId !== undefined ) {
@@ -102,192 +87,6 @@ const activeControlTargetSummary = computed( () => {
 			?? configStatus.value.controlTargetSummaries[ 0 ];
 	}
 	return configStatus.value.controlTargetSummaries[ 0 ];
-} );
-
-const registrationDiagnosticCards = computed( () => [
-	{ label: 'modelId', value: engine.value.selectedModelId || '-', wide: true },
-	{ label: 'modelLoadRequestId', value: `${runtimeLoad.value.modelLoadRequestId}/${runtimeLoad.value.modelLoadCompletedRequestId}` },
-	{ label: 'runtimeLoad', value: `${runtimeLoad.value.modelRuntimeLoadState}/${runtimeLoad.value.modelRuntimeLoadStage ?? '-'}` },
-	{ label: 'pipeRecords', value: runtimeLoad.value.pipeRecordsState.state },
-	{ label: 'siteConfig', value: runtimeLoad.value.siteConfigLoadState.state },
-	{ label: 'terrainAsset', value: `${runtimeLoad.value.terrainAssetState.state}${runtimeLoad.value.terrainAssetState.failureReason ? `/${runtimeLoad.value.terrainAssetState.failureReason}` : ''}` },
-	{ label: 'stakeMarkerAsset', value: `${runtimeLoad.value.stakeMarkerAssetState.state}${runtimeLoad.value.stakeMarkerAssetState.failureReason ? `/${runtimeLoad.value.stakeMarkerAssetState.failureReason}` : ''}` },
-	{ label: 'runtimeFailure', value: runtimeLoad.value.modelRuntimeLoadErrorMessage ?? '-', wide: true },
-	{ label: 'configSource', value: `${configStatus.value.configSource}; active=${formatBoolean( configStatus.value.activeRuntimeConfigReady )}; session=${formatBoolean( configStatus.value.sessionContextConfigReady )}`, wide: true },
-	{ label: 'registrationSolve', value: `${runtimeLoad.value.registrationSolveState.state}; cp=${runtimeLoad.value.registrationControlPointCount}; ready=${formatBoolean( configStatus.value.registrationSolutionReady )}` },
-	{ label: 'modelTemplate', value: `${runtimeLoad.value.modelTemplateComposeState.state}; meshes=${runtimeLoad.value.modelTemplateRenderableCount}; ready=${formatBoolean( configStatus.value.modelTemplateReady )}`, wide: true },
-	{ label: 'configUrl', value: currentConfigUrl.value, wide: true },
-	{ label: 'siteOrigin', value: configStatus.value.hasSiteOrigin ? 'configured' : 'missing' },
-	{ label: 'controlTargets', value: `${configStatus.value.controlTargetCount}` },
-	{ label: 'activeTarget', value: configStatus.value.activeControlTargetId ?? '-' },
-	{ label: 'cornersEnu', value: configStatus.value.activeControlTargetHasCornersEnu ? '4/4' : 'missing' },
-	{ label: 'cornerOrder', value: activeControlTargetSummary.value?.cornerOrderText ?? '-' },
-	{ label: 'capturedCornersAr', value: `${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}` },
-	{ label: 'markerCalibration.status', value: formatMarkerCalibrationStatus() },
-	{ label: 'ENU->AR transform', value: formatEnuToArTransformStatus() },
-	{ label: 'transformSessionId', value: engine.value.markerCalibration.currentSessionId ?? '-' },
-	{ label: 'currentSessionId', value: engine.value.markerCalibration.currentSessionId ?? '-' },
-	{ label: 'placementAnchorEnu', value: configStatus.value.placementAnchorText || '-' },
-	{ label: 'modelLocalToEnu', value: configStatus.value.modelLocalToEnuText },
-	{ label: 'model runtime', value: runtimeLoad.value.modelRuntimeLoadState },
-	{ label: 'runtime stage', value: runtimeLoad.value.modelRuntimeLoadStage ?? '-' },
-	{ label: 'runtime error', value: runtimeLoad.value.modelRuntimeLoadErrorMessage ?? '-', wide: true },
-	{ label: 'runtime config', value: `${configStatus.value.configSource}; active ${formatBoolean( configStatus.value.activeRuntimeConfigReady )}; session ${formatBoolean( configStatus.value.sessionContextConfigReady )}`, wide: true },
-	{ label: 'registration', value: `${runtimeLoad.value.registrationSolveState.state}; ${runtimeLoad.value.registrationControlPointCount} CP` },
-	{ label: 'model template', value: `${configStatus.value.modelTemplateReady ? 'ready' : runtimeLoad.value.modelRuntimeLoadState}; meshes ${runtimeLoad.value.modelTemplateRenderableCount}` },
-	{ label: 'final AR position', value: engine.value.placementSummary.positionText },
-	{ label: 'final AR quaternion', value: engine.value.placementSummary.quaternionText, wide: true },
-	{ label: 'controlPointAlignment', value: engine.value.registrationStatusDetail || engine.value.runtimeStatus || '-', wide: true },
-	{ label: 'model CP placement', value: engine.value.footprintDiagnostics.modelControlPointPlacementText, wide: true },
-	{ label: 'model CP order', value: engine.value.footprintDiagnostics.modelControlPointOrderText, wide: true },
-	{ label: 'modelLocal footprint', value: engine.value.footprintDiagnostics.modelLocalFootprintText, wide: true },
-	{ label: 'underground display', value: engine.value.footprintDiagnostics.undergroundDisplayText, wide: true },
-	{ label: 'model axis', value: engine.value.footprintDiagnostics.modelAxisText, wide: true },
-	{ label: 'marker self-check', value: engine.value.footprintDiagnostics.groundPlaneSelfCheckText, wide: true },
-	{ label: 'marker->footprint distance', value: engine.value.footprintDiagnostics.markerToFootprintDistanceText, wide: true },
-	{ label: 'marker->footprint heading', value: engine.value.footprintDiagnostics.markerToFootprintHeadingText, wide: true },
-	{ label: 'heading check', value: engine.value.footprintDiagnostics.markerToFootprintHeadingCheckText, wide: true },
-	{ label: 'footprint shape', value: engine.value.footprintDiagnostics.footprintShapeText, wide: true },
-	{ label: 'footprint CPs', value: engine.value.footprintDiagnostics.footprintControlPointIdsText, wide: true },
-	{ label: 'ENU usage', value: engine.value.footprintDiagnostics.enuUsageText, wide: true },
-	{ label: 'physical relation', value: engine.value.footprintDiagnostics.physicalRelationText, wide: true },
-	{ label: 'marker physical', value: engine.value.footprintDiagnostics.markerPhysicalText, wide: true },
-	{ label: 'footprint verdict', value: engine.value.footprintDiagnostics.verdictText, wide: true },
-	{ label: 'diagnostic updated', value: engine.value.footprintDiagnostics.updatedAtText },
-	{ label: 'placementMode', value: 'engineering' },
-	{ label: 'placementSource', value: formatPlacementSource() },
-	{ label: 'usedHitTestForFinalPlacement', value: 'false' },
-	{ label: 'hasMockEngineeringData', value: configStatus.value.hasMockEngineeringData ? 'true' : 'false' },
-	{ label: 'mock/demo reason', value: formatMockReason(), wide: true }
-] );
-
-const modelPlacementDebugCards = computed( () => {
-	const debug = engine.value.modelPlacementDebug;
-	return [
-		{
-			label: '工程误差',
-			value: `${formatHorizontalStatus( debug.engineeringHorizontalRms )}；水平 RMS ${formatMeters( debug.engineeringHorizontalRms )}；高度 Max ${formatMeters( debug.engineeringVerticalMax )}`,
-			wide: true
-		},
-		{
-			label: '显示误差',
-			value: `地表投影水平 RMS ${formatMeters( debug.surfaceProjectionHorizontalRms )}；底部深度误差 Max ${formatMeters( debug.bottomDepthErrorMax )}`,
-			wide: true
-		},
-		{
-			label: 'World Lock',
-			value: `${formatWorldLockStatus( debug.worldLockStatus, debug.isWorldLocked )}；相机移动 ${formatMeters( debug.cameraMovedDistance )}；模型漂移 ${formatMeters( debug.modelWorldDeltaXZ )}`,
-			wide: true
-		},
-		{
-			label: '父级挂载',
-			value: `model ${debug.modelParentName ?? '-'}；anchor ${debug.arModelAnchorParentName ?? '-'}；scene ${formatBoolean( debug.isArModelAnchorChildOfScene )}；camera ${formatBoolean( debug.isArModelAnchorChildOfCamera )}；reticle ${formatBoolean( debug.isArModelAnchorChildOfReticle )}`,
-			wide: true
-		},
-		{
-			label: '放置调用',
-			value: `次数 ${debug.engineeringPlacementCallCount ?? 0}；替换 ${debug.replacedModelCount ?? 0}；原因 ${debug.lastPlacementReason ?? '-'}`,
-			wide: true
-		},
-		{
-			label: '工程调试点',
-			value: `attempt ${debug.engineeringDebugRenderAttemptCount ?? 0}; success ${debug.engineeringDebugRenderSuccessCount ?? 0}; corners ${debug.engineeringCornerDebugCount ?? 0}; blocked ${debug.engineeringDebugBlockedReason ?? '-'}`,
-			wide: true
-		},
-		{
-			label: '结论',
-			value: debug.conclusion ?? '-',
-			wide: true
-		},
-		{
-			label: '对象漂移',
-			value: `model ${formatMeters( debug.modelWorldDeltaXZ )}/${formatMeters( debug.modelWorldDeltaY )}；modelAnchor ${formatMeters( debug.arModelAnchorWorldDeltaXZ )}/${formatMeters( debug.arModelAnchorWorldDeltaY )}；placementAnchor ${formatMeters( debug.arPlacementAnchorWorldDeltaXZ )}/${formatMeters( debug.arPlacementAnchorWorldDeltaY )}`,
-			wide: true
-		},
-		{
-			label: '相机距离',
-			value: `cameraToModel ${formatMeters( debug.cameraToModelDistance )}；变化 ${formatMeters( debug.cameraToModelDistanceDelta )}`,
-			wide: true
-		},
-		{
-			label: '模型链路',
-			value: debug.placedModelParentChain ?? '-',
-			wide: true
-		},
-		{
-			label: 'Anchor 链路',
-			value: `modelAnchor: ${debug.arModelAnchorParentChain ?? '-'}；placementAnchor: ${debug.arPlacementAnchorParentChain ?? '-'}`,
-			wide: true
-		},
-		{
-			label: 'placementAnchor 更新',
-			value: `次数 ${debug.placementAnchorUpdateCount ?? 0}；来源 ${debug.lastPlacementAnchorUpdateReason ?? 'none'}；frameLoop ${formatBoolean( debug.updatedPlacementAnchorFromFrameLoop )}；模型挂其下 ${formatBoolean( debug.isPlacedModelChildOfPlacementAnchor )}`,
-			wide: true
-		},
-		{
-			label: '矩阵变化',
-			value: `engineering ${formatChanged( debug.engineeringMatrixChanged )}；modelWorld ${formatChanged( debug.placedModelMatrixWorldChanged )}；modelAnchor ${formatChanged( debug.arModelAnchorMatrixWorldChanged )}；placementAnchor ${formatChanged( debug.arPlacementAnchorMatrixWorldChanged )}；arFromEnu ${formatChanged( debug.arFromEnuMatrixChanged )}`,
-			wide: true
-		}
-	];
-} );
-
-const modelPlacementDebugCardsExtended = computed( () => {
-	const debug = engine.value.modelPlacementDebug;
-	return [
-		...modelPlacementDebugCards.value,
-		{
-			label: 'camera baseline',
-			value: `initial ${formatMeters( debug.cameraToModelDistanceInitial )}; current ${formatMeters( debug.cameraToModelDistanceCurrent ?? debug.cameraToModelDistance )}; delta ${formatMeters( debug.cameraToModelDistanceDelta )}`,
-			wide: true
-		},
-		{
-			label: 'parent runtime',
-			value: `unexpected ${formatBoolean( debug.unexpectedArModelAnchorParent )}; camera ${debug.cameraParentChain ?? '-'}; reticle ${debug.reticleParentChain ?? '-'}`,
-			wide: true
-		},
-	];
-} );
-
-const modelPlacementDebugGroups = computed( () => {
-	const debug = engine.value.modelPlacementDebug;
-	return [
-		{
-			title: 'World Lock',
-			tone: worldDeltaTone( Math.max( debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ ?? 0, debug.modelAnchorDeltaXZ ?? debug.arModelAnchorWorldDeltaXZ ?? 0, debug.placementAnchorDeltaXZ ?? debug.arPlacementAnchorWorldDeltaXZ ?? 0 ) ),
-			items: [
-				{ label: '相机移动', value: formatMeters( debug.cameraMovedDistance ) },
-				{ label: '模型漂移 XZ / Y', value: `${formatMeters( debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ )} / ${formatSignedMeters( debug.placedModelDeltaY ?? debug.modelWorldDeltaY )}`, wide: true },
-				{ label: 'modelAnchor 漂移 XZ', value: formatMeters( debug.modelAnchorDeltaXZ ?? debug.arModelAnchorWorldDeltaXZ ) },
-				{ label: 'placementAnchor 漂移 XZ', value: formatMeters( debug.placementAnchorDeltaXZ ?? debug.arPlacementAnchorWorldDeltaXZ ) },
-				{ label: '相机到模型 初始/当前/变化', value: `${formatMeters( debug.cameraToModelDistanceInitial )} / ${formatMeters( debug.cameraToModelDistanceCurrent )} / ${formatSignedMeters( debug.cameraToModelDistanceDelta )}`, wide: true },
-				{ label: '模型父级链路', value: formatParentChain( debug.placedModelParentChain ), wide: true },
-				{ label: 'modelAnchor 父级链路', value: formatParentChain( debug.modelAnchorParentChain ?? debug.arModelAnchorParentChain ), wide: true },
-				{ label: 'placementAnchor 父级链路', value: formatParentChain( debug.placementAnchorParentChain ?? debug.arPlacementAnchorParentChain ), wide: true }
-			]
-		},
-		{
-			title: '矩阵变化',
-			tone: matrixTone( debug ),
-			items: [
-				{ label: 'engineering', value: formatChanged( debug.engineeringMatrixChanged ), wide: true },
-				{ label: 'model / modelAnchor', value: `${formatChanged( debug.placedModelMatrixWorldChanged )} / ${formatChanged( debug.modelAnchorMatrixWorldChanged ?? debug.arModelAnchorMatrixWorldChanged )}`, wide: true },
-				{ label: 'placementAnchor / arFromEnu', value: `${formatChanged( debug.placementAnchorMatrixWorldChanged ?? debug.arPlacementAnchorMatrixWorldChanged )} / ${formatChanged( debug.arFromEnuMatrixChanged )}`, wide: true },
-				{ label: '矩阵平移变化 eng/model', value: `${formatMeters( debug.engineeringMatrixTranslationDelta )} / ${formatMeters( debug.placedModelMatrixTranslationDelta )}`, wide: true }
-			]
-		},
-		{
-			title: '更新来源',
-			tone: 'normal',
-			items: [
-				{ label: '黄色 / 工程紫更新', value: `${formatUpdateMeta( debug.yellowUpdateCount, debug.yellowLastUpdateReason )} / ${formatUpdateMeta( debug.purpleEngineeringUpdateCount, debug.purpleEngineeringLastUpdateReason )}`, wide: true },
-				{ label: '当前实际点更新', value: formatUpdateMeta( debug.currentModelActualUpdateCount, debug.currentModelActualLastUpdateReason ), wide: true },
-				{ label: 'placementAnchor 更新', value: `${formatUpdateMeta( debug.placementAnchorUpdateCount, debug.lastPlacementAnchorUpdateReason )}; frame ${formatBoolean( debug.placementAnchorUpdatedFromFrameLoop )}; hit-test ${formatBoolean( debug.placementAnchorUpdatedFromHitTest )}; reticle ${formatBoolean( debug.placementAnchorUpdatedFromReticle )}`, wide: true },
-				{ label: '模型放置', value: `次数 ${debug.engineeringPlacementCallCount ?? 0}; 替换 ${debug.replacedModelCount ?? 0}; 原因 ${debug.lastPlacementReason ?? '-'}`, wide: true },
-				{ label: '结论', value: debug.conclusion ?? '-', wide: true }
-			]
-		}
-	];
 } );
 
 const configWarnings = computed( () => {
@@ -336,7 +135,6 @@ const canStartMarkerCalibration = computed(
 const canCaptureMarkerCorner = computed(
 	() => showMarkerCalibrationOverlay.value && hitTestReady.value && canUseMarkerCorners.value
 );
-const allowDebugMarkerApply = import.meta.env.DEV || import.meta.env.VITE_DEBUG_MARKER_APPLY === 'true';
 const canApplyMarkerCalibration = computed(
 	() => showMarkerCalibrationOverlay.value
 		&& canUseMarkerCorners.value
@@ -472,23 +270,6 @@ const workflowHint = computed( () => {
 	return hasArSession.value ? '请扫描地面。' : '请进入 AR。';
 } );
 
-watch(
-	workflowHint,
-	(message) => {
-		arInfo( 'ArUiLocalizationStepChanged', {
-			mode: engine.value.workflowMode,
-			siteId: engine.value.selectedModelId || null,
-			modelId: engine.value.selectedModelId || null,
-			sessionId: engine.value.markerCalibration.currentSessionId,
-			currentStep: resolveCurrentStep(),
-			localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
-			targetId: configStatus.value.activeControlTargetId ?? engine.value.markerCalibration.markerId,
-			message
-		} );
-	},
-	{ immediate: true }
-);
-
 watch( hasArSession, syncArOverlayClass, { immediate: true } );
 watch(
 	() => engine.value.markerCalibration.active,
@@ -504,257 +285,10 @@ watch( hasArSession, (active) => {
 	}
 } );
 
-function formatMarkerCalibrationStatus(): string {
-	if ( engine.value.markerCalibration.applied ) {
-		return 'applied';
-	}
-	if ( engine.value.markerCalibration.solved ) {
-		return 'solved';
-	}
-	if ( engine.value.markerCalibration.active ) {
-		return 'capturing';
-	}
-	return 'idle';
-}
-
-function formatEnuToArTransformStatus(): string {
-	if ( localizationReady.value === false ) {
-		return 'missing';
-	}
-	if ( engine.value.registrationChainDebug.arSessionLocalization.source !== 'marker' ) {
-		return `non-marker:${engine.value.registrationChainDebug.arSessionLocalization.source}`;
-	}
-	if ( hasArSession.value === false || engine.value.markerCalibration.currentSessionId === null ) {
-		return 'expired';
-	}
-	return 'generated';
-}
-
-function formatPlacementSource(): string {
-	if ( localizationReady.value && engine.value.registrationChainDebug.arSessionLocalization.source === 'marker' ) {
-		return 'marker-calibrated-enu';
-	}
-	return engine.value.registrationChainDebug.arSessionLocalization.source || 'missing';
-}
-
-function formatMockReason(): string {
-	if ( configStatus.value.hasMockEngineeringData === false ) {
-		return '-';
-	}
-	if ( configStatus.value.mockWarningText.length > 0 ) {
-		return configStatus.value.mockWarningText;
-	}
-	if ( configStatus.value.mockRtkPointIds.length > 0 ) {
-		return configStatus.value.mockRtkPointIds.join( ', ' );
-	}
-	return 'mock/demo engineering data';
-}
-
-function formatMeters(value: number | null | undefined): string {
-	return typeof value === 'number' && Number.isFinite( value )
-		? `${value.toFixed( 2 )}m`
-		: '-';
-}
-
-function formatSignedMeters(value: number | null | undefined): string {
-	return typeof value === 'number' && Number.isFinite( value )
-		? `${value >= 0 ? '+' : ''}${value.toFixed( 2 )}m`
-		: '-';
-}
-
-function formatPixels(value: number | null | undefined): string {
-	return typeof value === 'number' && Number.isFinite( value ) ? `${value.toFixed( 1 )}px` : '-';
-}
-
-function formatTimestamp(value: number | undefined): string {
-	return value === undefined ? '-' : new Date( value ).toLocaleTimeString( 'zh-CN', { hour12: false } );
-}
-
-function formatParentChain(value: string[] | undefined): string {
-	return value?.join( ' -> ' ) || '-';
-}
-
-function worldDeltaTone(value: number): 'normal' | 'warning' | 'error' {
-	return value > 0.1 ? 'error' : value >= 0.05 ? 'warning' : 'normal';
-}
-
-function matrixTone(debug: {
-	engineeringMatrixChanged?: boolean;
-	placedModelMatrixWorldChanged?: boolean;
-	modelAnchorMatrixWorldChanged?: boolean;
-	placementAnchorMatrixWorldChanged?: boolean;
-	arFromEnuMatrixChanged?: boolean;
-}): 'normal' | 'error' {
-	return Object.values( debug ).some( Boolean ) ? 'error' : 'normal';
-}
-
-function formatDepthAxis(value: 'y' | 'shortest-edge' | 'bbox-y' | undefined): string {
-	return value ?? '-';
-}
-
-function formatModelHeightSource(value: string | undefined): string {
-	switch ( value ) {
-		case 'override':
-			return '配置模型高度';
-		case 'normalized-bbox-y':
-			return 'normalized model local bbox-y';
-		case 'placeable-report-y':
-			return 'final model Y size';
-		case 'bbox-y':
-			return '模型 bbox-y';
-		case 'y':
-			return '模型 y';
-		case 'shortest-edge':
-			return '最短边';
-		case 'invalid':
-			return '无效';
-		default:
-			return '-';
-	}
-}
-
-function formatOpacity(value: number | null | undefined): string {
-	if ( typeof value !== 'number' || Number.isFinite( value ) === false ) {
-		return '-';
-	}
-	return value <= 1 ? value.toFixed( 2 ) : `${value.toFixed( 0 )}%`;
-}
-
-function formatVector3Compact(
-	value: { x: number; y: number; z: number } | null | undefined
-): string {
-	if ( value === undefined || value === null ) {
-		return '-';
-	}
-	return `${value.x.toFixed( 2 )},${value.y.toFixed( 2 )},${value.z.toFixed( 2 )}`;
-}
-
-function formatUpdateMeta(count: number | undefined, reason: string | undefined): string {
-	return `${count ?? 0}@${reason ?? 'none'}`;
-}
-
-async function copyModelPlacementDiagnostics(): Promise<void> {
-	const debug = engine.value.modelPlacementDebug;
-	const payload = {
-		buildCommit: debug.buildCommit ?? null,
-		sessionId: debug.sessionId ?? null,
-		cameraMovedDistance: debug.cameraMovedDistance ?? null,
-		placedModelDeltaXZ: debug.placedModelDeltaXZ ?? debug.modelWorldDeltaXZ ?? null,
-		modelAnchorDeltaXZ: debug.modelAnchorDeltaXZ ?? debug.arModelAnchorWorldDeltaXZ ?? null,
-		placementAnchorDeltaXZ: debug.placementAnchorDeltaXZ ?? debug.arPlacementAnchorWorldDeltaXZ ?? null,
-		cameraToModelDistanceInitial: debug.cameraToModelDistanceInitial ?? null,
-		cameraToModelDistanceCurrent: debug.cameraToModelDistanceCurrent ?? null,
-		cameraToModelDistanceDelta: debug.cameraToModelDistanceDelta ?? null,
-		engineeringMatrixChanged: debug.engineeringMatrixChanged ?? null,
-		placedModelMatrixWorldChanged: debug.placedModelMatrixWorldChanged ?? null,
-		arFromEnuMatrixChanged: debug.arFromEnuMatrixChanged ?? null,
-		engineeringMinusYellowXZ: debug.engineeringMinusYellowXZ ?? null,
-		engineeringMinusYellowY: debug.engineeringMinusYellowY ?? null,
-		yellowWorldDeltaXZ: debug.yellowWorldDeltaXZ ?? null,
-		purpleEngineeringWorldDeltaXZ: debug.purpleEngineeringWorldDeltaXZ ?? null,
-		currentModelActualWorldDeltaXZ: debug.currentModelActualWorldDeltaXZ ?? null,
-		yellowUpdateCount: debug.yellowUpdateCount ?? 0,
-		purpleEngineeringUpdateCount: debug.purpleEngineeringUpdateCount ?? 0,
-		currentModelActualUpdateCount: debug.currentModelActualUpdateCount ?? 0,
-		placementAnchorUpdateCount: debug.placementAnchorUpdateCount ?? 0,
-		engineeringPlacementCallCount: debug.engineeringPlacementCallCount ?? 0,
-		replacedModelCount: debug.replacedModelCount ?? 0,
-		conclusion: debug.conclusion ?? null
-	};
-	try {
-		await navigator.clipboard.writeText( JSON.stringify( payload, null, 2 ) );
-		diagnosticCopyFeedback.value = '诊断数据已复制';
-	} catch {
-		diagnosticCopyFeedback.value = '复制失败，请检查浏览器剪贴板权限';
-	}
-}
-
-function formatBoolean(value: boolean | undefined): string {
-	if ( value === true ) {
-		return '是';
-	}
-	if ( value === false ) {
-		return '否';
-	}
-	return '-';
-}
-
-function formatChanged(value: boolean | undefined): string {
-	return value === true ? '是' : '否';
-}
-
-function formatBuriedDepthSource(source: string | undefined): string {
-	if ( source === 'model-height' ) {
-		return '模型高度';
-	}
-	if ( source === 'configured-number' ) {
-		return '配置数值';
-	}
-	return '未配置';
-}
-
-function formatUndergroundPlacementMode(mode: string | undefined): string {
-	if ( mode === 'rtk-derived-elevation' ) {
-		return 'RTK surface elevation derived';
-	}
-	if ( mode === 'visual-offset' ) {
-		return 'visual offset';
-	}
-	return '-';
-}
-
-function formatHorizontalStatus(value: number | undefined): string {
-	if ( typeof value !== 'number' || Number.isFinite( value ) === false ) {
-		return '工程水平误差未知';
-	}
-	if ( value < 0.1 ) {
-		return '工程水平误差正常';
-	}
-	if ( value <= 0.3 ) {
-		return '工程水平误差警告';
-	}
-	return '工程水平误差异常';
-}
-
-function formatWorldLockStatus(
-	status: string | undefined,
-	isWorldLocked: boolean | null | undefined
-): string {
-	if ( status === 'normal' || isWorldLocked === true ) {
-		return 'World Lock 正常';
-	}
-	if ( status === 'error' ) {
-		return 'World Lock 异常';
-	}
-	if ( status === 'warning' ) {
-		return 'World Lock 警告';
-	}
-	return '请移动手机后再判断';
-}
-
 function formatActiveMarkerText(): string {
 	const id = configStatus.value.activeControlTargetId ?? '-';
 	const name = configStatus.value.activeControlTargetName ?? '-';
 	return `${id} / ${name}`;
-}
-
-function resolveCurrentStep(): string {
-	if ( hasArSession.value === false ) {
-		return 'enter-ar';
-	}
-	if ( engine.value.arSessionPhase === 'scanning' ) {
-		return 'scan-plane';
-	}
-	if ( engine.value.markerCalibration.active ) {
-		return 'capture-marker-corner';
-	}
-	if ( localizationReady.value === false ) {
-		return 'align-marker';
-	}
-	if ( modelPlaced.value === false ) {
-		return 'place-model';
-	}
-	return 'inspect';
 }
 
 async function mountEngineHosts(): Promise<void> {
@@ -865,46 +399,16 @@ async function handleResetMarkerCalibration(): Promise<void> {
 async function handleApplyMarkerCalibration(): Promise<void> {
 	markerApplyFeedback.value = null;
 	const blockedReason = markerApplyBlockedReason.value;
-	arInfo( 'MarkerCalibrationApplyClicked', {
-		modelId: engine.value.selectedModelId || null,
-		currentSessionId: engine.value.markerCalibration.currentSessionId,
-		markerCalibrationActive: engine.value.markerCalibration.active,
-		capturedCornerCount: engine.value.markerCalibration.capturedCornerCount,
-		expectedCornerCount: engine.value.markerCalibration.expectedCornerCount,
-		canApplyMarkerCalibration: canApplyMarkerCalibration.value,
-		markerApplyBlockedReason: blockedReason,
-		hasMockEngineeringData: configStatus.value.hasMockEngineeringData,
-		allowMockCalibration: canApplyMockEngineeringCalibration(),
-		allowDebugMarkerApply,
-		canUseMarkerCorners: canUseMarkerCorners.value,
-		showMarkerCalibrationOverlay: showMarkerCalibrationOverlay.value,
-		createdAt: Date.now()
-	} );
-	if ( canApplyMarkerCalibration.value === false && allowDebugMarkerApply === false ) {
+	if ( canApplyMarkerCalibration.value === false ) {
 		markerApplyFeedback.value = {
 			type: 'warning',
 			message: blockedReason || '当前条件不足，无法完成 Marker 校正。',
 			createdAt: Date.now()
 		};
-		arWarn( 'MarkerCalibrationApplyBlockedInUi', {
-			reason: blockedReason,
-			createdAt: Date.now()
-		} );
 		return;
 	}
 
 	const result = store.actions.solveAndApplyCurrentSessionMarkerCalibration();
-	arInfo( 'MarkerCalibrationApplyResult', {
-		result,
-		message: result.ok
-			? result.placementState === 'marker-applied-model-runtime-pending'
-				? 'Marker 校正成功，正在等待模型资源。'
-				: 'Marker 校正已完成，工程坐标已对齐，请点击工程放置模型。'
-			: `Marker 校正未应用：${result.reason}`,
-		runtimeStatus: engine.value.runtimeStatus,
-		markerCalibration: engine.value.markerCalibration,
-		createdAt: Date.now()
-	} );
 	await nextTick();
 	if ( result.ok === false ) {
 		markerApplyFeedback.value = {
@@ -913,11 +417,6 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 			createdAt: Date.now()
 		};
 		markerCalibrationOverlayOpen.value = true;
-		arWarn( 'MarkerCalibrationApplyFailedInUi', {
-			runtimeStatus: engine.value.runtimeStatus,
-			markerCalibration: engine.value.markerCalibration,
-			createdAt: Date.now()
-		} );
 		return;
 	}
 	markerApplyFeedback.value = {
@@ -933,18 +432,6 @@ async function handleApplyMarkerCalibration(): Promise<void> {
 
 async function handlePlaceEngineeringModel(): Promise<void> {
 	if ( canPlaceEngineeringModel.value === false ) {
-		arWarn( 'EngineeringPlacementBlockedInUi', {
-			modelId: engine.value.selectedModelId || null,
-			sessionId: engine.value.markerCalibration.currentSessionId,
-			hasSiteOrigin: configStatus.value.hasSiteOrigin,
-			hasControlTargets: configStatus.value.hasControlTargets,
-			hasCornersEnu: canUseMarkerCorners.value,
-			localizationReady: localizationReady.value,
-			localizationSource: engine.value.registrationChainDebug.arSessionLocalization.source,
-			hasMockEngineeringData: configStatus.value.hasMockEngineeringData,
-			allowMockCalibration: canApplyMockEngineeringCalibration(),
-			createdAt: Date.now()
-		} );
 		return;
 	}
 
@@ -1105,39 +592,7 @@ function setArOverlayClass(active: boolean): void {
 						<div v-for="warning in configWarnings" :key="warning" class="runtime-banner warning">
 							{{ warning }}
 						</div>
-						<button type="button" class="debug-toggle" @click="modelPlacementDiagnosticOpen = !modelPlacementDiagnosticOpen">
-							{{ modelPlacementDiagnosticOpen ? '收起模型诊断' : '模型诊断' }}
-						</button>
-						<div v-if="modelPlacementDiagnosticOpen" class="model-diagnostic-groups">
-							<div
-								v-for="group in modelPlacementDebugGroups"
-								:key="group.title"
-								class="model-diagnostic-group"
-								:class="group.tone"
-							>
-								<div class="section-label">{{ group.title }}</div>
-								<ArInfoGrid :items="group.items" />
-							</div>
-							<button type="button" class="debug-toggle" @click="copyModelPlacementDiagnostics()">
-								复制诊断数据
-							</button>
-							<div v-if="diagnosticCopyFeedback" class="runtime-banner">
-								{{ diagnosticCopyFeedback }}
-							</div>
-							<details v-if="arDebugMode" class="diagnostic-raw">
-								<summary>Raw debug JSON / matrices</summary>
-								<pre>{{ JSON.stringify(engine.modelPlacementDebug, null, 2) }}</pre>
-							</details>
-						</div>
-						<button v-if="arDebugMode" type="button" class="debug-toggle" @click="debugInfoOpen = !debugInfoOpen">
-							{{ debugInfoOpen ? '收起调试信息' : '展开调试信息' }}
-						</button>
-						<ArInfoGrid v-if="arDebugMode && debugInfoOpen" :items="debugCards" />
-							<button v-if="arDebugMode" type="button" class="debug-toggle" @click="registrationDiagnosticOpen = !registrationDiagnosticOpen">
-							{{ registrationDiagnosticOpen ? '收起配准诊断' : '配准诊断' }}
-						</button>
-						<ArInfoGrid v-if="arDebugMode && registrationDiagnosticOpen" :items="registrationDiagnosticCards" />
-					</ArPanelSection>
+											</ArPanelSection>
 
 					<ArPlacementStatusSection :state="engine" title="AR 定位" />
 					<div class="action-row placement-action-row">
@@ -1261,7 +716,7 @@ function setArOverlayClass(active: boolean): void {
 				<button
 					type="button"
 					class="marker-action success"
-					:disabled="canApplyMarkerCalibration === false && allowDebugMarkerApply === false"
+							:disabled="canApplyMarkerCalibration === false"
 					@click="handleApplyMarkerCalibration()"
 				>
 					完成校正
@@ -1517,48 +972,6 @@ function setArOverlayClass(active: boolean): void {
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
 	backdrop-filter: blur(24px);
-}
-
-.debug-toggle {
-	margin-top: 10px;
-	border: 1px solid rgba(148, 163, 184, 0.22);
-	border-radius: 12px;
-	background: rgba(15, 23, 42, 0.72);
-	color: #dbeafe;
-	padding: 8px 10px;
-	font-size: 12px;
-	font-weight: 800;
-}
-
-.model-diagnostic-groups {
-	display: grid;
-	gap: 12px;
-	margin-top: 10px;
-}
-
-.model-diagnostic-group {
-	padding-left: 8px;
-	border-left: 3px solid #22c55e;
-}
-
-.model-diagnostic-group.warning {
-	border-left-color: #facc15;
-}
-
-.model-diagnostic-group.error {
-	border-left-color: #ef4444;
-}
-
-.diagnostic-raw {
-	font-size: 12px;
-	color: rgba(230, 240, 255, 0.88);
-}
-
-.diagnostic-raw pre {
-	max-height: 320px;
-	overflow: auto;
-	white-space: pre-wrap;
-	word-break: break-word;
 }
 
 .sheet-header {

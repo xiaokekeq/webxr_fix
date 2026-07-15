@@ -37,7 +37,6 @@ export interface LoadModelArController {
 		setSectionCutValue(value: number): void;
 		setSectionCutPlaneMode(mode: SectionCutPlaneMode): void;
 		activatePanel(mode: WorkspaceMode): void;
-		toggleDrawer(): void;
 		setTimelineStage(index: number): void;
 		timelinePrev(): void;
 		timelineNext(): void;
@@ -45,21 +44,16 @@ export interface LoadModelArController {
 		setWorkflowMode(mode: ArWorkflowMode): void;
 		refreshGeoLocation(): Promise<void>;
 		saveSiteCalibrationBaseline(): void;
-		refreshSavedMarkerLocalization(): void;
 		startCurrentSessionMarkerCalibration(): void;
 		captureCurrentSessionMarkerCorner(): void;
 		resetCurrentSessionMarkerCalibration(): void;
 		solveAndApplyCurrentSessionMarkerCalibration(): MarkerSolutionApplyResult;
 		clearMarkerLocalizationCorrection(): void;
-		clearSavedMarkerLocalization(): void;
 		resetPlacement(): void;
 		setInspectionPlacementSource(source: InspectionPlacementSource): void;
 	enterAr(): void;
 		placeModel(): Promise<ModelPlacementResult>;
 		exitAr(): void;
-		setRegistrationView(_view: RegistrationView): void;
-		setInspectionFormExpanded(_expanded: boolean): void;
-		updateInspectionDraft(_patch: Partial<InspectionDraft>): void;
 		saveInspectionRecord(input: Omit<CreateInspectionRecordInput, 'siteId'>): void;
 		exportInspectionRecords(): void;
 		takeSnapshot(): void;
@@ -160,12 +154,6 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			toggleDrawer() {
-
-				// UI state now lives in Pinia. Keep this method as a compatibility no-op bridge.
-
-			},
-
 			setTimelineStage(index) {
 
 				engine.setTimelineStage( index );
@@ -208,12 +196,6 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			refreshSavedMarkerLocalization() {
-
-				engine.refreshSavedMarkerLocalization();
-
-			},
-
 			startCurrentSessionMarkerCalibration() {
 
 				engine.startCurrentSessionMarkerCalibration();
@@ -244,12 +226,6 @@ export function createLoadModelArController(): LoadModelArController {
 
 			},
 
-			clearSavedMarkerLocalization() {
-
-				engine.clearSavedMarkerLocalization();
-
-			},
-
 			resetPlacement() {
 
 				engine.resetPlacement();
@@ -277,24 +253,6 @@ export function createLoadModelArController(): LoadModelArController {
 			exitAr() {
 
 				engine.exitAr();
-
-			},
-
-			setRegistrationView(_view) {
-
-				// UI state now lives in Pinia. Keep this method as a compatibility no-op bridge.
-
-			},
-
-			setInspectionFormExpanded(_expanded) {
-
-				// UI state now lives in Pinia. Keep this method as a compatibility no-op bridge.
-
-			},
-
-			updateInspectionDraft(_patch) {
-
-				// UI state now lives in Pinia. Keep this method as a compatibility no-op bridge.
 
 			},
 

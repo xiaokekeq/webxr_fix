@@ -1,3 +1,4 @@
+import { arWarn } from '@/engine/debug/ar-logger.js';
 export function formatDate(iso: string): string {
   if (!iso) return '--'
   return new Date(iso).toLocaleString('zh-CN', {
@@ -24,7 +25,7 @@ export async function api<T = any>(path: string, options?: RequestInit): Promise
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return await res.json()
   } catch (e) {
-    console.warn('API error:', e)
+    arWarn('API error:', e)
     return null
   }
 }

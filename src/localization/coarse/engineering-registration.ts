@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import type {
 	DemoModelConfig,
 	DemoModelControlPointCorrespondence,
@@ -99,7 +99,6 @@ export function solveEngineeringRegistration(
 			`Registration requires at least ${config.registration.minControlPoints} control points, but got ${controlPoints.length}.`
 		);
 	}
-	console.info( '[ModelToEnuCorrespondenceCheck]', createModelToEnuCorrespondencePayload( config, controlPoints ) );
 
 	// Formal chain: modelLocal -> ENU is a fixed-scale ground-plane rigid transform.
 	const modelToSite = solveGroundPlaneRigidTransform(
@@ -110,19 +109,6 @@ export function solveEngineeringRegistration(
 	const rootSiteEnu = modelToSite.translation.clone();
 	const rootWorldGeodetic = enuToGeodetic( rootSiteEnu, siteEnuFrame );
 	const rootHeadingDeg = extractHeadingDegFromQuaternion( modelToSite.rotation );
-	console.info( '[ModelControlPointRegistrationReady]', {
-		modelId: config.modelId,
-		siteId: config.siteId,
-		source: 'controlPoints[id].modelLocal + controlPoints[id].enu',
-		controlPointCount: controlPoints.length,
-		controlPointIds: controlPoints.map( ( point ) => point.id ),
-		modelLocal: controlPoints.map( ( point ) => point.modelLocal.toArray() ),
-		targetEnu: controlPoints.map( ( point ) => point.worldEnu.toArray() ),
-		rmsErrorMeters: modelToSite.rmsErrorMeters,
-		rotation: modelToSite.rotation.toArray(),
-		translation: modelToSite.translation.toArray(),
-		scale: modelToSite.scale
-	} );
 
 	return {
 		modelId: config.modelId,
@@ -272,16 +258,6 @@ export function solveGroundPlaneRigidTransform(
 	);
 	const rotation = new THREE.Quaternion().setFromRotationMatrix( matrix );
 	const rmsErrorMeters = computeMatrixRmsError( sourcePoints, targetPoints, matrix );
-	console.info( '[GroundPlaneModelToEnuSolved]', {
-		yawDeg: Number( THREE.MathUtils.radToDeg( yawRad ).toFixed( 6 ) ),
-		translation: {
-			x: Number( translation.x.toFixed( 6 ) ),
-			y: Number( translation.y.toFixed( 6 ) ),
-			z: Number( translation.z.toFixed( 6 ) )
-		},
-		rmsErrorMeters: Number( rmsErrorMeters.toFixed( 6 ) ),
-		matrix: matrix.toArray()
-	} );
 
 	return {
 		rotation,

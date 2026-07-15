@@ -31,15 +31,6 @@ const httpClient = new FetchHttpClient( {
 	timeoutMs: 10000
 } );
 
-console.info( '[RepositoryDataSourceSelected]', {
-	mode: 'repository',
-	siteId: null,
-	dataSource,
-	repository: 'factory',
-	targetId: null,
-	imageUrl: null,
-	createdAt: Date.now()
-} );
 
 const modelRepository = dataSource === 'api'
 	? new ApiModelRepository( httpClient )
@@ -63,13 +54,3 @@ export const repositories = {
 		? new ApiMonitoringDataRepository( httpClient )
 		: new MockMonitoringDataRepository()
 };
-
-console.info( '[RepositoryFactoryInitialized]', {
-	mode: 'repository',
-	siteId: null,
-	dataSource,
-	repository: 'factory',
-	targetId: null,
-	imageUrl: null,
-	createdAt: Date.now()
-} );

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { ArCoordinateService } from '@/engine/coordinates/ar-coordinate-service.js';
-import { arInfo } from '@/engine/debug/ar-logger.js';
 import {
 	resolveAnnotationStyle,
 	type AnnotationStyleRule,
@@ -44,15 +43,6 @@ export class AnnotationLayer {
 		this.annotations = annotations;
 		this.styleRules = styleRules;
 		this.clear();
-		arInfo( 'AnnotationDataSourceCheck', {
-			annotationCount: annotations.length,
-			annotationIds: annotations.map( ( annotation ) => annotation.id ),
-			sourceFromAnnotationsConfig: true,
-			generatedFromControlPoints: false,
-			generatedFromControlTargets: false,
-			skippedControlPointCount: 0,
-			skippedControlTargetCount: 0
-		} );
 
 	}
 
@@ -60,13 +50,6 @@ export class AnnotationLayer {
 
 		this.clear();
 		if ( coordinates.hasCalibration() === false ) {
-			arInfo( 'AnnotationLayerUpdatedFromCalibration', {
-				annotationCount: this.annotations.length,
-				visibleCount: 0,
-				hasCalibration: false,
-				firstAnchorAr: null,
-				firstLabelAr: null
-			} );
 			return;
 		}
 
@@ -84,13 +67,6 @@ export class AnnotationLayer {
 			this.entries.push( this.createEntry( annotation, anchorAr.clone(), labelAr.clone() ) );
 		}
 
-		arInfo( 'AnnotationLayerUpdatedFromCalibration', {
-			annotationCount: this.annotations.length,
-			visibleCount: this.entries.length,
-			hasCalibration: true,
-			firstAnchorAr: this.entries[ 0 ]?.objects[ 0 ]?.position.toArray() ?? null,
-			firstLabelAr: this.entries[ 0 ]?.objects[ 2 ]?.position.toArray() ?? null
-		} );
 
 	}
 
@@ -114,7 +90,6 @@ export class AnnotationLayer {
 	dispose(): void {
 
 		this.clear();
-		arInfo( 'AnnotationLayerDisposed' );
 
 	}
 
@@ -185,12 +160,6 @@ export class AnnotationLayer {
 		applyAnnotationUserData( labelResult.sprite, annotation, 'annotation-label', true );
 
 		this.group.add( line, point, labelResult.sprite );
-		arInfo( 'AnnotationLayerCreated', {
-			annotationId: annotation.id,
-			severity: annotation.severity,
-			layerId: annotation.layerId
-		} );
-
 		return {
 			annotation,
 			objects: [ point, line, labelResult.sprite ],

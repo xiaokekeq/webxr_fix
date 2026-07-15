@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import type {
 	EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
@@ -47,29 +47,6 @@ export function createPlacementBaseFromArLocalizationSolution(options: {
 	modelOrientationTarget.copy( tempMatrixQuaternion );
 	const baseScale = ( tempMatrixScale.x + tempMatrixScale.y + tempMatrixScale.z ) / 3;
 	const position = tempMatrixPosition.clone();
-	console.info( '[FormalPlacementUsesModelLocalToEnu]', {
-		source: arFromEnuSolution.source,
-		modelId: registrationSolution.modelId,
-		placementMode: 'full-matrix',
-		matrixChain: 'modelLocal -> modelToSite -> arFromEnu',
-		modelToSiteTranslation: serializeVector3( registrationSolution.modelToSite.translation ),
-		modelToSiteScale: registrationSolution.modelToSite.scale,
-		siteOriginArPosition: serializeVector3( arFromEnuSolution.siteOriginArPosition ),
-		placementPosition: serializeVector3( position ),
-		placementQuaternion: quaternionToObject( tempMatrixQuaternion ),
-		placementScaleVector: serializeVector3( tempMatrixScale ),
-		appliedUniformScale: baseScale,
-		flattenYawApplied: false,
-		residualScaleOverrideApplied: false,
-		matrix: tempModelRawLocalToArMatrix.toArray(),
-		createdAt: Date.now()
-	} );
-	console.info( '[FormalPlacementGroundSnapSkipped]', {
-		source: arFromEnuSolution.source,
-		modelId: registrationSolution.modelId,
-		reason: 'formal placement uses modelLocal -> ENU -> AR local',
-		createdAt: Date.now()
-	} );
 
 	return {
 		position,

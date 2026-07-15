@@ -1,19 +1,14 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import {
 	createDefaultEngineeringConfigStatusState,
 	createDefaultRegistrationMetricsState,
-	createDefaultSavedMarkerLocalizationState,
 	createDefaultSiteCalibrationBaselineState,
 	type MarkerCalibrationState,
 	type RegistrationStore
 } from '@/localization/core/registration-store.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
-import {
-	loadLastStableMarkerLocalizationResult,
-	type SavedMarkerLocalizationResult
-} from '@/localization/marker/marker-localization-storage.js';
-import type { MarkerPoseInEnu } from '@/localization/marker/marker-localization.js';
+import type { MarkerLocalizationResult, MarkerPoseInEnu } from '@/localization/marker/marker-localization.js';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
 import type {
 	ArWorkflowMode,
@@ -21,7 +16,7 @@ import type {
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
 import { formatGeodetic } from '@/features/ar/utils/formatters.js';
-import { arInfo, arWarn } from '@/engine/debug/ar-logger.js';
+import { arWarn } from '@/engine/debug/ar-logger.js';
 
 interface RegistrationStateRuntimeOptions {
 	store: RegistrationStore;
@@ -33,7 +28,7 @@ interface RegistrationStateRuntimeOptions {
 	getActiveModelTemplate(): THREE.Object3D | null;
 	getRegistrationSolution(): EngineeringRegistrationSolution | null;
 	getResolvedMarkerPosesInEnu(): MarkerPoseInEnu[];
-	getActiveMarkerLocalizationResult(): SavedMarkerLocalizationResult | null;
+	getActiveMarkerLocalizationResult(): MarkerLocalizationResult | null;
 	getActiveMarkerArFromEnuSolutionForCurrentSession(): ArFromEnuSolution | null;
 	getActiveArFromEnuSolution(): ArFromEnuSolution | null;
 	getActiveSiteCalibrationBaseline(): SiteCalibrationBaseline | null;
@@ -296,12 +291,6 @@ export class RegistrationStateRuntime {
 			: controlTargetSource === 'site-config'
 				? 'SiteConfigControlTargetsUsed'
 				: 'ArUiConfigStatusResolved';
-		arInfo( eventName, this.createUiLogPayload( {
-			currentStep: 'load-config',
-			localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
-			targetId: firstTarget?.id ?? null,
-			message: `control target source: ${controlTargetSourceText}`
-		} ) );
 
 		if ( baselineMismatch ) {
 			arWarn( 'SiteBaselineControlTargetsMismatchWarning', this.createUiLogPayload( {
@@ -312,12 +301,6 @@ export class RegistrationStateRuntime {
 			} ) );
 		}
 
-		arInfo( 'ArUiConfigStatusResolved', this.createUiLogPayload( {
-			currentStep: 'load-config',
-			localizationSource: this.options.getActiveArFromEnuSolution()?.source ?? 'unknown',
-			targetId: firstTarget?.id ?? null,
-			message: 'Engineering config status resolved.'
-		} ) );
 		this.logEngineeringCalibrationConfigStatus( {
 			demoModelConfig,
 			firstTarget,
@@ -380,9 +363,7 @@ export class RegistrationStateRuntime {
 			createdAt: Date.now()
 		};
 
-		arInfo( 'EngineeringCalibrationLoaded', payload );
 		if ( args.missingRequiredFields.length === 0 && args.hasMockEngineeringData === false ) {
-			arInfo( 'EngineeringCalibrationConfigValidated', payload );
 			return;
 		}
 
@@ -432,15 +413,6 @@ export class RegistrationStateRuntime {
 
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
 			for ( const target of baseline.controlTargets ) {
-				arInfo( 'ArSessionUsingBaselineControlTargets', {
-					mode: this.options.getWorkflowMode(),
-					siteId: baseline.siteId,
-					sessionId: this.options.getCurrentSessionId(),
-					targetId: target.id,
-					controlTargetCount: baseline.controlTargets.length,
-					createdAt: Date.now(),
-					source: baseline.source
-				} );
 			}
 		}
 
@@ -511,55 +483,6 @@ export class RegistrationStateRuntime {
 
 	}
 
-	refreshSavedMarkerLocalizationResult(options?: { silentStatus?: boolean }): void {
-
-		const saved = loadLastStableMarkerLocalizationResult();
-		if ( saved === null ) {
-			this.options.store.patch( {
-				savedMarkerLocalization: createDefaultSavedMarkerLocalizationState()
-			} );
-			this.options.syncMarkerCalibrationState( {
-				debugOnlySavedResultAvailable: false
-			} );
-			if ( options?.silentStatus !== true ) {
-				this.options.setStatus( 'No saved marker localization result found.' );
-			}
-			return;
-		}
-
-		const stability = (
-			typeof saved.stabilityReport === 'object'
-			&& saved.stabilityReport !== null
-			&& 'stable' in saved.stabilityReport
-			&& typeof ( saved.stabilityReport as { stable?: unknown } ).stable === 'boolean'
-		)
-			? ( saved.stabilityReport as { stable: boolean } ).stable
-			: undefined;
-
-		this.options.store.patch( {
-			savedMarkerLocalization: {
-				available: true,
-				markerId: saved.markerId,
-				markerConfigId: saved.markerConfigId,
-				timestamp: saved.timestamp,
-				ageSeconds: Math.max( 0, Math.round( ( Date.now() - saved.timestamp ) / 1000 ) ),
-				rmsErrorMeters: saved.rmsErrorMeters,
-				sampleCount: saved.sampleCount,
-				headingDeg: saved.headingDeg,
-				siteOriginArPosition: saved.siteOriginArPosition,
-				stable: stability
-			}
-		} );
-		this.options.syncMarkerCalibrationState( {
-			debugOnlySavedResultAvailable: true
-		} );
-
-		if ( options?.silentStatus !== true ) {
-			this.options.setStatus( 'Saved marker localization result refreshed.' );
-		}
-
-	}
-
 }
 
 function formatVector3Text(vector: THREE.Vector3): string {
@@ -617,12 +540,6 @@ export function hasMockEngineeringDataInConfig(
 
 	const reasons = resolveMockEngineeringDataReasons( config, controlTargets );
 	const hasMock = reasons.length > 0;
-	arInfo( 'MockEngineeringDataResolved', {
-		modelId: config.modelId,
-		hasMockEngineeringData: hasMock,
-		reasons,
-		allowMockCalibration: canApplyMockEngineeringCalibration()
-	} );
 	return hasMock;
 
 }

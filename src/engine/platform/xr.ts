@@ -1,3 +1,4 @@
+import { arError } from '@/engine/debug/ar-logger.js';
 import type {
 	ARSceneBundle,
 	ArSessionStartResult,
@@ -66,7 +67,7 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 			}
 			lastErrorLogAt.set( stage, now );
 			const message = error instanceof Error ? error.message : String( error );
-			console.error( '[XrFrameStageError]', {
+			arError( '[XrFrameStageError]', {
 				stage,
 				errorName: error instanceof Error ? error.name : typeof error,
 				errorMessage: message,

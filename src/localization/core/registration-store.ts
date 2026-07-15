@@ -83,184 +83,6 @@ export interface RegistrationChainDebugState {
 	};
 }
 
-export interface FootprintDiagnosticsState {
-	groundPlaneSelfCheckText: string;
-	markerToFootprintDistanceText: string;
-	markerToFootprintHeadingText: string;
-	markerToFootprintHeadingCheckText: string;
-	modelControlPointPlacementText: string;
-	modelControlPointOrderText: string;
-	modelLocalFootprintText: string;
-	undergroundDisplayText: string;
-	modelAxisText: string;
-	footprintShapeText: string;
-	footprintControlPointIdsText: string;
-	enuUsageText: string;
-	physicalRelationText: string;
-	markerPhysicalText: string;
-	verdictText: string;
-	updatedAtText: string;
-}
-
-export interface DebugVector3 {
-	x: number;
-	y: number;
-	z: number;
-}
-
-export interface DebugScreenPoint {
-	x: number;
-	y: number;
-	visible: boolean;
-}
-
-export interface ModelPlacementDebugState {
-	sessionId?: string | null;
-	buildCommit?: string | null;
-	updatedAt?: number;
-	diagnosticSampleCount?: number;
-	engineeringHorizontalRms?: number;
-	engineeringVerticalMax?: number;
-	surfaceProjectionHorizontalRms?: number;
-	bottomDepthErrorMax?: number;
-	initialModelWorldPosition?: { x: number; y: number; z: number };
-	currentModelWorldPosition?: { x: number; y: number; z: number };
-	modelWorldDeltaXZ?: number;
-	modelWorldDeltaY?: number;
-	arModelAnchorWorldDeltaXZ?: number;
-	arModelAnchorWorldDeltaY?: number;
-	arPlacementAnchorWorldDeltaXZ?: number;
-	arPlacementAnchorWorldDeltaY?: number;
-	initialCameraWorldPosition?: { x: number; y: number; z: number };
-	currentCameraWorldPosition?: { x: number; y: number; z: number };
-	cameraMovedDistance?: number;
-	cameraToModelDistanceInitial?: number;
-	cameraToModelDistanceCurrent?: number;
-	cameraToModelDistance?: number;
-	cameraToModelDistanceDelta?: number;
-	isWorldLocked?: boolean | null;
-	worldLockStatus?: 'unknown' | 'normal' | 'warning' | 'error';
-	modelParentName?: string;
-	arModelAnchorParentName?: string;
-	arPlacementAnchorParentName?: string;
-	placedModelParentChain?: string[];
-	modelAnchorParentChain?: string[];
-	placementAnchorParentChain?: string[];
-	arModelAnchorParentChain?: string[];
-	arPlacementAnchorParentChain?: string[];
-	reticleParentChain?: string[];
-	cameraParentChain?: string[];
-	unexpectedArModelAnchorParent?: boolean;
-	isArModelAnchorChildOfPlacementAnchor?: boolean;
-	isPlacedModelChildOfPlacementAnchor?: boolean;
-	isArModelAnchorChildOfCamera?: boolean;
-	isArModelAnchorChildOfReticle?: boolean;
-	isArModelAnchorChildOfScene?: boolean;
-	isModelChildOfCamera?: boolean;
-	isModelChildOfReticle?: boolean;
-	isModelChildOfPlacementAnchor?: boolean;
-	isModelAnchorChildOfScene?: boolean;
-	isPlacementAnchorChildOfScene?: boolean;
-	placementAnchorUpdateCount?: number;
-	lastPlacementAnchorUpdateReason?: string;
-	updatedPlacementAnchorFromFrameLoop?: boolean;
-	engineeringMatrixChanged?: boolean;
-	placedModelMatrixWorldChanged?: boolean;
-	arModelAnchorMatrixWorldChanged?: boolean;
-	arPlacementAnchorMatrixWorldChanged?: boolean;
-	modelAnchorMatrixWorldChanged?: boolean;
-	placementAnchorMatrixWorldChanged?: boolean;
-	arFromEnuMatrixChanged?: boolean;
-	modelHeightX?: number;
-	modelHeightY?: number;
-	modelHeightZ?: number;
-	chosenModelHeight?: number;
-	modelHeightToYDifferenceMeters?: number | null;
-	modelHeightAxis?: 'y' | 'shortest-edge' | 'bbox-y';
-	modelSizeX?: number;
-	modelSizeY?: number;
-	modelSizeZ?: number;
-	placedModelInitialWorld?: DebugVector3;
-	placedModelCurrentWorld?: DebugVector3;
-	placedModelDeltaX?: number;
-	placedModelDeltaY?: number;
-	placedModelDeltaZ?: number;
-	placedModelDeltaXZ?: number;
-	modelAnchorInitialWorld?: DebugVector3;
-	modelAnchorCurrentWorld?: DebugVector3;
-	modelAnchorDeltaX?: number;
-	modelAnchorDeltaY?: number;
-	modelAnchorDeltaZ?: number;
-	modelAnchorDeltaXZ?: number;
-	placementAnchorInitialWorld?: DebugVector3;
-	placementAnchorCurrentWorld?: DebugVector3;
-	placementAnchorDeltaX?: number;
-	placementAnchorDeltaY?: number;
-	placementAnchorDeltaZ?: number;
-	placementAnchorDeltaXZ?: number;
-	cameraInitialWorld?: DebugVector3;
-	cameraCurrentWorld?: DebugVector3;
-	yellowSurfaceCenterWorld?: { x: number; y: number; z: number };
-	purpleEngineeringCenterWorld?: { x: number; y: number; z: number };
-	yellowSurfaceDeltaXZ?: number;
-	yellowSurfaceDeltaY?: number;
-	purpleEngineeringDeltaXZ?: number;
-	purpleEngineeringDeltaY?: number;
-	yellowCenterInitialWorld?: DebugVector3;
-	yellowCenterCurrentWorld?: DebugVector3;
-	yellowWorldDeltaXZ?: number;
-	yellowWorldDeltaY?: number;
-	yellowScreenInitial?: DebugScreenPoint;
-	yellowScreenCurrent?: DebugScreenPoint;
-	yellowScreenDeltaPx?: number;
-	purpleEngineeringCenterInitialWorld?: DebugVector3;
-	purpleEngineeringCenterCurrentWorld?: DebugVector3;
-	purpleEngineeringWorldDeltaXZ?: number;
-	purpleEngineeringWorldDeltaY?: number;
-	purpleEngineeringScreenDeltaPx?: number;
-	currentModelActualCenterWorld?: DebugVector3;
-	currentModelActualWorldDeltaXZ?: number;
-	currentModelActualWorldDeltaY?: number;
-	yellowUpdateCount?: number;
-	purpleEngineeringUpdateCount?: number;
-	currentModelActualUpdateCount?: number;
-	yellowLastUpdateReason?: string;
-	purpleEngineeringLastUpdateReason?: string;
-	currentModelActualLastUpdateReason?: string;
-	purpleDiagnosticsUpdatedInFrameLoop?: boolean;
-	engineeringMinusYellowXZ?: number;
-	engineeringMinusYellowY?: number;
-	engineeringMatrixTranslationDelta?: number;
-	placedModelMatrixTranslationDelta?: number;
-	engineeringMatrixElements?: number[];
-	placedModelMatrixWorldElements?: number[];
-	modelAnchorMatrixWorldElements?: number[];
-	placementAnchorMatrixWorldElements?: number[];
-	arFromEnuMatrixElements?: number[];
-	engineeringPlacementCallCount?: number;
-	modelPlacementAttemptCount?: number;
-	modelPlacementSuccessCount?: number;
-	engineeringDebugRenderAttemptCount?: number;
-	engineeringDebugRenderSuccessCount?: number;
-	engineeringDebugBlockedReason?: string;
-	engineeringCornerDebugCount?: number;
-	lastModelPlacementReason?: string;
-	lastAppliedMarkerSolutionId?: string;
-	lastPlacementReason?: string;
-	lastPlacementTimestamp?: number;
-	replacedModelCount?: number;
-	hasExistingPlacedModel?: boolean;
-	calledFromFrameLoop?: boolean;
-	calledFromHitTest?: boolean;
-	calledFromButton?: boolean;
-	lastPlacementAnchorUpdateTimestamp?: number;
-	placementAnchorUpdatedFromFrameLoop?: boolean;
-	placementAnchorUpdatedFromHitTest?: boolean;
-	placementAnchorUpdatedFromReticle?: boolean;
-	parallaxStatus?: 'unknown' | 'likely-parallax' | 'real-world-movement' | 'matrix-space-error';
-	conclusion?: string;
-}
-
 export interface SiteCalibrationBaselineState {
 	available: boolean;
 	siteId?: string;
@@ -290,7 +112,6 @@ export interface ModelRuntimeAssetState extends ModelRuntimeStageState {
 
 export interface ModelRuntimeLoadStatus {
 	modelLoadRequestId: number;
-	modelLoadCompletedRequestId: number;
 	modelRuntimeLoadState: ModelRuntimeLoadState;
 	modelRuntimeLoadStage?: string;
 	modelRuntimeLoadFailureReason?: string;
@@ -369,19 +190,6 @@ export interface EngineeringConfigStatusState {
 	}>;
 }
 
-export interface SavedMarkerLocalizationState {
-	available: boolean;
-	markerId?: string;
-	markerConfigId?: string;
-	timestamp?: number;
-	ageSeconds?: number;
-	rmsErrorMeters?: number;
-	sampleCount?: number;
-	headingDeg?: number;
-	siteOriginArPosition?: { x: number; y: number; z: number };
-	stable?: boolean;
-}
-
 export interface MarkerCalibrationCornerState {
 	id: string;
 	label: string;
@@ -390,7 +198,6 @@ export interface MarkerCalibrationCornerState {
 
 export interface MarkerCalibrationState {
 	currentSessionId: string | null;
-	debugOnlySavedResultAvailable: boolean;
 	markerId: string | null;
 	markerConfigId: string | null;
 	active: boolean;
@@ -474,19 +281,15 @@ export interface RegistrationStoreState {
 	registrationMetrics: RegistrationMetricsState;
 	modelScaleSummary: ModelScaleSummaryState;
 	registrationChainDebug: RegistrationChainDebugState;
-	footprintDiagnostics: FootprintDiagnosticsState;
-	modelPlacementDebug: ModelPlacementDebugState;
 	modelRuntimeLoad: ModelRuntimeLoadStatus;
 	siteCalibrationBaseline: SiteCalibrationBaselineState;
 	engineeringConfigStatus: EngineeringConfigStatusState;
-	savedMarkerLocalization: SavedMarkerLocalizationState;
 	markerCalibration: MarkerCalibrationState;
 	placementSummary: PlacementSummaryState;
 	targetGuidance: TargetGuidanceState;
 	annotationDetail: AnnotationDetailState;
 	registrationStatusDetail: string;
 	runtimeStatus: string;
-	logMessages: string[];
 }
 
 type RegistrationStoreListener = (state: RegistrationStoreState) => void;
@@ -494,9 +297,6 @@ type RegistrationStoreListener = (state: RegistrationStoreState) => void;
 export interface RegistrationStore {
 	getState(): RegistrationStoreState;
 	patch(partialState: Partial<RegistrationStoreState>): void;
-	setModelPlacementDebug(state: ModelPlacementDebugState): void;
-	patchModelPlacementDebug(partial: Partial<ModelPlacementDebugState>): void;
-	clearModelPlacementDebug(): void;
 	subscribe(listener: RegistrationStoreListener): () => void;
 }
 
@@ -522,27 +322,6 @@ export function createRegistrationStore(
 			listeners.forEach( ( listener ) => {
 				listener( state );
 			} );
-
-		},
-		setModelPlacementDebug(modelPlacementDebug) {
-
-			state = { ...state, modelPlacementDebug };
-			listeners.forEach( ( listener ) => listener( state ) );
-
-		},
-		patchModelPlacementDebug(partial) {
-
-			state = {
-				...state,
-				modelPlacementDebug: { ...state.modelPlacementDebug, ...partial }
-			};
-			listeners.forEach( ( listener ) => listener( state ) );
-
-		},
-		clearModelPlacementDebug() {
-
-			state = { ...state, modelPlacementDebug: createDefaultModelPlacementDebugState() };
-			listeners.forEach( ( listener ) => listener( state ) );
 
 		},
 		subscribe(listener) {
@@ -634,45 +413,6 @@ export function createDefaultRegistrationChainDebugState(): RegistrationChainDeb
 
 }
 
-export function createDefaultFootprintDiagnosticsState(): FootprintDiagnosticsState {
-
-	return {
-		groundPlaneSelfCheckText: '-',
-		markerToFootprintDistanceText: '-',
-		markerToFootprintHeadingText: '-',
-		markerToFootprintHeadingCheckText: '-',
-		modelControlPointPlacementText: '-',
-		modelControlPointOrderText: '-',
-		modelLocalFootprintText: '-',
-		undergroundDisplayText: '-',
-		modelAxisText: '-',
-		footprintShapeText: '-',
-		footprintControlPointIdsText: '-',
-		enuUsageText: '-',
-		physicalRelationText: '-',
-		markerPhysicalText: '-',
-		verdictText: '等待 Marker 校正',
-		updatedAtText: '-'
-	};
-
-}
-
-export function createDefaultModelPlacementDebugState(): ModelPlacementDebugState {
-
-	return {
-		isWorldLocked: null,
-		worldLockStatus: 'unknown',
-		engineeringPlacementCallCount: 0,
-		replacedModelCount: 0,
-		placementAnchorUpdateCount: 0,
-		lastPlacementAnchorUpdateReason: 'none',
-		updatedPlacementAnchorFromFrameLoop: false,
-		hasExistingPlacedModel: false,
-		conclusion: '等待工程放置模型'
-	};
-
-}
-
 export function createDefaultSiteCalibrationBaselineState(): SiteCalibrationBaselineState {
 
 	return {
@@ -736,7 +476,6 @@ export function createDefaultModelRuntimeLoadStatus(): ModelRuntimeLoadStatus {
 	const idle: ModelRuntimeStageState = { state: 'idle' };
 	return {
 		modelLoadRequestId: 0,
-		modelLoadCompletedRequestId: 0,
 		modelRuntimeLoadState: 'idle',
 		modelCatalogState: { ...idle },
 		pipeRecordsState: { ...idle },
@@ -764,19 +503,10 @@ export function createDefaultPlacementSummaryState(): PlacementSummaryState {
 
 }
 
-export function createDefaultSavedMarkerLocalizationState(): SavedMarkerLocalizationState {
-
-	return {
-		available: false
-	};
-
-}
-
 export function createDefaultMarkerCalibrationState(): MarkerCalibrationState {
 
 	return {
 		currentSessionId: null,
-		debugOnlySavedResultAvailable: false,
 		markerId: null,
 		markerConfigId: null,
 		active: false,

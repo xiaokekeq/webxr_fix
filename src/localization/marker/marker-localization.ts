@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import {
 	createArFromEnuSolution,
 	type ArFromEnuSolution
@@ -27,6 +27,18 @@ export interface MarkerLocalizationSolution {
 	rmsErrorMeters: number;
 	correspondenceCount: number;
 	source: 'marker';
+}
+
+export interface MarkerLocalizationResult {
+	markerId: string;
+	markerConfigId?: string;
+	timestamp: number;
+	source: 'marker';
+	matrix: THREE.Matrix4;
+	siteOriginArPosition?: { x: number; y: number; z: number };
+	headingDeg?: number;
+	rmsErrorMeters?: number;
+	sampleCount?: number;
 }
 
 export function solveMarkerLocalizationGroundPlane2D(args: {
@@ -85,55 +97,6 @@ export function solveMarkerLocalizationGroundPlane2D(args: {
 	const siteOriginArPosition = new THREE.Vector3( translationX, translationY, translationZ );
 	const timestamp = args.timestamp ?? Date.now();
 
-	console.info( '[GroundPlane2DCalibrationSolved]', {
-		solveMode: 'ground-plane-2d',
-		yawDeg: Number( headingDeg.toFixed( 6 ) ),
-		translationXZ: {
-			x: Number( translationX.toFixed( 6 ) ),
-			z: Number( translationZ.toFixed( 6 ) )
-		},
-		groundY: Number( groundY.toFixed( 6 ) ),
-		markerAverageEnuUp: Number( markerAverageEnuUp.toFixed( 6 ) ),
-		rms2dError: Number( rms2dError.toFixed( 6 ) ),
-		max2dError: Number( max2dError.toFixed( 6 ) ),
-		inputEnu2d: correspondences.map( ( item ) => ( {
-			id: item.id,
-			x: Number( item.siteEnu.x.toFixed( 6 ) ),
-			y: Number( item.siteEnu.y.toFixed( 6 ) )
-		} ) ),
-		inputAr2d: correspondences.map( ( item ) => ( {
-			id: item.id,
-			x: Number( item.arPosition.x.toFixed( 6 ) ),
-			z: Number( item.arPosition.z.toFixed( 6 ) )
-		} ) ),
-		matrix: matrix.toArray()
-	} );
-	console.info( '[GroundPlane2DFormulaCheck]', {
-		sourceCentroid,
-		targetCentroid,
-		rotationMatrix2D: [
-			[ Number( c.toFixed( 6 ) ), Number( ( - s ).toFixed( 6 ) ) ],
-			[ Number( s.toFixed( 6 ) ), Number( c.toFixed( 6 ) ) ]
-		],
-		translationXZ: {
-			x: Number( translationX.toFixed( 6 ) ),
-			z: Number( translationZ.toFixed( 6 ) )
-		},
-		reconstructedTargetPoints: correspondences.map( ( item ) => {
-			const predicted = item.siteEnu.clone().applyMatrix4( matrix );
-			return {
-				id: item.id,
-				x: Number( predicted.x.toFixed( 6 ) ),
-				z: Number( predicted.z.toFixed( 6 ) )
-			};
-		} ),
-		actualTargetPoints: correspondences.map( ( item ) => ( {
-			id: item.id,
-			x: Number( item.arPosition.x.toFixed( 6 ) ),
-			z: Number( item.arPosition.z.toFixed( 6 ) )
-		} ) ),
-		reconstructionErrors: errors.map( ( error ) => Number( error.toFixed( 6 ) ) )
-	} );
 
 	return {
 		arFromEnuSolution: {
@@ -238,14 +201,6 @@ export function solveMarkerLocalization(args: {
 		timestamp: args.timestamp
 	} );
 
-	console.info( '[MarkerLocalization]', {
-		correspondenceCount: correspondences.length,
-		rmsErrorMeters,
-		source: arFromEnuSolution.source,
-		siteOriginArPosition: arFromEnuSolution.siteOriginArPosition,
-		headingDeg: arFromEnuSolution.headingDeg,
-		matrix: arFromEnuSolution.matrix
-	} );
 
 	return {
 		arFromEnuSolution,
@@ -282,16 +237,6 @@ export function resolveMarkerPoseInEnu(
 		new THREE.Vector3( 1, 1, 1 )
 	);
 
-	console.info( '[MarkerEngineeringConfig]', {
-		markerId: markerConfig.id,
-		bindControlPointId: markerConfig.bindControlPointId ?? null,
-		sizeMeters: markerConfig.sizeMeters,
-		enu: resolvedEnu,
-		yawDeg,
-		markerPoseInEnu: {
-			matrix
-		}
-	} );
 
 	return {
 		markerId: markerConfig.id,
@@ -309,13 +254,6 @@ export function resolveMarkerCornersInEnu(
 	const markerPoseInEnu = resolveMarkerPoseInEnu( config, markerId );
 	const corners = createMarkerCornersFromPoseInEnu( markerPoseInEnu );
 
-	console.info( '[MarkerCornersEnuResolved]', {
-		targetId: markerId,
-		source: 'markers',
-		hasCornersEnu: false,
-		cornerCount: corners.length,
-		createdAt: Date.now()
-	} );
 
 	return corners;
 
@@ -333,13 +271,6 @@ export function resolveMarkerCornersInEnuFromControlTarget(
 			position: new THREE.Vector3( corner[ 0 ], corner[ 1 ], corner[ 2 ] )
 		} ) );
 
-		console.info( '[MarkerCornersEnuResolved]', {
-			targetId: target.id,
-			source: 'controlTargets.cornersEnu',
-			hasCornersEnu: true,
-			cornerCount: corners.length,
-			createdAt: Date.now()
-		} );
 
 		return corners;
 	}
@@ -348,13 +279,6 @@ export function resolveMarkerCornersInEnuFromControlTarget(
 		createMarkerPoseInEnuFromControlTarget( target )
 	);
 
-	console.info( '[MarkerCornersEnuResolved]', {
-		targetId: target.id,
-		source: 'controlTargets.centerEnu',
-		hasCornersEnu: false,
-		cornerCount: corners.length,
-		createdAt: Date.now()
-	} );
 
 	return corners;
 

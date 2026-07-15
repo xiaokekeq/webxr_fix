@@ -1,3 +1,4 @@
+import { arError } from '@/engine/debug/ar-logger.js';
 import {
 	loadDemoModelConfig,
 	type DemoModelConfig
@@ -33,34 +34,12 @@ export class LocalJsonSiteConfigRepository implements SiteConfigRepository {
 
 	async getSiteConfig(siteId: string): Promise<DemoModelConfig> {
 
-		console.info( '[SiteConfigLoadStarted]', {
-			mode: 'repository',
-			siteId,
-			dataSource: 'local',
-			repository: 'siteConfig',
-			targetId: null,
-			imageUrl: null,
-			createdAt: Date.now()
-		} );
 		try {
 			const model = await this.modelRepository.getModelDefinition( siteId );
 			const config = await loadDemoModelConfig( model.configUrl );
-			console.info( '[SiteConfigLoadSucceeded]', {
-				mode: 'repository',
-				siteId,
-				configUrl: model.configUrl,
-				dataSource: 'local',
-				repository: 'siteConfig',
-				targetId: config.controlTargets[ 0 ]?.id ?? null,
-				siteFrameOriginLoaded: typeof config.siteFrame.origin.lat === 'number' && typeof config.siteFrame.origin.lon === 'number',
-				controlTargetCount: config.controlTargets.length,
-				markersCount: config.markers.length,
-				cornersEnuValid: config.controlTargets.some( ( target ) => target.cornersEnu !== undefined ),
-				createdAt: Date.now()
-			} );
 			return config;
 		} catch ( error ) {
-			console.error( '[SiteConfigLoadFailed]', {
+			arError( '[SiteConfigLoadFailed]', {
 				mode: 'repository',
 				siteId,
 				dataSource: 'local',

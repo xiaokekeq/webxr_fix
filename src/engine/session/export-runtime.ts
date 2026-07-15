@@ -1,4 +1,5 @@
-﻿import type * as THREE from 'three';
+import { arError } from '@/engine/debug/ar-logger.js';
+import type * as THREE from 'three';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import { createRegistrationSnapshot } from './view-state.js';
@@ -38,7 +39,7 @@ export function exportSceneSnapshot(options: {
 			statusMessage: `截图已导出：${fileName}`
 		};
 	} catch ( error ) {
-		console.error( 'Snapshot export failed:', error );
+		arError( 'Snapshot export failed:', error );
 		return {
 			ok: false,
 			statusMessage: '截图失败，当前环境可能限制了画面导出。'

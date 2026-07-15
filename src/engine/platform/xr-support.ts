@@ -1,3 +1,4 @@
+import { arWarn, arError } from '@/engine/debug/ar-logger.js';
 import * as THREE from 'three';
 import type {
 	ArSessionStartResult,
@@ -84,15 +85,6 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		const startResult = pendingStartResult ?? createSessionResult( session, true, false, null );
 		pendingStartResult = null;
 		onSessionStart?.( startResult );
-		console.info( '[ArSessionStarted]', {
-			depthRequested: startResult.depthRequested,
-			depthGranted: startResult.depthGranted,
-			depthUsage: startResult.depthUsage,
-			depthDataFormat: startResult.depthDataFormat,
-			depthActive: startResult.depthActive,
-			fallbackUsed: startResult.fallbackUsed,
-			fallbackReason: startResult.fallbackReason
-		} );
 		setStatus( '已进入 AR，请缓慢移动手机，让系统持续识别地面或墙面。' );
 
 		const viewerSpace = await session.requestReferenceSpace( 'viewer' );
@@ -235,7 +227,7 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		try {
 			return await result.createAnchor();
 		} catch ( error ) {
-			console.warn( '[XRAnchorPlacement]', { created: false, reason: 'createAnchor failed', error } );
+			arWarn( '[XRAnchorPlacement]', { created: false, reason: 'createAnchor failed', error } );
 			return null;
 		}
 
@@ -277,7 +269,7 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 			} catch ( error ) {
 				sessionRequestPending = false;
 				pendingStartResult = null;
-				console.error( 'XR session request failed:', error );
+				arError( 'XR session request failed:', error );
 				setStatus( error instanceof Error ? `AR 会话启动失败：${error.message}` : 'AR 会话启动失败。' );
 			}
 

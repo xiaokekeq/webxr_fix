@@ -1,3 +1,4 @@
+import { arWarn } from '@/engine/debug/ar-logger.js';
 import * as THREE from 'three';
 import type { XRHitTestController } from '@/features/ar/types/runtime-types.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
@@ -40,7 +41,7 @@ export class PlacementWorkflow {
 		const localization = this.options.getPreferredLocalizationOverride();
 		if ( modelTemplate === null || registrationSolution === null || localization === null ) {
 			const runtime = this.options.getRuntimeLoadStatus();
-			console.warn( '[EngineeringPlacementBlocked]', {
+			arWarn( '[EngineeringPlacementBlocked]', {
 				hasModelTemplate: modelTemplate !== null,
 				hasRegistrationSolution: registrationSolution !== null,
 				hasLocalization: localization !== null,
@@ -61,10 +62,6 @@ export class PlacementWorkflow {
 		this.options.onBeforePlacementRequest();
 		const localizationOverride = localization;
 		const hadPlacedModel = this.options.placementSession.getPlacedModel() !== null;
-		console.info( '[EngineeringPlacementTriggered]', this.createPlacementLogPayload( {
-			source: localizationOverride?.source ?? 'missing',
-			localizationReady: localizationOverride !== null
-		} ) );
 		const placed = this.options.placementSession.placeEngineeringModelFromCurrentArFromEnu( {
 			modelTemplate,
 			registrationSolution,
@@ -75,10 +72,6 @@ export class PlacementWorkflow {
 			this.options.applyModelLayerVisibility();
 			this.options.syncRegistrationChainDebug();
 			if ( hadPlacedModel === false ) {
-				console.info( '[EngineeringModelPlaced]', this.createPlacementLogPayload( {
-					source: localizationOverride?.source ?? 'missing',
-					localizationReady: localizationOverride !== null
-				} ) );
 				this.options.onPlacementCompleted();
 			}
 			this.options.syncArSessionPhase();
@@ -102,17 +95,6 @@ export class PlacementWorkflow {
 		this.options.placementSession.requestAutoPlacement( this.options.getModelTemplate() );
 		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
 			const localizationOverride = this.options.getPreferredLocalizationOverride();
-			console.info( '[ArInspectionEngineeringPlacementRequested]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: this.options.getCurrentSessionId(),
-				targetId: this.options.getInspectionTargetId(),
-				source: localizationOverride?.source ?? 'missing',
-				stableFrameCount: this.options.getInspectionStableFrameCount(),
-				hasHitTest: this.options.getHitTestController().hasGroundHit(),
-				usesHitTestForFinalPose: false,
-				createdAt: Date.now()
-			} );
 		}
 		this.attemptAutoPlacement();
 
@@ -124,25 +106,14 @@ export class PlacementWorkflow {
 		const localizationOverride = this.options.getPreferredLocalizationOverride();
 		if ( localizationOverride === null ) {
 			if ( this.options.getHitTestController().hasGroundHit() ) {
-				console.warn( '[HitTestReadyButLocalizationMissing]', this.createPlacementLogPayload( {
+				arWarn( '[HitTestReadyButLocalizationMissing]', this.createPlacementLogPayload( {
 					source: 'unknown',
 					localizationReady: false
 				} ) );
 			}
-			console.info( '[FormalLocalizationRequired]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: this.options.getCurrentSessionId(),
-				reason: 'no marker ENU-to-AR transform available',
-				createdAt: Date.now()
-			} );
 			return;
 		}
 
-		console.info( '[EngineeringPlacementTriggered]', this.createPlacementLogPayload( {
-			source: localizationOverride.source,
-			localizationReady: true
-		} ) );
 
 		this.options.placementSession.attemptLocalizedPlacement( {
 			modelTemplate: this.options.getModelTemplate(),
@@ -158,10 +129,6 @@ export class PlacementWorkflow {
 
 		const placedModel = this.options.placementSession.getPlacedModel();
 		if ( hadPlacedModel === false && placedModel !== null ) {
-			console.info( '[EngineeringModelPlaced]', this.createPlacementLogPayload( {
-				source: localizationOverride.source,
-				localizationReady: true
-			} ) );
 			this.options.onPlacementCompleted();
 		}
 

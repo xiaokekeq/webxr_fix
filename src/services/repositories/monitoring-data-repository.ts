@@ -106,23 +106,5 @@ export class ApiMonitoringDataRepository implements MonitoringDataRepository {
 
 function logMonitoringData(action: string, siteId: string): void {
 
-	console.info( '[MonitoringDataLoadStarted]', {
-		mode: 'repository',
-		siteId,
-		dataSource: 'local',
-		repository: 'monitoring',
-		targetId: action,
-		imageUrl: null,
-		createdAt: Date.now()
-	} );
-	console.info( '[MonitoringDataLoadSucceeded]', {
-		mode: 'repository',
-		siteId,
-		dataSource: 'local',
-		repository: 'monitoring',
-		targetId: action,
-		imageUrl: null,
-		createdAt: Date.now()
-	} );
 
 }

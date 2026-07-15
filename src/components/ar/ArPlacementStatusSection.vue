@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { computed } from 'vue';
 import ArInfoGrid from './ArInfoGrid.vue';
 import ArPanelSection from './ArPanelSection.vue';
 import type {
 	ArSessionPhase,
 	RegistrationStoreState
 } from '@/localization/core/registration-store.js';
-import { arInfo } from '@/engine/debug/ar-logger.js';
 
 const props = withDefaults( defineProps<{
 	state: RegistrationStoreState;
@@ -27,21 +26,6 @@ const placementCards = computed( () => [
 ] );
 
 const placementHint = computed( () => resolvePlacementHint( props.state ) );
-
-watch(
-	() => [
-		props.state.arSessionPhase,
-		props.state.registrationChainDebug.arSessionLocalization.source,
-		props.state.markerCalibration.active,
-		props.state.markerCalibration.applied,
-		props.state.markerCalibration.looseThresholdAccepted,
-		props.state.placementSummary.positionText
-	].join( '|' ),
-	() => {
-		arInfo( 'ArUiLocalizationStepChanged', createUiLogPayload( props.state, resolveCurrentStep( props.state ), placementHint.value ) );
-	},
-	{ immediate: true }
-);
 
 function formatConfigStatus(state: RegistrationStoreState): string {
 
@@ -127,50 +111,6 @@ function resolvePlacementHint(state: RegistrationStoreState): string {
 
 }
 
-function resolveCurrentStep(state: RegistrationStoreState): string {
-
-	if ( state.appMode !== 'ar-session' ) {
-		return 'enter-ar';
-	}
-
-	if ( state.arSessionPhase === 'scanning' ) {
-		return 'scan-plane';
-	}
-
-	if ( state.markerCalibration.active ) {
-		return 'capture-marker-corner';
-	}
-
-	if ( state.registrationChainDebug.arSessionLocalization.available === false ) {
-		return 'align-marker';
-	}
-
-	if ( state.placementSummary.positionText === '-' ) {
-		return 'place-model';
-	}
-
-	return 'inspect';
-
-}
-
-function createUiLogPayload(
-	state: RegistrationStoreState,
-	currentStep: string,
-	message: string
-): Record<string, unknown> {
-
-	return {
-		mode: state.workflowMode,
-		siteId: state.selectedModelId || null,
-		modelId: state.selectedModelId || null,
-		sessionId: state.markerCalibration.currentSessionId,
-		currentStep,
-		localizationSource: state.registrationChainDebug.arSessionLocalization.source,
-		targetId: state.engineeringConfigStatus.activeControlTargetId ?? state.markerCalibration.markerId,
-		message
-	};
-
-}
 </script>
 
 <template>

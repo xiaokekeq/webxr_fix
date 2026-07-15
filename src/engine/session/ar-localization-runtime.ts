@@ -1,3 +1,4 @@
+import { arWarn } from '@/engine/debug/ar-logger.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 
 interface ArLocalizationRuntimeOptions {
@@ -42,7 +43,7 @@ export class ArLocalizationRuntime {
 			|| activeMarkerSolution.sessionId !== this.options.getCurrentSessionId()
 		) {
 			if ( activeMarkerSolution !== null ) {
-				console.warn( '[CurrentSessionLocalizationRejectedSessionMismatch]', {
+				arWarn( '[CurrentSessionLocalizationRejectedSessionMismatch]', {
 					mode: 'marker-corners-4',
 					workflowMode: null,
 					siteId: null,

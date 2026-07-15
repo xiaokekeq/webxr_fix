@@ -1,13 +1,8 @@
-﻿import * as THREE from 'three';
 import type { SetStatus } from '@/features/ar/types/runtime-types.js';
-import {
-	enuToGeodetic,
-	type GeodeticCoordinate
-} from '@/localization/core/geodesy.js';
+import type { GeodeticCoordinate } from '@/localization/core/geodesy.js';
 import { convertGeodeticToWgs84 } from '@/localization/core/coordinate-systems.js';
 import type { RtkSurveyDataset } from '@/localization/rtk/rtk-survey-dataset.js';
 import type { VisualControlTarget } from '@/localization/baseline/site-calibration-baseline.js';
-import { createCornerOrderConfigLoadedPayload } from '@/localization/core/corner-order-diagnostics.js';
 import type {
 	AnnotationSeverity,
 	AnnotationStyleRule,
@@ -15,7 +10,7 @@ import type {
 	EngineeringAnnotation,
 	EnuPoint
 } from '@/engine/annotation/annotation-types.js';
-import { arDebug, arError, arInfo, arWarn } from '@/engine/debug/ar-logger.js';
+import { arError, arWarn } from '@/engine/debug/ar-logger.js';
 
 export interface DemoModelLocalPoint {
 	x: number;
@@ -171,7 +166,7 @@ export interface DemoModelConfig {
 	annotations: EngineeringAnnotation[];
 	annotationStyleRules: AnnotationStyleRule[];
 	markerCalibration?: {
-		solveMode?: 'ground-plane-2d' | 'rigid-3d-debug';
+		solveMode?: 'ground-plane-2d' | 'rigid-3d';
 		maxSelfCheckErrorMeters?: number;
 		note?: string;
 	};
@@ -198,54 +193,9 @@ interface RawGeodeticCoordinateShape {
 	coordType?: string;
 }
 
-type PointLike = DemoModelLocalPoint | [ number, number, number ] | number[];
-
-interface LocalDebugOriginShape {
-	lng: number;
-	lat: number;
-	height?: number;
-	alt?: number;
-	coordType?: string;
-}
-
-interface LocalDebugControlPointShape {
-	id: string;
-	name?: string;
-	modelLocal: PointLike;
-	siteENU: PointLike;
-}
-
 interface RawEnclosureShellConfig {
 	source?: unknown;
 	objectName?: unknown;
-}
-
-interface LocalDebugModelConfig {
-	siteId: string;
-	origin: LocalDebugOriginShape;
-	anchorModelLocal?: PointLike;
-	yawDeg?: number;
-	scale?: number;
-	controlPoints?: LocalDebugControlPointShape[];
-	markers?: RawMarkerEngineeringConfig[];
-	attachments?: RawDemoModelAttachmentShape[];
-	attachmentsUrl?: string;
-	rtkSurveyDataset?: RtkSurveyDataset;
-	controlTargets?: VisualControlTarget[];
-	placementAnchorEnu?: [ number, number, number ];
-	placementAnchorMeaning?: string;
-	placementAnchorModelLocal?: [ number, number, number ];
-	undergroundDisplay?: UndergroundDisplayConfig;
-	enclosureShell?: RawEnclosureShellConfig;
-	groundClassification?: ModelGroundClassificationConfig;
-	display?: ModelDisplayConfig;
-	modelInstances?: ModelInstanceConfig[];
-	undergroundObjects?: unknown[];
-	sensors?: unknown[];
-	riskPoints?: unknown[];
-	annotations?: unknown[];
-	annotationStyleRules?: unknown[];
-	markerCalibration?: DemoModelConfig['markerCalibration'];
 }
 
 interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'registration' | 'controlPoints' | 'markers' | 'attachments' | 'controlTargets' | 'undergroundDisplay' | 'enclosureShell' | 'groundClassification' | 'display' | 'modelInstances' | 'annotations' | 'annotationStyleRules'> {
@@ -279,7 +229,7 @@ interface LegacyDemoModelConfig extends Omit<DemoModelConfig, 'siteFrame' | 'reg
 	annotationStyleRules?: unknown[];
 }
 
-type RawDemoModelConfig = LegacyDemoModelConfig | LocalDebugModelConfig;
+type RawDemoModelConfig = LegacyDemoModelConfig;
 type RawAttachmentCollection = RawDemoModelAttachmentShape[] | {
 	attachments: RawDemoModelAttachmentShape[];
 };
@@ -301,15 +251,12 @@ export async function loadDemoModelConfig(
 		const enrichedRaw = await enrichDemoModelConfigAttachments( raw );
 		const normalized = normalizeDemoModelConfig( enrichedRaw );
 		validateDemoModelConfig( normalized );
-		arInfo( 'DemoModelConfigLoaded', createConfigDebugPayload( url, normalized ) );
-		arInfo( 'CornerOrderConfigLoaded', createCornerOrderConfigLoadedPayload( url, normalized ) );
-		arDebug( 'DemoModelConfigNormalized', normalized );
 
 		return normalized;
 	} catch ( error ) {
 		arError( 'DemoModelConfigParseFailed', {
 			configUrl: url,
-			modelId: 'modelId' in raw ? raw.modelId : 'siteId' in raw ? raw.siteId : null,
+			modelId: raw.modelId,
 			hasSiteFrameOrigin: 'siteFrame' in raw && raw.siteFrame?.origin !== undefined,
 			rawModelControlPointOrder: Array.isArray( ( raw as { modelControlPointOrder?: unknown } ).modelControlPointOrder )
 				? ( raw as { modelControlPointOrder: unknown[] } ).modelControlPointOrder
@@ -338,10 +285,6 @@ export function getFirstGeodeticPointFromDemoModelConfig(
 }
 
 function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
-
-	if ( isLocalDebugModelConfig( config ) ) {
-		return normalizeLocalDebugModelConfig( config );
-	}
 
 	const anchor = normalizeGeodeticShape( config.anchor as RawGeodeticCoordinateShape, 'anchor' );
 	const siteOrigin = normalizeGeodeticShape(
@@ -436,174 +379,12 @@ function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelConfig {
 
 }
 
-function normalizeLocalDebugModelConfig(config: LocalDebugModelConfig): DemoModelConfig {
-
-	const origin = normalizeLocalDebugOrigin( config.origin );
-	const normalizedControlPoints = normalizeLocalDebugControlPoints( config, origin );
-	const registration = {
-		mode: 'rigid-ground-plane' as const,
-		minControlPoints: 3
-	};
-	const modelControlTargetDiagnostics = createModelControlTargetDiagnostics(
-		getRawModelControlPointCount( config ),
-		normalizedControlPoints,
-		registration.minControlPoints
-	);
-
-	const markers = loadMarkerEngineeringConfigs( config.markers );
-	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.siteId );
-	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints );
-
-	return {
-		modelId: config.siteId,
-		siteId: config.siteId,
-		siteFrame: {
-			origin,
-			axes: 'enu'
-		},
-		anchor: origin,
-		yaw: config.yawDeg ?? 0,
-		scale: config.scale ?? 1,
-		registration,
-		controlPoints: normalizedControlPoints,
-		modelControlTargetDiagnostics,
-		markers,
-		attachments: normalizeAttachments( config.attachments ),
-		rtkSurveyDataset: normalizeRtkSurveyDataset( config.rtkSurveyDataset, config.siteId ),
-		controlTargets,
-		placementAnchorEnu: normalizeEnuTuple( config.placementAnchorEnu ),
-		placementAnchorMeaning: typeof config.placementAnchorMeaning === 'string' ? config.placementAnchorMeaning : undefined,
-		placementAnchorModelLocal: normalizeEnuTuple( config.placementAnchorModelLocal ),
-		undergroundDisplay: normalizeUndergroundDisplayConfig( config.undergroundDisplay ),
-		enclosureShell: normalizeEnclosureShellConfig( config.enclosureShell ),
-		groundClassification: normalizeGroundClassificationConfig( config.groundClassification ),
-		display: normalizeModelDisplayConfig( config.display, config.undergroundDisplay ),
-		modelInstances: normalizeModelInstances( config.modelInstances, config.siteId, config.undergroundDisplay, config.groundClassification, config.display ),
-		undergroundObjects: Array.isArray( config.undergroundObjects ) ? config.undergroundObjects : [],
-		sensors: Array.isArray( config.sensors ) ? config.sensors : [],
-		riskPoints: Array.isArray( config.riskPoints ) ? config.riskPoints : [],
-		annotations,
-		annotationStyleRules: normalizeAnnotationStyleRules( config.annotationStyleRules ),
-		markerCalibration: config.markerCalibration,
-		configCompleteness: {
-			hasExplicitSiteId: true,
-			hasSiteName: hasOwnObjectKey( config, 'siteName' ),
-			hasExplicitModelLocalToEnu: hasOwnObjectKey( config, 'modelLocalToEnu' ),
-			controlPointsHaveEnu: ( config.controlPoints ?? [] ).every( hasControlPointEnu )
-		}
-	};
-
-}
-
-function normalizeLocalDebugControlPoints(
-	config: LocalDebugModelConfig,
-	origin: GeodeticCoordinate
-): Record<string, DemoModelControlPointCorrespondence> {
-
-	const controlPoints = Array.isArray( config.controlPoints )
-		? config.controlPoints
-		: [];
-
-	if ( controlPoints.length >= 3 ) {
-		const normalizedControlPoints: Record<string, DemoModelControlPointCorrespondence> = {};
-
-		for ( const point of controlPoints ) {
-			const modelLocal = normalizePointLike( point.modelLocal, `${point.id}.modelLocal` );
-			const siteEnu = normalizePointLike( point.siteENU, `${point.id}.siteENU` );
-			// Local debug configs are authored as [east, height, north] so remap them
-			// into the runtime ENU basis [east, north, up].
-			const world = enuToGeodetic( new THREE.Vector3( siteEnu.x, siteEnu.z, siteEnu.y ), origin );
-
-			normalizedControlPoints[ point.id ] = {
-				modelLocal,
-				enu: [ siteEnu.x, siteEnu.z, siteEnu.y ],
-				world
-			};
-		}
-
-		return normalizedControlPoints;
-	}
-
-	const anchorModelLocal = normalizePointLike(
-		config.anchorModelLocal ?? [ 0, 0, 0 ],
-		'anchorModelLocal'
-	);
-	const yawDeg = typeof config.yawDeg === 'number' ? config.yawDeg : 0;
-	const scale = typeof config.scale === 'number' && Number.isFinite( config.scale ) && config.scale > 0
-		? config.scale
-		: 1;
-
-	return {
-		ANCHOR: {
-			modelLocal: anchorModelLocal,
-			enu: [ 0, 0, 0 ],
-			world: origin
-		},
-		AXIS_EAST: {
-			modelLocal: {
-				x: anchorModelLocal.x + 1,
-				y: anchorModelLocal.y,
-				z: anchorModelLocal.z
-			},
-			enu: [ 1, 0, 0 ],
-			world: synthesizeLocalDebugAnchorWorldPoint(
-				anchorModelLocal,
-				{ x: anchorModelLocal.x + 1, y: anchorModelLocal.y, z: anchorModelLocal.z },
-				origin,
-				yawDeg,
-				scale
-			)
-		},
-		AXIS_NORTH: {
-			modelLocal: {
-				x: anchorModelLocal.x,
-				y: anchorModelLocal.y,
-				z: anchorModelLocal.z - 1
-			},
-			enu: [ 0, 1, 0 ],
-			world: synthesizeLocalDebugAnchorWorldPoint(
-				anchorModelLocal,
-				{ x: anchorModelLocal.x, y: anchorModelLocal.y, z: anchorModelLocal.z - 1 },
-				origin,
-				yawDeg,
-				scale
-			)
-		},
-		AXIS_UP: {
-			modelLocal: {
-				x: anchorModelLocal.x,
-				y: anchorModelLocal.y + 1,
-				z: anchorModelLocal.z
-			},
-			enu: [ 0, 0, 1 ],
-			world: synthesizeLocalDebugAnchorWorldPoint(
-				anchorModelLocal,
-				{ x: anchorModelLocal.x, y: anchorModelLocal.y + 1, z: anchorModelLocal.z },
-				origin,
-				yawDeg,
-				scale
-			)
-		}
-	};
-
-}
-
 function normalizeEngineeringAnnotations(
 	rawAnnotations: unknown[] | undefined,
 	controlPoints: Record<string, DemoModelControlPointCorrespondence>
 ): EngineeringAnnotation[] {
 
 	if ( Array.isArray( rawAnnotations ) === false ) {
-		arInfo( 'AnnotationConfigLoaded', {
-			totalRaw: 0,
-			totalValid: 0,
-			skippedIds: [],
-			annotationIds: [],
-			severityCounts: {},
-			layerIds: [],
-			generatedFromControlPoints: false,
-			generatedFromControlTargets: false
-		} );
 		return [];
 	}
 
@@ -645,16 +426,6 @@ function normalizeEngineeringAnnotations(
 		annotations.push( normalized );
 	}
 
-	arInfo( 'AnnotationConfigLoaded', {
-		totalRaw: rawAnnotations.length,
-		totalValid: annotations.length,
-		skippedIds,
-		annotationIds: annotations.map( ( annotation ) => annotation.id ),
-		severityCounts: countAnnotationSeverities( annotations ),
-		layerIds: Array.from( new Set( annotations.map( ( annotation ) => annotation.layerId ) ) ),
-		generatedFromControlPoints: false,
-		generatedFromControlTargets: false
-	} );
 
 	return annotations;
 
@@ -1035,13 +806,6 @@ function normalizeRtkSurveyDataset(
 ): RtkSurveyDataset | undefined {
 
 	if ( dataset === undefined ) {
-		arInfo( 'RtkSurveyDatasetLoaded', {
-			siteId,
-			pointCount: 0,
-			source: null,
-			coordinateSystem: null,
-			createdAt: Date.now()
-		} );
 		return undefined;
 	}
 
@@ -1057,13 +821,6 @@ function normalizeRtkSurveyDataset(
 		points: Array.isArray( dataset.points ) ? dataset.points : []
 	};
 
-	arInfo( 'RtkSurveyDatasetLoaded', {
-		siteId: normalized.siteId,
-		pointCount: normalized.points.length,
-		source: normalized.source ?? null,
-		coordinateSystem: normalized.coordinateSystem,
-		createdAt: Date.now()
-	} );
 	return normalized;
 
 }
@@ -1105,14 +862,6 @@ function normalizeSiteConfigControlTargets(
 	} );
 	const resolvedTargets = [ ...normalizedTargets, ...markerFallbackTargets ];
 
-	arInfo( 'SiteConfigControlTargetsResolved', {
-		siteId,
-		sourceControlTargetsCount: Array.isArray( targets ) ? targets.length : 0,
-		sourceMarkersCount: markers.length,
-		resolvedControlTargetsCount: resolvedTargets.length,
-		usedMarkerFallbackCount: markerFallbackTargets.length,
-		createdAt: Date.now()
-	} );
 
 	return resolvedTargets;
 
@@ -1143,12 +892,6 @@ function normalizeVisualControlTargets(
 			return [];
 		}
 
-		arInfo( 'RtkSurveyControlTargetResolved', {
-			targetId: target.id,
-			resolved: true,
-			hasCornersEnu: cornersEnu !== undefined,
-			createdAt: Date.now()
-		} );
 
 		return [ {
 			...target,
@@ -1548,30 +1291,6 @@ function normalizeMarkerSizeMeters(marker: RawMarkerEngineeringConfig): number |
 
 }
 
-function createConfigDebugPayload(configUrl: string, config: DemoModelConfig): Record<string, unknown> {
-
-	return {
-		modelId: config.modelId,
-		siteId: config.siteId,
-		configUrl,
-		rawModelControlPointCount: config.modelControlTargetDiagnostics.rawModelControlPointCount,
-		normalizedModelControlTargetCount: config.modelControlTargetDiagnostics.normalizedModelControlTargetCount,
-		requiredModelControlTargetCount: config.modelControlTargetDiagnostics.requiredModelControlTargetCount,
-		modelControlTargetIds: config.modelControlTargetDiagnostics.modelControlTargetIds,
-		modelControlPointOrder: config.modelControlTargetDiagnostics.modelControlTargetIds,
-		modelControlTargetValidationState: config.modelControlTargetDiagnostics.modelControlTargetValidationState,
-		modelControlTargetFailureReason: config.modelControlTargetDiagnostics.modelControlTargetFailureReason ?? null,
-		siteFrameOriginLoaded: typeof config.siteFrame.origin.lat === 'number' && typeof config.siteFrame.origin.lon === 'number',
-		controlTargetCount: config.controlTargets.length,
-		markersCount: config.markers.length,
-		cornersEnuValid: config.controlTargets.map( ( target ) => ( {
-			id: target.id,
-			hasCornersEnu: normalizeCornersEnu( target.cornersEnu ) !== undefined
-		} ) )
-	};
-
-}
-
 function isControlPointCorrespondence(
 	point:
 		| DemoModelControlPointCorrespondence
@@ -1584,36 +1303,6 @@ function isControlPointCorrespondence(
 ): point is DemoModelControlPointCorrespondence {
 
 	return 'modelLocal' in point && 'world' in point;
-
-}
-
-function isLocalDebugModelConfig(config: RawDemoModelConfig): config is LocalDebugModelConfig {
-
-	return 'siteId' in config
-		&& typeof config.siteId === 'string'
-		&& 'origin' in config
-		&& typeof config.origin === 'object'
-		&& config.origin !== null;
-
-}
-
-function normalizeLocalDebugOrigin(origin: LocalDebugOriginShape): GeodeticCoordinate {
-
-	if ( typeof origin.lat !== 'number' || typeof origin.lng !== 'number' ) {
-		throw new Error( 'Debug site config is missing a valid origin lat/lng.' );
-	}
-
-	const altitude = typeof origin.height === 'number'
-		? origin.height
-		: typeof origin.alt === 'number'
-			? origin.alt
-			: 0;
-
-	return convertGeodeticToWgs84( {
-		lat: origin.lat,
-		lon: origin.lng,
-		alt: altitude
-	}, origin.coordType );
 
 }
 
@@ -1646,84 +1335,6 @@ function normalizeGeodeticShape(
 		lon: longitude,
 		alt: altitude
 	}, coordinate.coordType );
-
-}
-
-function normalizePointLike(point: PointLike, label: string): DemoModelLocalPoint {
-
-	if ( Array.isArray( point ) ) {
-		if ( point.length < 3 || point.slice( 0, 3 ).some( ( value ) => typeof value !== 'number' ) ) {
-			throw new Error( `Debug site point ${label} must contain three numeric entries.` );
-		}
-
-		return {
-			x: point[ 0 ],
-			y: point[ 1 ],
-			z: point[ 2 ]
-		};
-	}
-
-	if (
-		typeof point === 'object'
-		&& point !== null
-		&& typeof point.x === 'number'
-		&& typeof point.y === 'number'
-		&& typeof point.z === 'number'
-	) {
-		return {
-			x: point.x,
-			y: point.y,
-			z: point.z
-		};
-	}
-
-	throw new Error( `Debug site point ${label} is invalid.` );
-
-}
-
-function synthesizeWorldControlPoint(
-	localPoint: DemoModelLocalPoint,
-	anchor: GeodeticCoordinate,
-	yawDeg: number,
-	scale: number
-): GeodeticCoordinate {
-
-	const yawRad = yawDeg * Math.PI / 180;
-	const scaledX = localPoint.x * scale;
-	const scaledY = localPoint.y * scale;
-	const scaledZ = localPoint.z * scale;
-	const eastMeters = scaledX * Math.cos( yawRad ) - scaledZ * Math.sin( yawRad );
-	const northMeters = scaledX * Math.sin( yawRad ) + scaledZ * Math.cos( yawRad );
-	const metersPerLat = 111320;
-	const metersPerLon = 111320 * Math.cos( anchor.lat * Math.PI / 180 );
-
-	return {
-		lat: anchor.lat + northMeters / metersPerLat,
-		lon: anchor.lon + eastMeters / metersPerLon,
-		alt: anchor.alt + scaledY
-	};
-
-}
-
-function synthesizeLocalDebugAnchorWorldPoint(
-	anchorModelLocal: DemoModelLocalPoint,
-	localPoint: DemoModelLocalPoint,
-	anchor: GeodeticCoordinate,
-	yawDeg: number,
-	scale: number
-): GeodeticCoordinate {
-
-	const localDeltaX = ( localPoint.x - anchorModelLocal.x ) * scale;
-	const localDeltaY = ( localPoint.y - anchorModelLocal.y ) * scale;
-	const localDeltaNorth = - ( localPoint.z - anchorModelLocal.z ) * scale;
-	const yawRad = yawDeg * Math.PI / 180;
-	const eastMeters = localDeltaX * Math.cos( yawRad ) - localDeltaNorth * Math.sin( yawRad );
-	const northMeters = localDeltaX * Math.sin( yawRad ) + localDeltaNorth * Math.cos( yawRad );
-
-	return enuToGeodetic(
-		new THREE.Vector3( eastMeters, northMeters, localDeltaY ),
-		anchor
-	);
 
 }
 

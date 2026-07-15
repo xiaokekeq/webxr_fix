@@ -328,12 +328,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		refreshSavedMarkerLocalization(): void {
-
-			ensureController().actions.refreshSavedMarkerLocalization();
-
-		},
-
 		startCurrentSessionMarkerCalibration(): void {
 
 			handleStartCurrentSessionMarkerCalibration();
@@ -367,12 +361,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		clearMarkerLocalizationCorrection(): void {
 
 			ensureController().actions.clearMarkerLocalizationCorrection();
-
-		},
-
-		clearSavedMarkerLocalization(): void {
-
-			ensureController().actions.clearSavedMarkerLocalization();
 
 		},
 

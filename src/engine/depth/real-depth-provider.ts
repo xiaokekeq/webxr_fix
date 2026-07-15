@@ -1,3 +1,4 @@
+import { arWarn, arError } from '@/engine/debug/ar-logger.js';
 import * as THREE from 'three';
 
 export type CpuDepthSampleEncoding = 'uint16-raw';
@@ -60,7 +61,7 @@ export class RealDepthProvider {
 
 		if ( this.depthEnabled === false && this.unsupportedConfigurationLogged === false ) {
 			this.unsupportedConfigurationLogged = true;
-			console.warn( '[UnsupportedDepthConfiguration]', { depthUsage, depthDataFormat } );
+			arWarn( '[UnsupportedDepthConfiguration]', { depthUsage, depthDataFormat } );
 		}
 
 	}
@@ -202,7 +203,7 @@ export class RealDepthProvider {
 			return;
 		}
 		this.lastErrorLogAt = now;
-		console.error( '[RealDepthProviderReadFailed]', {
+		arError( '[RealDepthProviderReadFailed]', {
 			errorName: error instanceof Error ? error.name : typeof error,
 			errorMessage: error instanceof Error ? error.message : String( error ),
 			width: this.width,

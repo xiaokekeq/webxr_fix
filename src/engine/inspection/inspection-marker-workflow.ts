@@ -37,9 +37,6 @@ export class InspectionMarkerWorkflow {
 		}
 
 		this.options.setStatus( STATUS_MANUAL_MARKER_READY );
-		console.info( '[ManualMarkerPlacementSessionStarted]', this.buildLogPayload( {
-			reason: 'manual-marker-current-session-flow'
-		} ) );
 
 	}
 

@@ -1,4 +1,5 @@
-﻿import * as THREE from 'three';
+import { arError } from '@/engine/debug/ar-logger.js';
+import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
@@ -110,7 +111,7 @@ async function loadGltfModelTemplate(
 				}
 			},
 			( error ) => {
-				console.error( 'AR model load failed:', error );
+				arError( 'AR model load failed:', error );
 				setStatus( '模型加载失败，请检查 glb 文件路径。' );
 				reject( error );
 			}
@@ -136,18 +137,6 @@ async function loadFbxModelTemplate(
 				attachModelSourceMetadata( template, extractModelSourceMetadata( object, 'fbx' ) );
 				logPlaceableTemplateReport( report );
 
-				console.info(
-					'[Model Scale]',
-					{
-						originalSizeMeters: report.originalSize,
-						originalLongestEdgeMeters: report.originalLongestEdgeMeters,
-						appliedScaleFactor: report.appliedScaleFactor,
-						perModelScaleFactor: report.perModelScaleFactor,
-						scaledSizeMeters: report.scaledSize,
-						calibrationMode: report.calibrationMode,
-						note: MODEL_SCALE_CALIBRATION.note
-					}
-				);
 
 				setStatus(
 					`FBX 模型加载成功，原始包围盒 ${formatSize( report.originalSize )}，缩放 ${report.appliedScaleFactor.toFixed( 3 )}x`
@@ -163,7 +152,7 @@ async function loadFbxModelTemplate(
 				}
 			},
 			( error ) => {
-				console.error( 'AR FBX model load failed:', error );
+				arError( 'AR FBX model load failed:', error );
 				setStatus( 'FBX 模型加载失败，请检查 fbx 文件和贴图路径。' );
 				reject( error );
 			}
@@ -203,18 +192,6 @@ async function loadObjModelTemplate(
 					attachModelSourceMetadata( template, extractModelSourceMetadata( object, 'obj' ) );
 					logPlaceableTemplateReport( report );
 
-					console.info(
-						'[Model Scale]',
-						{
-							originalSizeMeters: report.originalSize,
-							originalLongestEdgeMeters: report.originalLongestEdgeMeters,
-							appliedScaleFactor: report.appliedScaleFactor,
-							perModelScaleFactor: report.perModelScaleFactor,
-							scaledSizeMeters: report.scaledSize,
-							calibrationMode: report.calibrationMode,
-							note: MODEL_SCALE_CALIBRATION.note
-						}
-					);
 
 					setStatus(
 						`模型加载成功，原始包围盒 ${formatSize( report.originalSize )}，缩放 ${report.appliedScaleFactor.toFixed( 3 )}x`
@@ -230,14 +207,14 @@ async function loadObjModelTemplate(
 					}
 				},
 				( error ) => {
-					console.error( 'AR OBJ model load failed:', error );
+					arError( 'AR OBJ model load failed:', error );
 					setStatus( '模型加载失败，请检查 obj / mtl 文件路径。' );
 					reject( error );
 				}
 			);
 		} );
 	} catch ( error ) {
-		console.error( 'AR OBJ material load failed:', error );
+		arError( 'AR OBJ material load failed:', error );
 		setStatus( '模型材质加载失败，请检查 mtl 和贴图路径。' );
 		throw error;
 	}
@@ -967,16 +944,6 @@ function buildModelLoadStatusMessage(
 
 function logPlaceableTemplateReport(report: PlaceableTemplateReport): void {
 
-	console.info( '[Model Scale]', {
-		originalModelBoundsMeters: report.originalSize,
-		unitScale: report.unitScale,
-		finalModelBoundsMeters: report.finalSize,
-		pivotOffset: report.pivotOffset,
-		appliedScaleFactor: report.appliedScaleFactor,
-		perModelScaleFactor: report.perModelScaleFactor,
-		calibrationMode: report.calibrationMode,
-		note: MODEL_SCALE_CALIBRATION.note
-	} );
 
 }
 

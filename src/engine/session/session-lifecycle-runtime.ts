@@ -4,7 +4,6 @@ import type { PlacementSession } from '@/engine/placement/session.js';
 import type { ArSessionStateRuntime } from '@/engine/session/ar-session-state-runtime.js';
 import type { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-workflow.js';
 import type { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
-import type { SavedMarkerLocalizationResult } from '@/localization/marker/marker-localization-storage.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 
 interface SessionLifecycleRuntimeOptions {
@@ -16,7 +15,6 @@ interface SessionLifecycleRuntimeOptions {
 	getSiteId(): string | null;
 	getPrimaryBaselineTargetId(): string | null;
 	getActiveMarkerArFromEnuSolution(): ArFromEnuSolution | null;
-	getActiveMarkerLocalizationResult(): SavedMarkerLocalizationResult | null;
 	hasGroundHit(): boolean;
 	resetMarkerLocalizationCorrection(): void;
 	refreshSiteCalibrationBaselineState(options?: { silentStatus?: boolean }): void;
@@ -65,29 +63,6 @@ export class SessionLifecycleRuntime {
 		this.options.syncArSessionPhase();
 		this.options.syncRegistrationChainDebug();
 		this.options.syncSceneHost();
-		console.info(
-			this.options.getWorkflowMode() === 'site-baseline-config'
-				? '[SiteBaselineConfigSessionStarted]'
-				: '[ArInspectionSessionStarted]',
-			{
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: currentSessionId,
-				source: null,
-				targetId: this.options.getPrimaryBaselineTargetId(),
-				createdAt: Date.now(),
-				trackingState: 'session-started',
-				stableFrameCount: 0
-			}
-		);
-		console.info( '[RtkRealtimeDeviceLocalizationReserved]', {
-			mode: this.options.getWorkflowMode(),
-			siteId: this.options.getSiteId(),
-			sessionId: currentSessionId,
-			active: false,
-			reason: 'reserved for future realtime RTK device localization',
-			createdAt: Date.now()
-		} );
 		this.options.emit();
 
 	}
@@ -103,18 +78,6 @@ export class SessionLifecycleRuntime {
 		this.options.placementSession.resetPlacement();
 		this.options.syncRegistrationChainDebug();
 		this.options.syncSceneHost();
-		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
-			console.info( '[ArInspectionSessionEnded]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: endedSessionId,
-				source: null,
-				targetId: null,
-				createdAt: Date.now(),
-				trackingState: 'session-ended',
-				stableFrameCount: 0
-			} );
-		}
 		this.options.emit();
 
 	}
@@ -134,18 +97,6 @@ export class SessionLifecycleRuntime {
 			&& activeMarkerSolution !== null
 			&& activeMarkerSolution.sessionId === this.options.getCurrentSessionId()
 		) {
-			console.info( '[ArInspectionAutoPlacementCompleted]', {
-				mode: this.options.getWorkflowMode(),
-				siteId: this.options.getSiteId(),
-				sessionId: this.options.getCurrentSessionId(),
-				targetId: this.options.getActiveMarkerLocalizationResult()?.markerId
-					?? this.options.inspectionMarkerWorkflow.getStableTargetId(),
-				source: activeMarkerSolution.source,
-				trackingState: 'placement-completed',
-				stableFrameCount: this.options.inspectionMarkerWorkflow.getStableFrameCount(),
-				hasHitTest: this.options.hasGroundHit(),
-				createdAt: Date.now()
-			} );
 			this.options.setStatus( '模型已按工程坐标显示，未强制贴地。' );
 			return;
 		}
