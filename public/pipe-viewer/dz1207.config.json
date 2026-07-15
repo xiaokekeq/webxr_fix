@@ -240,6 +240,14 @@
     "xrayOpacity": 0.5,
     "showDepthGuideLines": true
   },
+  "spatialType": "underground",
+  "defaultViewMode": "elevated-camera-offset",
+  "cameraHeightOffset": {
+    "heightFactor": 1,
+    "additionalHeightMeters": 0,
+    "minimumOffsetMeters": 0.5,
+    "maximumOffsetMeters": 30
+  },
   "enclosureShell": {
     "source": "disabled"
   },

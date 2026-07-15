@@ -19,6 +19,7 @@ export interface ARSceneBundle {
 	renderer: THREE.WebGLRenderer;
 	reticle: THREE.Group;
 	arPlacementAnchor: THREE.Group;
+	arModelPresentationRoot: THREE.Group;
 	arModelAnchor: THREE.Group;
 }
 

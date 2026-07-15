@@ -28,6 +28,7 @@ interface CreatePlacementSessionOptions {
 	propertySelection: PropertySelectionController;
 	setStatus(message: string): void;
 	updateRegistrationStatusDetail(message: string): void;
+	onModelPlaced?(model: THREE.Group): void;
 }
 
 export interface PlacementSession {
@@ -61,7 +62,8 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		sceneBundle,
 		propertySelection,
 		setStatus,
-		updateRegistrationStatusDetail
+		updateRegistrationStatusDetail,
+		onModelPlaced
 	} = options;
 
 	let arPlacedModel: THREE.Group | null = null;
@@ -111,6 +113,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			modelAnchor: sceneBundle.arModelAnchor,
 			adjustedPlacement
 		} );
+		onModelPlaced?.( arPlacedModel );
 		updateRegistrationStatusDetail( '状态：模型已按工程坐标显示' );
 		updatePlacementSummary();
 
@@ -248,6 +251,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				sceneBundle.arModelAnchor,
 				engineeringMatrix
 			);
+			onModelPlaced?.( arPlacedModel );
 			applyModelInstanceUserData( arPlacedModel, {
 				id: registrationSolution.modelId,
 				name: registrationSolution.modelId,
