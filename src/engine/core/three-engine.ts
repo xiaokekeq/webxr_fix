@@ -1925,6 +1925,7 @@ export class ThreeEngine {
 		this.placementSession.cancelAutoPlacement();
 		this.syncRegistrationChainDebug();
 		this.syncLocalizationDebug();
+		this.tryAutoPlaceAppliedMarkerSolution();
 		this.setStatus(
 			this.modelTemplate === null || this.registrationSolution === null
 				? 'Marker 校正成功，正在等待模型资源。'
