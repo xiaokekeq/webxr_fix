@@ -241,7 +241,7 @@
     "showDepthGuideLines": true
   },
   "spatialType": "underground",
-  "defaultViewMode": "elevated-camera-offset",
+  "defaultViewMode": "registered-ar",
   "cameraHeightOffset": {
     "heightFactor": 1,
     "additionalHeightMeters": 0,
