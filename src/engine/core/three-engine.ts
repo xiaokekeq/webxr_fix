@@ -2009,6 +2009,7 @@ export class ThreeEngine {
 		this.annotationLayer.clear();
 		this.annotationLayer.setSelected( null );
 		this.clearAnnotationDetail();
+		this.syncLocalizationDebug();
 
 	}
 
