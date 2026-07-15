@@ -1363,6 +1363,7 @@ export class ThreeEngine {
 				{ position: placedModel.localToWorld( new THREE.Vector3() ), label: '模型原点' }
 			];
 		this.localizationDebugLayer.sync( {
+			siteOrigin: solution === null ? [] : [ { position: solution.siteOriginArPosition.clone(), label: 'RTK工程原点' } ],
 			marker: solution === null || target === null ? [] : [ { position: new THREE.Vector3( ...target.centerEnu ).applyMatrix4( solution.matrix ), label: 'Marker' } ],
 			rtk,
 			model
