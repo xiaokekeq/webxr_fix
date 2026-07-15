@@ -14,6 +14,7 @@ const materials = Object.fromEntries(
 		toneMapped: false
 	} ) ] )
 ) as Record<keyof typeof colors, THREE.MeshBasicMaterial>;
+const rtkLineMaterial = new THREE.LineBasicMaterial( { color: colors.rtk, depthTest: false, depthWrite: false, toneMapped: false } );
 type DebugPoint = { position: THREE.Vector3; label: string; };
 
 export class LocalizationDebugLayer {
@@ -31,6 +32,7 @@ export class LocalizationDebugLayer {
 		this.clear();
 		this.add( 'marker', points.marker );
 		this.add( 'rtk', points.rtk );
+		this.addRtkLine( points.rtk );
 		this.add( 'model', points.model );
 
 	}
@@ -41,6 +43,7 @@ export class LocalizationDebugLayer {
 		this.root.removeFromParent();
 		geometry.dispose();
 		Object.values( materials ).forEach( ( material ) => material.dispose() );
+		rtkLineMaterial.dispose();
 
 	}
 
@@ -51,6 +54,7 @@ export class LocalizationDebugLayer {
 				object.material.map?.dispose();
 				object.material.dispose();
 			}
+			if ( object instanceof THREE.Line ) object.geometry.dispose();
 		} );
 		this.root.clear();
 
@@ -67,6 +71,15 @@ export class LocalizationDebugLayer {
 			label.position.copy( point.position ).add( new THREE.Vector3( 0, 0.1, 0 ) );
 			this.root.add( label );
 		}
+
+	}
+
+	private addRtkLine(points: DebugPoint[]): void {
+
+		if ( points.length < 2 ) return;
+		const line = new THREE.LineLoop( new THREE.BufferGeometry().setFromPoints( points.map( ( point ) => point.position ) ), rtkLineMaterial );
+		line.name = 'registration-rtk-line';
+		this.root.add( line );
 
 	}
 
