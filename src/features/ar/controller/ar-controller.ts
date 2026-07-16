@@ -9,6 +9,7 @@ import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { mapLegacyDisplayMode, type LegacyArDisplayMode, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import type { MarkerSolutionApplyResult } from '@/engine/inspection/marker-solution-apply-result.js';
+import type { ArProjectCapabilities, ArProjectConfig } from '@/shared/config/project-config.js';
 
 export interface InspectionDraft {
 	result: string;
@@ -62,9 +63,14 @@ export interface LoadModelArController {
 	};
 }
 
-export function createLoadModelArController(): LoadModelArController {
+export function assertArCapability(capabilities: ArProjectCapabilities, capability: keyof ArProjectCapabilities): void {
+	if ( capabilities[ capability ] === false ) throw new Error( `AR capability disabled: ${capability}` );
+}
 
-	const engine = new ThreeEngine();
+export function createLoadModelArController(config: ArProjectConfig): LoadModelArController {
+
+	const capabilities = config.capabilities;
+	const engine = new ThreeEngine( config );
 	const listeners = new Set<() => void>();
 
 	const unsubscribeEngine = engine.subscribe( () => {
@@ -129,6 +135,9 @@ export function createLoadModelArController(): LoadModelArController {
 			},
 
 			setDisplayMode(mode) {
+				if ( mode === 'transparent-xray' ) assertArCapability( capabilities, 'xray' );
+				if ( mode === 'layer-peeling' ) assertArCapability( capabilities, 'layerControl' );
+				if ( mode === 'section-cut' ) assertArCapability( capabilities, 'sectionCut' );
 
 				const state = mapLegacyDisplayMode( mode );
 				if ( state.undergroundMaterialMode !== undefined ) engine.setUndergroundMaterialMode( state.undergroundMaterialMode );
@@ -137,16 +146,24 @@ export function createLoadModelArController(): LoadModelArController {
 			},
 
 			setSectionCutPlaneMode(mode) {
+				assertArCapability( capabilities, 'sectionCut' );
 
 				engine.setSectionCutPlaneMode( mode );
 
 			},
 
-			setUndergroundMaterialMode(mode) { engine.setUndergroundMaterialMode( mode ); },
-			setUndergroundInspectionTool(tool) { engine.setUndergroundInspectionTool( tool ); },
-			setTransparentXrayValue(value) { engine.setTransparentXrayValue( value ); },
-			setLayerPeelingValue(value) { engine.setLayerPeelingValue( value ); },
-			setSectionCutValue(value) { engine.setSectionCutValue( value ); },
+			setUndergroundMaterialMode(mode) {
+				if ( mode === 'xray' ) assertArCapability( capabilities, 'xray' );
+				engine.setUndergroundMaterialMode( mode );
+			},
+			setUndergroundInspectionTool(tool) {
+				if ( tool === 'layer-peeling' ) assertArCapability( capabilities, 'layerControl' );
+				if ( tool === 'section-cut' ) assertArCapability( capabilities, 'sectionCut' );
+				engine.setUndergroundInspectionTool( tool );
+			},
+			setTransparentXrayValue(value) { assertArCapability( capabilities, 'xray' ); engine.setTransparentXrayValue( value ); },
+			setLayerPeelingValue(value) { assertArCapability( capabilities, 'layerControl' ); engine.setLayerPeelingValue( value ); },
+			setSectionCutValue(value) { assertArCapability( capabilities, 'sectionCut' ); engine.setSectionCutValue( value ); },
 
 			activatePanel(mode) {
 
@@ -197,30 +214,35 @@ export function createLoadModelArController(): LoadModelArController {
 			},
 
 			startCurrentSessionMarkerCalibration() {
+				assertArCapability( capabilities, 'markerRegistration' );
 
 				engine.startCurrentSessionMarkerCalibration();
 
 			},
 
 			captureCurrentSessionMarkerCorner() {
+				assertArCapability( capabilities, 'markerRegistration' );
 
 				engine.captureCurrentSessionMarkerCorner();
 
 			},
 
 			resetCurrentSessionMarkerCalibration() {
+				assertArCapability( capabilities, 'markerRegistration' );
 
 				engine.resetCurrentSessionMarkerCalibration();
 
 			},
 
 			solveAndApplyCurrentSessionMarkerCalibration() {
+				assertArCapability( capabilities, 'markerRegistration' );
 
 				return engine.solveAndApplyCurrentSessionMarkerCalibration();
 
 			},
 
 			clearMarkerLocalizationCorrection() {
+				assertArCapability( capabilities, 'markerRegistration' );
 
 				engine.clearMarkerLocalizationCorrection();
 
@@ -245,6 +267,7 @@ export function createLoadModelArController(): LoadModelArController {
 			},
 
 			placeModel() {
+				assertArCapability( capabilities, 'modelPlacement' );
 
 				return engine.placeModel();
 
@@ -257,18 +280,21 @@ export function createLoadModelArController(): LoadModelArController {
 			},
 
 			saveInspectionRecord(input) {
+				assertArCapability( capabilities, 'inspectionRecord' );
 
 				engine.saveInspectionRecord( input );
 
 			},
 
 			exportInspectionRecords() {
+				assertArCapability( capabilities, 'inspectionRecord' );
 
 				engine.exportInspectionRecords();
 
 			},
 
 			takeSnapshot() {
+				assertArCapability( capabilities, 'screenshot' );
 
 				engine.takeSnapshot();
 

@@ -1,5 +1,4 @@
 export {
-	PROJECT_NAME,
 	STATIC_LAYER_NAMES,
 	TIMELINE_STAGES
 } from './model-static-content.js';

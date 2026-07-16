@@ -5,5 +5,5 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.shared.ts", "vite.config.dam.ts", "vite.config.water-network.ts", "vitest.config.ts"]
 }

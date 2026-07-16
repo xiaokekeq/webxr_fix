@@ -31,7 +31,6 @@ import {
 	type CanvasModelPropertyPanelData
 } from '@/engine/models/model-property-resolver.js';
 import {
-	PROJECT_NAME,
 	STATIC_LAYER_NAMES,
 	TIMELINE_STAGES
 } from '@/models/catalog/model-api.js';
@@ -67,9 +66,9 @@ import {
 	type MarkerLocalizationSolution,
 	type MarkerPoseInEnu
 } from '@/localization/marker/marker-localization.js';
-import { createLayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
+import { createLayerVisibilityController, type LayerVisibilityController } from '@/engine/visualization/layer-visibility.js';
 import { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
-import { createArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
+import { createArSectionCutController, type ArSectionCutController } from '@/engine/visualization/ar-section-cut.js';
 import { DEFAULT_UNDERGROUND_DISPLAY_STATE, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { VisualizationStateRuntime } from '@/engine/visualization/visualization-state-runtime.js';
 import { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosure-shell.js';
@@ -93,6 +92,7 @@ import { InspectionMarkerWorkflow } from '@/engine/inspection/inspection-marker-
 import { MarkerCalibrationRuntime } from '@/engine/inspection/marker-calibration-runtime.js';
 import type { MarkerSolutionApplyDiagnostics, MarkerSolutionApplyResult, MarkerSolutionApplyStage } from '@/engine/inspection/marker-solution-apply-result.js';
 import { PlacementWorkflow } from '@/engine/placement/placement-workflow.js';
+import type { ArProjectConfig } from '@/shared/config/project-config.js';
 import type {
 	ArWorkflowMode,
 	SiteCalibrationBaseline,
@@ -156,10 +156,10 @@ export type ModelPlacementResult =
 	| { ok: true; placedModelUuid: string }
 	| { ok: false; stage: 'runtime' | 'registration' | 'marker' | 'placement'; reason: string; message: string };
 
-function createInitialState(): RegistrationStoreState {
+function createInitialState(projectName = '现场辅助核查'): RegistrationStoreState {
 
 	return {
-		projectName: PROJECT_NAME,
+		projectName,
 		modelUrl: '-',
 		availableModels: [],
 		selectedModelId: '',
@@ -217,6 +217,10 @@ function createInitialState(): RegistrationStoreState {
 
 }
 
+export function createInitialThreeEngineSnapshot(projectName?: string): ThreeEngineSnapshot {
+	return { ...createInitialState( projectName ), hasSelection: false, currentStatus: '正在准备 AR 运行环境' };
+}
+
 function hasSelectedPipe(state: RegistrationStoreState): boolean {
 
 	return (
@@ -247,11 +251,11 @@ export class ThreeEngine {
 	private readonly localizationDebugLayer = new LocalizationDebugLayer();
 	private readonly materialStateRuntime = new MaterialStateRuntime();
 	private readonly enclosureShell = new TexturedEnclosureShell();
-	private readonly sectionCutController;
+	private readonly sectionCutController: ArSectionCutController | null;
 	private readonly annotationLabelsController;
 	private readonly annotationLayer = new AnnotationLayer();
 	private readonly arCoordinateService = new ArCoordinateService();
-	private readonly layerVisibility = createLayerVisibilityController();
+	private readonly layerVisibility: LayerVisibilityController | null;
 	private readonly propertySelection;
 	private readonly placementSession;
 	private readonly modelSession;
@@ -301,14 +305,15 @@ export class ThreeEngine {
 		( event as WebGLContextEvent ).preventDefault();
 		arError( '[WebGLContextLost]', { xrPresenting: this.sceneBundle.renderer.xr.isPresenting } );
 	};
-	constructor() {
+	constructor(private readonly projectConfig: ArProjectConfig) {
 
-		this.store = createRegistrationStore( createInitialState() );
+		this.store = createRegistrationStore( createInitialState( projectConfig.labels.appTitle ) );
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
 		this.sceneBundle.scene.add( this.localizationDebugLayer.root );
 		this.sceneBundle.scene.add( this.annotationLayer.group );
+		this.layerVisibility = projectConfig.capabilities.layerControl ? createLayerVisibilityController() : null;
 
 		const statusRuntime = createStatusRuntime( {
 			store: this.store,
@@ -334,7 +339,7 @@ export class ThreeEngine {
 			}
 		} );
 
-		this.sectionCutController = createArSectionCutController( this.sceneBundle.renderer );
+		this.sectionCutController = projectConfig.capabilities.sectionCut ? createArSectionCutController( this.sceneBundle.renderer ) : null;
 		this.annotationLabelsController = createArAnnotationLabelController( {
 			canvas: this.sceneBundle.renderer.domElement
 		} );
@@ -609,7 +614,7 @@ export class ThreeEngine {
 					this.markerCalibrationRuntime.resetRuntimeState();
 				}
 				this.pipesByName = new Map<string, PipeRecord>();
-				this.layerVisibility.reset();
+				this.layerVisibility?.reset();
 				this.visualizationStateRuntime.reset();
 				this.lastAnnotationLabelsSignature = '';
 				this.annotationLabelsController.clear();
@@ -815,7 +820,7 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.materialStateRuntime.dispose();
-		this.sectionCutController.dispose();
+		this.sectionCutController?.dispose();
 		this.enclosureShell.dispose();
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();
@@ -847,6 +852,7 @@ export class ThreeEngine {
 	}
 
 	setSectionCutPlaneMode(mode: SectionCutPlaneMode): void {
+		if ( this.sectionCutController === null ) return;
 
 		if (
 			mode !== 'horizontal-section'
@@ -867,6 +873,7 @@ export class ThreeEngine {
 	}
 
 	setTransparentXrayValue(value: number): void {
+		if ( this.projectConfig.capabilities.xray === false ) return;
 
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().transparentXrayValue === clampedValue ) return;
@@ -875,6 +882,7 @@ export class ThreeEngine {
 	}
 
 	setLayerPeelingValue(value: number): void {
+		if ( this.layerVisibility === null ) return;
 
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().layerPeelingValue === clampedValue ) return;
@@ -889,6 +897,7 @@ export class ThreeEngine {
 	}
 
 	setSectionCutValue(value: number): void {
+		if ( this.sectionCutController === null ) return;
 
 		const clampedValue = THREE.MathUtils.clamp( Math.round( value ), 0, 100 );
 		if ( this.store.getState().sectionCutValue === clampedValue ) return;
@@ -897,6 +906,7 @@ export class ThreeEngine {
 	}
 
 	setUndergroundMaterialMode(mode: UndergroundMaterialMode): void {
+		if ( mode === 'xray' && this.projectConfig.capabilities.xray === false ) return;
 
 		if ( this.store.getState().undergroundMaterialMode === mode ) return;
 		this.store.patch( { undergroundMaterialMode: mode } );
@@ -904,11 +914,15 @@ export class ThreeEngine {
 	}
 
 	setUndergroundInspectionTool(tool: UndergroundInspectionTool): void {
+		if ( tool === 'layer-peeling' && this.layerVisibility === null ) return;
+		if ( tool === 'section-cut' && this.sectionCutController === null ) return;
 
 		const state = this.store.getState();
 		if ( state.undergroundInspectionTool === tool ) return;
 		this.store.patch( { undergroundInspectionTool: tool } );
-		this.layerVisibility.setHiddenLayerCount( tool === 'layer-peeling' ? mapLayerPeelingValue( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0 );
+		if ( this.layerVisibility !== null ) {
+			this.layerVisibility.setHiddenLayerCount( tool === 'layer-peeling' ? mapLayerPeelingValue( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0 );
+		}
 		this.applyModelLayerVisibility( 'inspection-tool-changed' );
 
 	}
@@ -2384,7 +2398,8 @@ export class ThreeEngine {
 
 	private rebuildModelLayers(): void {
 
-		this.sectionCutController.markBoundsDirty();
+		this.sectionCutController?.markBoundsDirty();
+		if ( this.layerVisibility === null ) return;
 		this.layerVisibility.rebuild( {
 			modelRoot: this.modelTemplate,
 			pipesByName: this.pipesByName
@@ -2415,7 +2430,7 @@ export class ThreeEngine {
 
 	private syncLayerPeelingValueFromLayers(): void {
 
-		const layers = this.layerVisibility.getState();
+		const layers = this.layerVisibility?.getState() ?? [];
 		const nextValue = hiddenLayerCountToPercent( countHiddenLayers( layers ), layers.length );
 		const patch: Partial<RegistrationStoreState> = {
 			layerPeelingValue: nextValue

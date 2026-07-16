@@ -17,20 +17,5 @@
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],
-  "exclude": [
-    "src/views/AllReminders.vue",
-    "src/views/AllRisks.vue",
-    "src/views/HistoryRisks.vue",
-    "src/views/MonitorStations.vue",
-    "src/views/Patrol.vue",
-    "src/views/PatrolDetail.vue",
-    "src/views/PatrolRecords.vue",
-    "src/views/ProgressDetail.vue",
-    "src/views/Report.vue",
-    "src/views/RiskMonitor.vue",
-    "src/views/RiskReport.vue",
-    "src/views/ShiftHandover.vue",
-    "src/views/Supplies.vue"
-  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

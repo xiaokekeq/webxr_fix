@@ -1,0 +1,253 @@
+{
+  "modelId": "dz1207",
+  "siteId": "dz1207",
+  "siteName": "707 堤坝警示牌控制点",
+  "anchor": {
+    "lng": 118.7359443694,
+    "lat": 31.9400473778,
+    "height": 24.33046,
+    "coordType": "WGS84"
+  },
+  "siteFrame": {
+    "origin": {
+      "lng": 118.7359443694,
+      "lat": 31.9400473778,
+      "height": 24.33046,
+      "coordType": "WGS84"
+    },
+    "axes": "enu",
+    "heightDatum": "unspecified"
+  },
+  "yaw": 0,
+  "scale": 1,
+  "registration": {
+    "mode": "rigid-ground-plane",
+    "minControlPoints": 3
+  },
+  "markerCalibration": {
+    "maxSelfCheckErrorMeters": 0.4,
+    "solveMode": "ground-plane-2d",
+    "note": "Temporary loose threshold for outdoor manual cone-base corner capture; tighten for production."
+  },
+  "annotations": [
+    {
+      "id": "risk-near-707-1",
+      "type": "risk",
+      "title": "疑似渗漏点",
+      "description": "演示 annotation，不是模型控制点。",
+      "anchorEnu": {
+        "east": -7.024,
+        "north": -1.499,
+        "up": 0.18
+      },
+      "label": {
+        "mode": "offset",
+        "offsetMeters": {
+          "east": 0.4,
+          "north": 0.2,
+          "up": 0.6
+        }
+      },
+      "severity": "danger",
+      "source": "demo",
+      "properties": {
+        "风险等级": "高",
+        "巡检状态": "待处理",
+        "说明": "演示 annotation，不是模型控制点"
+      }
+    },
+    {
+      "id": "inspection-note-707",
+      "type": "inspection",
+      "title": "巡检说明点",
+      "description": "用于验证显式配置的业务标识。",
+      "anchorEnu": {
+        "east": -2.604,
+        "north": 2.902,
+        "up": 0.18
+      },
+      "label": {
+        "mode": "offset",
+        "offsetMeters": {
+          "east": 0.2,
+          "north": 0.4,
+          "up": 0.55
+        }
+      },
+      "severity": "warning",
+      "source": "demo",
+      "properties": {
+        "类型": "巡检提示",
+        "说明": "显式 annotations[] 配置生成"
+      }
+    },
+    {
+      "id": "normal-label-707",
+      "type": "label",
+      "title": "堤防观察点",
+      "description": "普通业务标签演示。",
+      "anchorEnu": {
+        "east": 0.043,
+        "north": 0.24,
+        "up": 0.18
+      },
+      "severity": "normal",
+      "source": "demo",
+      "properties": {
+        "状态": "正常",
+        "说明": "蓝色 normal annotation"
+      }
+    }
+  ],
+  "modelControlPointOrder": [
+    "707-1",
+    "707-2",
+    "707-3",
+    "707-4"
+  ],
+  "modelControlPointCornerOrder": [
+    "leftTop",
+    "rightTop",
+    "rightBottom",
+    "leftBottom"
+  ],
+  "controlPoints": {
+    "707-1": {
+      "name": "模型控制点 707-1",
+      "cornerRole": "leftTop",
+      "modelLocal": {
+        "x": -2.1663,
+        "y": 2.787714,
+        "z": -1.1963
+      },
+      "world": {
+        "lng": 118.7358803583,
+        "lat": 31.9400360222,
+        "height": 24.29345,
+        "coordType": "WGS84"
+      },
+      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
+    },
+    "707-2": {
+      "name": "模型控制点 707-2",
+      "cornerRole": "rightTop",
+      "modelLocal": {
+        "x": 2.5463,
+        "y": 2.787714,
+        "z": -1.1963
+      },
+      "world": {
+        "lng": 118.7359142694,
+        "lat": 31.9400648028,
+        "height": 24.24052,
+        "coordType": "WGS84"
+      },
+      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
+    },
+    "707-3": {
+      "name": "模型控制点 707-3",
+      "cornerRole": "rightBottom",
+      "modelLocal": {
+        "x": 2.5463,
+        "y": 2.787714,
+        "z": 1.1963
+      },
+      "world": {
+        "lng": 118.7359345528,
+        "lat": 31.9400473944,
+        "height": 24.29282,
+        "coordType": "WGS84"
+      },
+      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
+    },
+    "707-4": {
+      "name": "模型控制点 707-4",
+      "cornerRole": "leftBottom",
+      "modelLocal": {
+        "x": -2.1663,
+        "y": 2.787714,
+        "z": 1.1963
+      },
+      "world": {
+        "lng": 118.7359008583,
+        "lat": 31.9400187222,
+        "height": 24.31788,
+        "coordType": "WGS84"
+      },
+      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
+    }
+  },
+  "markers": [
+    {
+      "id": "marker-warning-707",
+      "name": "707 警示牌控制标志",
+      "enu": [
+        -4.0705,
+        -3.8872,
+        -0.0058
+      ],
+      "sizeMeters": 0.297,
+      "yawDeg": 0,
+      "cornerOrder": [
+        "leftTop",
+        "rightTop",
+        "rightBottom",
+        "leftBottom"
+      ],
+      "cornersEnu": [
+        [
+          -4.2881,
+          -3.8896,
+          -0.0093
+        ],
+        [
+          -4.0564,
+          -3.6848,
+          -0.0143
+        ],
+        [
+          -3.8605,
+          -3.8745,
+          0.0027
+        ],
+        [
+          -4.0772,
+          -4.1,
+          -0.0024
+        ]
+      ],
+      "plane": "horizontal"
+    }
+  ],
+  "placementAnchorEnu": [
+    0,
+    0,
+    0
+  ],
+  "placementAnchorMeaning": "site-origin-ground-reference",
+  "undergroundDisplay": {
+    "defaultMode": "x-ray",
+    "xrayOpacity": 0.5,
+    "showDepthGuideLines": true
+  },
+  "enclosureShell": {
+    "source": "disabled"
+  },
+  "modelInstances": [
+    {
+      "id": "dz1207",
+      "name": "dz1207",
+      "role": "primary",
+      "groundClassification": {
+        "mode": "whole-model"
+      },
+      "display": {
+        "aboveGroundMode": "hidden",
+        "realWorldOcclusion": true,
+        "opacity": 0.85,
+        "selectable": true
+      }
+    }
+  ],
+  "attachmentsUrl": "../properties/dz1207.attachments.json"
+}

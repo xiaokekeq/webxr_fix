@@ -4,10 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc && vite build",
+    "dev:dam": "vite --config vite.config.dam.ts",
+    "dev:water": "vite --config vite.config.water-network.ts",
+    "build:dam": "vue-tsc && vite build --config vite.config.dam.ts",
+    "build:water": "vue-tsc && vite build --config vite.config.water-network.ts",
+    "build": "npm run build:dam && npm run build:water",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview:dam": "vite preview --config vite.config.dam.ts",
+    "preview:water": "vite preview --config vite.config.water-network.ts"
   },
   "dependencies": {
     "echarts": "^5.5.0",

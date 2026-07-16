@@ -179,7 +179,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 
 			const availableModels = await fetchModelCatalog();
 			if ( availableModels.length === 0 ) {
-				throw new Error( '\u672a\u5728 /pipe-viewer/models.json \u4e2d\u627e\u5230\u6a21\u578b\u6761\u76ee\u3002' );
+				throw new Error( '\u5f53\u524d\u9879\u76ee\u6a21\u578b\u76ee\u5f55\u4e2d\u6ca1\u6709\u53ef\u7528\u6a21\u578b\u3002' );
 			}
 
 			store.patch( {

@@ -4,8 +4,6 @@ import type { ModelCatalogItem } from '@/models/catalog/model-types.js';
 import { normalizeModelCatalogItem } from '@/models/catalog/model-catalog-normalizer.js';
 import type { HttpClient } from '@/services/api/http-client.js';
 
-const MODEL_CATALOG_URL = '/pipe-viewer/models.json';
-
 export interface ModelSummary {
 	id: string;
 	name: string;
@@ -19,10 +17,11 @@ export interface ModelRepository {
 }
 
 export class LocalJsonModelRepository implements ModelRepository {
+	constructor(private readonly catalogUrl: string) {}
 
 	async listModels(): Promise<ModelCatalogItem[]> {
 
-		const response = await fetch( MODEL_CATALOG_URL, { cache: 'no-store' } );
+		const response = await fetch( this.catalogUrl, { cache: 'no-store' } );
 		if ( response.ok === false ) {
 			throw new Error( `Failed to load models.json: HTTP ${response.status}` );
 		}
@@ -32,7 +31,9 @@ export class LocalJsonModelRepository implements ModelRepository {
 			throw new Error( 'models.json must be an array.' );
 		}
 
-		return data.map( normalizeModelCatalogItem );
+		return data
+			.map( normalizeModelCatalogItem )
+			.map( ( item ) => resolveModelCatalogItemUrls( item, response.url || this.catalogUrl ) );
 
 	}
 
@@ -55,6 +56,32 @@ export class LocalJsonModelRepository implements ModelRepository {
 
 	}
 
+}
+
+export function resolveModelCatalogItemUrls(item: ModelCatalogItem, catalogUrl: string): ModelCatalogItem {
+	const assets = item.assets.map( ( asset ) => ( {
+		...asset,
+		modelUrl: resolveAssetUrl( asset.modelUrl, catalogUrl ),
+		materialUrl: asset.materialUrl === undefined ? undefined : resolveAssetUrl( asset.materialUrl, catalogUrl )
+	} ) );
+	const primaryAsset = assets.find( ( asset ) => asset.id === item.primaryAssetId ) ?? assets[ 0 ];
+
+	return {
+		...item,
+		assets,
+		modelUrl: primaryAsset.modelUrl,
+		materialUrl: primaryAsset.materialUrl,
+		configUrl: resolveAssetUrl( item.configUrl, catalogUrl ),
+		pipesUrl: resolveAssetUrl( item.pipesUrl, catalogUrl )
+	};
+}
+
+function resolveAssetUrl(url: string, baseUrl: string): string {
+	try {
+		return new URL( url, baseUrl ).toString();
+	} catch {
+		return url;
+	}
 }
 
 export class ApiModelRepository implements ModelRepository {

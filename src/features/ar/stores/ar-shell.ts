@@ -12,12 +12,13 @@ import type {
 	SectionCutPlaneMode,
 	WorkspaceMode
 } from '@/localization/core/registration-store.js';
-import type { ThreeEngineHosts, ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
+import { createInitialThreeEngineSnapshot, type ThreeEngineHosts, type ThreeEngineSnapshot } from '@/engine/core/three-engine.js';
 import type { ModelPlacementResult } from '@/engine/core/three-engine.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import type { LegacyArDisplayMode } from '@/engine/visualization/underground-display-state.js';
 import type { MarkerSolutionApplyResult } from '@/engine/inspection/marker-solution-apply-result.js';
+import type { ArProjectConfig } from '@/shared/config/project-config.js';
 
 interface ControllerUiState {
 	drawerOpen: boolean;
@@ -49,24 +50,13 @@ function createInitialUiState(): ControllerUiState {
 
 }
 
-function createSnapshotFallback(): LoadModelArControllerState {
-
-	const controller = createLoadModelArController();
-	const state = {
-		engine: controller.getEngineState(),
-		ui: createInitialUiState()
-	};
-	controller.dispose();
-	return state;
-
-}
-
 export const useArShellStore = defineStore( 'ar-shell', () => {
 
 	const controllerRef = shallowRef<LoadModelArController | null>( null );
-	const engineSnapshotRef = shallowRef<ThreeEngineSnapshot>( createSnapshotFallback().engine );
+	const engineSnapshotRef = shallowRef<ThreeEngineSnapshot>( createInitialThreeEngineSnapshot() );
 	const uiStateRef = shallowRef<ControllerUiState>( createInitialUiState() );
 	const initializedRef = shallowRef( false );
+	const projectConfigRef = shallowRef<ArProjectConfig | null>( null );
 	let unsubscribe: (() => void) | null = null;
 	let initializePromise: Promise<void> | null = null;
 	let previousEngineState = engineSnapshotRef.value;
@@ -77,7 +67,8 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 			return controllerRef.value;
 		}
 
-		const controller = createLoadModelArController();
+		if ( projectConfigRef.value === null ) throw new Error( 'AR store must be configured before use.' );
+		const controller = createLoadModelArController( projectConfigRef.value );
 		controllerRef.value = controller;
 		engineSnapshotRef.value = controller.getEngineState();
 		previousEngineState = engineSnapshotRef.value;
@@ -98,6 +89,14 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		} );
 		return controller;
 
+	}
+
+	function configure(config: ArProjectConfig): void {
+		if ( projectConfigRef.value !== null && projectConfigRef.value.projectId !== config.projectId ) {
+			throw new Error( 'AR store cannot switch projects at runtime.' );
+		}
+		projectConfigRef.value = config;
+		engineSnapshotRef.value = createInitialThreeEngineSnapshot( config.labels.appTitle );
 	}
 
 	function patchUiState(patch: Partial<ControllerUiState>): void {
@@ -149,6 +148,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		initializePromise = null;
 		initializedRef.value = false;
 		uiStateRef.value = createInitialUiState();
+		engineSnapshotRef.value = createInitialThreeEngineSnapshot( projectConfigRef.value?.labels.appTitle );
 		if ( unsubscribe !== null ) {
 			unsubscribe();
 			unsubscribe = null;
@@ -475,6 +475,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		controllerState,
 		engine,
 		ui,
+		configure,
 		actions,
 		initialize,
 		mountHosts,

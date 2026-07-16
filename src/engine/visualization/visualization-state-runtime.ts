@@ -14,9 +14,9 @@ import type { TexturedEnclosureShell } from '@/engine/visualization/textured-enc
 interface VisualizationStateRuntimeOptions {
 	store: RegistrationStore;
 	placementSession: PlacementSession;
-	layerVisibility: LayerVisibilityController;
+	layerVisibility: LayerVisibilityController | null;
 	materialStateRuntime: MaterialStateRuntime;
-	sectionCutController: ArSectionCutController;
+	sectionCutController: ArSectionCutController | null;
 	enclosureShell: TexturedEnclosureShell;
 	getUndergroundModelRoot(): THREE.Object3D | null;
 	syncAttachmentInfoBoardVisibility(): void;
@@ -63,11 +63,11 @@ export class VisualizationStateRuntime {
 		const sectionDirty = rootDirty || this.lastSectionEnabled !== sectionEnabled || this.lastSectionValue !== state.sectionCutValue || this.lastSectionMode !== state.sectionCutPlaneMode;
 
 		if ( rootDirty ) this.options.materialStateRuntime.setRoot( undergroundRoot );
-		if ( sectionDirty ) {
+		if ( sectionDirty && this.options.sectionCutController !== null ) {
 			this.options.sectionCutController.restore();
 			this.options.sectionCutController.setPlaneMode( state.sectionCutPlaneMode );
 		}
-		this.sectionPlane = sectionEnabled ? this.options.sectionCutController.apply( undergroundRoot, state.sectionCutValue ) : null;
+		this.sectionPlane = sectionEnabled ? this.options.sectionCutController?.apply( undergroundRoot, state.sectionCutValue ) ?? null : null;
 		const sectionPlaneSignature = getSectionPlaneSignature( this.sectionPlane );
 		const sectionPlaneDirty = sectionPlaneSignature !== this.lastSectionPlaneSignature;
 		if ( sectionDirty || sectionPlaneDirty ) this.options.materialStateRuntime.applySection( this.sectionPlane );
@@ -87,6 +87,11 @@ export class VisualizationStateRuntime {
 	applyModelLayerVisibility(): { changed: boolean; changedObjectCount: number; visibilitySignature: string } {
 
 		const root = this.options.placementSession.getArPlacedModel();
+		if ( this.options.layerVisibility === null ) {
+			this.options.syncAttachmentInfoBoardVisibility();
+			this.syncVisualizationState();
+			return { changed: false, changedObjectCount: 0, visibilitySignature: 'disabled' };
+		}
 		const before = new Map<string, boolean>();
 		root?.traverse( ( object ) => before.set( object.uuid, object.visible ) );
 		this.options.layerVisibility.applyToRoot( root );
@@ -119,7 +124,7 @@ export class VisualizationStateRuntime {
 	restoreVisualizationControllers(): void {
 
 		this.options.materialStateRuntime.restore();
-		this.options.sectionCutController.restore();
+		this.options.sectionCutController?.restore();
 
 	}
 

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import dz1207Obj from '../../../public/pipe-viewer/dz1207/dizhi1207.obj?raw';
+import dz1207Obj from '../../../public/projects/dam/models/dz1207/dizhi1207.obj?raw';
 import { resolveModelConformingSurface } from './model-boundary-surface-resolver.js';
 
 describe( 'dz1207 conforming shell coverage', () => {

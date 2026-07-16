@@ -19,6 +19,7 @@ import {
 	ApiSiteConfigRepository,
 	LocalJsonSiteConfigRepository
 } from '@/services/repositories/site-config-repository.js';
+import type { ArProjectConfig } from '@/shared/config/project-config.js';
 
 export type RepositoryDataSource = 'local' | 'api';
 
@@ -34,7 +35,7 @@ const httpClient = new FetchHttpClient( {
 
 const modelRepository = dataSource === 'api'
 	? new ApiModelRepository( httpClient )
-	: new LocalJsonModelRepository();
+	: new LocalJsonModelRepository( 'models.json' );
 
 const siteConfigRepository = dataSource === 'api'
 	? new ApiSiteConfigRepository( httpClient )
@@ -54,3 +55,10 @@ export const repositories = {
 		? new ApiMonitoringDataRepository( httpClient )
 		: new MockMonitoringDataRepository()
 };
+
+export function configureRepositories(config: Pick<ArProjectConfig, 'modelCatalogUrl'>): void {
+	if ( dataSource === 'api' ) return;
+	const model = new LocalJsonModelRepository( config.modelCatalogUrl );
+	repositories.model = model;
+	repositories.siteConfig = new LocalJsonSiteConfigRepository( model );
+}

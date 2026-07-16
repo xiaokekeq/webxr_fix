@@ -1,0 +1,30 @@
+import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router';
+
+export const damRoutes: RouteRecordRaw[] = [
+	{ path: '/', name: 'dam-home', component: () => import( './views/Home.vue' ), meta: { title: '堤防巡查系统', tab: 0 } },
+	{ path: '/ar', name: 'dam-ar', component: () => import( '@/shared/ar/views/ArWorkspace.vue' ), meta: { title: '堤防 AR 巡查', tab: 1, workflowMode: 'ar-inspection' } },
+	{ path: '/map', name: 'dam-map', component: () => import( '@/shared/views/MapView.vue' ), meta: { title: '堤防巡查地图', tab: 2 } },
+	{ path: '/records', name: 'dam-records', component: () => import( '@/shared/views/Records.vue' ), meta: { title: '堤坝巡查记录', tab: 3 } },
+	{ path: '/profile', name: 'dam-profile', component: () => import( '@/shared/views/Profile.vue' ), meta: { title: '我的', tab: 4 } },
+	{ path: '/map-full', component: () => import( './views/MapFull.vue' ), meta: { title: '全屏地图' } },
+	{ path: '/records/patrol', component: () => import( './views/PatrolRecords.vue' ), meta: { title: '巡查记录' } },
+	{ path: '/records/history', component: () => import( './views/HistoryRisks.vue' ), meta: { title: '历史险情' } },
+	{ path: '/patrol', component: () => import( './views/Patrol.vue' ), meta: { title: '巡查任务' } },
+	{ path: '/patrol/:id', component: () => import( './views/PatrolDetail.vue' ), meta: { title: '巡检详情' }, props: true },
+	{ path: '/risks', component: () => import( './views/AllRisks.vue' ), meta: { title: '全部风险' } },
+	{ path: '/monitor/stations', component: () => import( './views/MonitorStations.vue' ), meta: { title: '监测点位' } },
+	{ path: '/shift', component: () => import( './views/ShiftHandover.vue' ), meta: { title: '交接班记录' } },
+	{ path: '/supplies', component: () => import( './views/Supplies.vue' ), meta: { title: '应急物资' } },
+	{ path: '/progress', component: () => import( './views/ProgressDetail.vue' ), meta: { title: '进度详情' } },
+	{ path: '/reminders', component: () => import( './views/AllReminders.vue' ), meta: { title: '全部提醒' } },
+	{ path: '/monitor', component: () => import( './views/RiskMonitor.vue' ), meta: { title: '风险监测' } },
+	{ path: '/report', component: () => import( './views/Report.vue' ), meta: { title: '统计分析' } },
+	{ path: '/risk-report', component: () => import( './views/RiskReport.vue' ), meta: { title: '险情上报' } },
+	{ path: '/model-calibration', component: () => import( '@/shared/ar/views/ModelCalibration.vue' ), meta: { title: '现场基准配置', workflowMode: 'site-baseline-config' } }
+];
+
+export function createDamRouter() {
+	const router = createRouter( { history: createWebHashHistory( import.meta.env.BASE_URL ), routes: damRoutes } );
+	router.beforeEach( ( to ) => { document.title = ( to.meta.title as string ) || '堤防巡查系统'; } );
+	return router;
+}

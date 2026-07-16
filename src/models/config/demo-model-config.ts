@@ -267,7 +267,7 @@ export async function loadDemoModelConfig(
 
 	const raw = await response.json() as RawDemoModelConfig;
 	try {
-		const enrichedRaw = await enrichDemoModelConfigAttachments( raw );
+		const enrichedRaw = await enrichDemoModelConfigAttachments( raw, response.url || url );
 		const normalized = normalizeDemoModelConfig( enrichedRaw );
 		validateDemoModelConfig( normalized );
 
@@ -1170,10 +1170,11 @@ function normalizeAttachments(
 }
 
 async function enrichDemoModelConfigAttachments(
-	config: RawDemoModelConfig
+	config: RawDemoModelConfig,
+	configUrl: string
 ): Promise<RawDemoModelConfig> {
 
-	const attachmentsUrl = resolveAttachmentsUrl( config );
+	const attachmentsUrl = resolveAttachmentsUrl( config, configUrl );
 	if ( attachmentsUrl === undefined ) {
 		return config;
 	}
@@ -1193,12 +1194,15 @@ async function enrichDemoModelConfigAttachments(
 
 }
 
-function resolveAttachmentsUrl(config: RawDemoModelConfig): string | undefined {
+function resolveAttachmentsUrl(config: RawDemoModelConfig, configUrl: string): string | undefined {
 
 	const candidate = 'attachmentsUrl' in config ? config.attachmentsUrl : undefined;
-	return typeof candidate === 'string' && candidate.trim().length > 0
-		? candidate.trim()
-		: undefined;
+	if ( typeof candidate !== 'string' || candidate.trim().length === 0 ) return undefined;
+	try {
+		return new URL( candidate.trim(), configUrl ).toString();
+	} catch {
+		return candidate.trim();
+	}
 
 }
 

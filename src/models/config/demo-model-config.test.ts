@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import dz1207ConfigText from '../../../public/pipe-viewer/dz1207.config.json?raw';
+import dz1207ConfigText from '../../../public/projects/dam/configs/dz1207.config.json?raw';
 import { createEnuFrame, geodeticToEnu } from '@/localization/core/geodesy.js';
 import { normalizeDemoModelConfig } from './demo-model-config.js';
 

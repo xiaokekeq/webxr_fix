@@ -1,5 +1,3 @@
-export const PROJECT_NAME = '堤防现场辅助核查';
-
 export const TIMELINE_STAGES = [
 	'施工前',
 	'基础开挖',

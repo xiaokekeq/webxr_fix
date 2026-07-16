@@ -7,15 +7,8 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
-    AppTabBar: typeof import('./src/components/AppTabBar.vue')['default']
-    ArFloatingValueRail: typeof import('./src/components/ar/ArFloatingValueRail.vue')['default']
-    ArInfoGrid: typeof import('./src/components/ar/ArInfoGrid.vue')['default']
-    ArPanelSection: typeof import('./src/components/ar/ArPanelSection.vue')['default']
-    ArPlacementStatusSection: typeof import('./src/components/ar/ArPlacementStatusSection.vue')['default']
-    PatrolCard: typeof import('./src/components/PatrolCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
-    UndergroundDisplayControls: typeof import('./src/components/ar/UndergroundDisplayControls.vue')['default']
     VanEmpty: typeof import('vant/es')['Empty']
     VanField: typeof import('vant/es')['Field']
     VanIcon: typeof import('vant/es')['Icon']

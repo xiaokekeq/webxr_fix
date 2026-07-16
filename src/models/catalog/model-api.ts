@@ -7,7 +7,6 @@ export type {
 } from './model-types.js';
 
 export {
-	PROJECT_NAME,
 	STATIC_LAYER_NAMES,
 	TIMELINE_STAGES,
 	loadPipeRecords

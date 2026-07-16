@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<!--Created By OSGBLab(http://www.osgblab.com)-->
+<html>
+	<head>
+		<meta charset = "utf-8">
+		<meta http-equiv = "X-UA-Compatible" content = "IE=edge">
+		<meta name = "viewport" content = "width=device-width, initial-scale = 1, maximum-scale = 1, minimum-scale = 1, user-scalable = no">
+		<title>OSGBLab Cesium Data Viewer</title>
+		<script src = "./Cesium/Cesium.js"></script>
+		<style>
+			@import url(./Cesium/Widgets/widgets.css);
+			html, body, #OSGBLab_Container{
+				width:100% ;
+				height:100% ;
+				margin:0;
+				padding:0;
+				overflow:hidden;
+			}
+		</style>
+	</head>
+	<body>
+		<div id = "OSGBLab_Container"></div>
+	</body>
+	<script>
+		function IsMobile() {
+			var ios = /AppleWebKit/.test(navigator.userAgent) && /Mobile\/\w+/.test(navigator.userAgent);
+			var mobile = ios || /Android|webOS|BlackBerry|Opera Mini|Opera Mobi|IEMobile/i.test(navigator.userAgent);
+			return mobile;
+		}
+		Cesium.Ion.defaultAccessToken='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5OTc4MTFiYS1hYzhlLTQ3ZjYtYWJmMi1hODMwMWMxZGRiYTQiLCJpZCI6ODU1NDksImlhdCI6MTY1Mzc5NDc5N30.ldTi8bF3XvSOgnZrMITokRW4kE3i8Mwbarhk5OQbPsI';
+		var terrain = Cesium.createDefaultTerrainProviderViewModels();
+		var viewer = new Cesium.Viewer('OSGBLab_Container', {
+			animation:false,
+			vrButton : true,
+			timeline : false,
+			sceneModePicker : false,
+			scene3DOnly : true,
+			infoBox : true,
+			terrainProviderViewModels : terrain,
+			selectedTerrainProviderViewModel : terrain[0]
+		});
+		viewer.scene.globe.depthTestAgainstTerrain = false;
+		var boundingSphere = new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(inf, inf, inf), 86.93910906);
+		viewer.homeButton.viewModel.command.beforeExecute.addEventListener(function(cmd) {
+			viewer.camera.flyToBoundingSphere(boundingSphere);
+			cmd.cancel = true;
+		});
+		viewer.camera.flyToBoundingSphere(boundingSphere, { duration: 0 });
+		var tiles = viewer.scene.primitives.add(new Cesium.Cesium3DTileset({
+			url: '../Data/tileset.json',
+			maximumScreenSpaceError :  16,
+			maximumNumberOfLoadedTiles : IsMobile() ? 32 : 1024
+		}));
+		var pointsCollection = [];
+		viewer.screenSpaceEventHandler.setInputAction((evt) => {
+			var cartesian = viewer.scene.pickPosition(evt.position);
+			if (Cesium.defined(cartesian)) {
+				var cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+				var lng = Cesium.Math.toDegrees(cartographic.longitude);
+				var lat = Cesium.Math.toDegrees(cartographic.latitude);
+				var height = cartographic.height;
+				var entity = viewer.entities.add({
+				position: Cesium.Cartesian3.fromDegrees(lng, lat, height),
+				label : {
+					text: 'Lon: ' + lng.toFixed(5) + '\u00B0' + '\nLat: ' + lat.toFixed(5) + '\u00B0' + '\nheight: ' + height.toFixed(4) + 'm',
+					font : '20px monospace',
+					fillColor : Cesium.Color.BLACK,
+					scale : 1,
+					style : Cesium.LabelStyle.FILL,
+					pixelOffset : new Cesium.Cartesian2(-90, -30),
+					showBackground : true,
+					backgroundColor : Cesium.Color.AQUA.withAlpha(1),
+					backgroundPadding : new Cesium.Cartesian2(17, 10),
+					horizontalOrigin : Cesium.HorizontalOrigin.LEFT,
+					verticalOrigin : Cesium.VerticalOrigin.BOTTOM,
+					disableDepthTestDistance : Number.POSITIVE_INFINITY,
+				},
+				point:{
+					color:Cesium.Color.RED,
+					pixelSize : 9,
+					outlineColor : Cesium.Color.ALICEBLUE,
+					outlineWidth : 2,
+					disableDepthTestDistance : Number.POSITIVE_INFINITY,
+				},
+			})
+			pointsCollection.push(entity);
+		}
+		}, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+	</script>
+</html>
