@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import dz1207ConfigText from '../../../public/projects/dam/configs/dz1207.config.json?raw';
+import waterNetworkConfigText from '../../../public/projects/water-network/configs/waternetwork.config.json?raw';
 import { createEnuFrame, geodeticToEnu } from '@/localization/core/geodesy.js';
+import { solveEngineeringRegistration } from '@/localization/coarse/engineering-registration.js';
 import { normalizeDemoModelConfig } from './demo-model-config.js';
 
 describe( 'RTK control-point normalization', () => {
@@ -36,6 +38,17 @@ describe( 'RTK control-point normalization', () => {
 
 		const raw = JSON.parse( dz1207ConfigText ) as { controlPoints: Record<string, Record<string, unknown>> };
 		expect( Object.values( raw.controlPoints ).every( ( point ) => 'world' in point && 'enu' in point === false ) ).toBe( true );
+
+	} );
+
+	it( 'keeps the water-network model registration config valid', () => {
+
+		const config = normalizeDemoModelConfig( JSON.parse( waterNetworkConfigText ) );
+		expect( config.modelControlTargetDiagnostics.modelControlTargetValidationState ).toBe( 'ready' );
+		expect( Object.keys( config.controlPoints ) ).toHaveLength( 3 );
+		expect( config.siteFrame.origin ).toEqual( normalizeDemoModelConfig( JSON.parse( dz1207ConfigText ) ).siteFrame.origin );
+		expect( config.markers[ 0 ]?.id ).toBe( 'marker-warning-707' );
+		expect( solveEngineeringRegistration( config ).modelToSite.rmsErrorMeters ).toBeLessThan( 0.05 );
 
 	} );
 

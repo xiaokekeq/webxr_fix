@@ -557,6 +557,11 @@ export class ThreeEngine {
 				this.emit();
 			},
 			onSelectionApplied: ( selection ) => {
+				if ( selection.properties === null ) {
+					this.clearAnnotationDetail();
+					return;
+				}
+
 				this.showCanvasModelPropertyPanel(
 					selection.businessObject,
 					selection.properties

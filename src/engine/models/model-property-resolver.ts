@@ -77,22 +77,32 @@ export function resolveModelObjectProperties(args: {
 	bounds?: THREE.Box3;
 }): CanvasModelPropertyPanelData {
 
-	const rows = [
-		row( '模型实例', args.selection.modelInstanceName ),
-		row( '实例 ID', args.selection.modelInstanceId ),
-		row( '角色', args.selection.modelRole ),
-		row( '构件名称', args.properties?.name ?? args.selection.objectName ),
-		row( '图层', args.layerName ),
-		row( '材质', args.properties?.material ?? args.materialName ),
-		row( '状态', args.properties?.status ?? ( args.selection.object.visible ? '可见' : '隐藏' ) )
-	];
-
-	if ( args.selection.modelRole === 'utility' ) {
-		rows.push(
-			row( '管径', args.properties?.diameter ),
-			row( '埋深', args.properties?.depth )
-		);
-	}
+	const rows = args.properties === null
+		? [
+			row( '模型实例', args.selection.modelInstanceName ),
+			row( '实例 ID', args.selection.modelInstanceId ),
+			row( '角色', args.selection.modelRole ),
+			row( '构件名称', args.selection.objectName ),
+			row( '图层', args.layerName ),
+			row( '材质', args.materialName ),
+			row( '状态', args.selection.object.visible ? '可见' : '隐藏' )
+		]
+		: [
+			row( '构件名称', args.properties.name ?? args.selection.objectName ),
+			row( '管线类型', args.properties.type ),
+			row( '管径', args.properties.diameter ),
+			row( '材质', args.properties.material ?? args.materialName ),
+			row( '埋深', args.properties.depth ),
+			row( '运行状态', args.properties.status ?? ( args.selection.object.visible ? '可见' : '隐藏' ) ),
+			row( '管线编号', args.properties.code ),
+			row( '起点', args.properties.startPoint ),
+			row( '终点', args.properties.endPoint ),
+			row( '所属区域', args.properties.area ),
+			row( '备注', args.properties.remark ),
+			row( '模型实例', args.selection.modelInstanceName ),
+			row( '实例 ID', args.selection.modelInstanceId ),
+			row( '图层', args.layerName )
+		];
 
 	if ( args.selection.modelRole === 'device' ) {
 		rows.push(
@@ -106,8 +116,6 @@ export function resolveModelObjectProperties(args: {
 		rows.push( row( '工程高程', center.y.toFixed( 2 ), 'm' ) );
 	}
 
-	rows.push( row( '备注', args.properties?.remark ) );
-
 	return {
 		panelType: 'model-property',
 		modelInstanceId: args.selection.modelInstanceId,
@@ -115,7 +123,7 @@ export function resolveModelObjectProperties(args: {
 		modelRole: args.selection.modelRole,
 		objectId: args.selection.objectId,
 		objectName: args.selection.objectName,
-		title: args.properties?.name ?? args.selection.objectName,
+		title: args.properties?.code ?? args.properties?.name ?? args.selection.objectName,
 		sections: [
 			{
 				id: 'main',

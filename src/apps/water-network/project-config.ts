@@ -12,7 +12,7 @@ export const waterNetworkProjectConfig: ArProjectConfig = {
 	dataSource: import.meta.env.VITE_DATA_SOURCE === 'api'
 		? { kind: 'api', apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? '' }
 		: { kind: 'local-json', modelCatalogUrl },
-	defaultModelId: 'tongma-74-76-fbx',
+	defaultModelId: 'waternetwork',
 	showModelSelector: false,
 	labels: {
 		appTitle: '自来水管网核查系统',

@@ -274,6 +274,14 @@ export function createPointerSelectionSession(
 	): void {
 
 		const businessName = getBusinessName( businessObject );
+		if ( propertySelection.isSelectedBusinessObject( businessObject ) ) {
+			propertySelection.clearSelection();
+			onSelectionCleared?.();
+			onInspectSelection();
+			setStatus( `已取消选择 ${businessName}。` );
+			return;
+		}
+
 		propertySelection.selectBusinessObject( businessObject, properties, highlightObject );
 		onSelectionApplied?.( { businessObject, properties, highlightObject } );
 		onInspectSelection();

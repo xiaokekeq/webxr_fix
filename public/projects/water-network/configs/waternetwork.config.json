@@ -1,0 +1,102 @@
+{
+  "modelId": "waternetwork",
+  "siteId": "waternetwork",
+  "siteName": "供水管网",
+  "anchor": {
+    "lng": 118.7359443694,
+    "lat": 31.9400473778,
+    "height": 24.33046,
+    "coordType": "WGS84"
+  },
+  "siteFrame": {
+    "origin": {
+      "lng": 118.7359443694,
+      "lat": 31.9400473778,
+      "height": 24.33046,
+      "coordType": "WGS84"
+    },
+    "axes": "enu",
+    "heightDatum": "unspecified"
+  },
+  "yaw": 0,
+  "scale": 1,
+  "registration": {
+    "mode": "rigid-ground-plane",
+    "minControlPoints": 3
+  },
+  "markerCalibration": {
+    "maxSelfCheckErrorMeters": 0.4,
+    "solveMode": "ground-plane-2d",
+    "note": "Demo reuses the dam 707 marker calibration."
+  },
+  "modelControlPointOrder": [
+    "surface-west-south",
+    "surface-east",
+    "surface-west-north"
+  ],
+  "controlPoints": {
+    "surface-west-south": {
+      "name": "左上角水管",
+      "modelLocal": { "x": -20.4826, "y": -70.1925, "z": 0.0765 },
+      "world": {
+        "lng": 118.7358803583,
+        "lat": 31.9400360222,
+        "height": 24.29345,
+        "coordType": "WGS84"
+      }
+    },
+    "surface-east": {
+      "name": "东侧水管（临时推算）",
+      "modelLocal": { "x": 145.5918, "y": -70.1925, "z": -0.322 },
+      "world": {
+        "lng": 118.7376367382,
+        "lat": 31.9400396047,
+        "height": 24.29545258,
+        "coordType": "WGS84"
+      }
+    },
+    "surface-west-north": {
+      "name": "西北侧水管（临时推算）",
+      "modelLocal": { "x": -20.4819, "y": -71.3285, "z": -4.4463 },
+      "world": {
+        "lng": 118.7358803657,
+        "lat": 31.94007681,
+        "height": 23.15745071,
+        "coordType": "WGS84"
+      }
+    }
+  },
+  "markers": [
+    {
+      "id": "marker-warning-707",
+      "name": "707 警示牌控制标志",
+      "enu": [ -4.0705, -3.8872, -0.0058 ],
+      "sizeMeters": 0.297,
+      "yawDeg": 0,
+      "cornerOrder": [ "leftTop", "rightTop", "rightBottom", "leftBottom" ],
+      "cornersEnu": [
+        [ -4.2881, -3.8896, -0.0093 ],
+        [ -4.0564, -3.6848, -0.0143 ],
+        [ -3.8605, -3.8745, 0.0027 ],
+        [ -4.0772, -4.1, -0.0024 ]
+      ],
+      "plane": "horizontal"
+    }
+  ],
+  "placementAnchorEnu": [ 0, 0, 0 ],
+  "placementAnchorMeaning": "temporary water-network placement anchored to dam 707-1; remaining control points are derived at unit scale with zero rotation",
+  "undergroundDisplay": {
+    "defaultMode": "true-depth",
+    "liftedPreviewOffsetMeters": 1.5,
+    "xrayOpacity": 0.35,
+    "showDepthGuideLines": true
+  },
+  "enclosureShell": { "source": "disabled" },
+  "groundClassification": { "mode": "whole-model" },
+  "display": {
+    "aboveGroundMode": "normal-ar",
+    "realWorldOcclusion": true,
+    "opacity": 1,
+    "selectable": true
+  }
+}

@@ -13,6 +13,7 @@ export interface PropertySelectionResult {
 
 export interface PropertySelectionController {
 	clearSelection(): void;
+	isSelectedBusinessObject(businessObject: THREE.Object3D): boolean;
 	resolveBusinessObject(
 		mesh: THREE.Object3D,
 		placedModel: THREE.Group | null,
@@ -31,10 +32,16 @@ export function createPropertySelectionController(
 
 	let selectedMeshes: THREE.Mesh[] = [];
 	let selectedOutlines: THREE.LineSegments[] = [];
+	let selectedBusinessObject: THREE.Object3D | null = null;
 	const shouldRenderSelectionOutline = options.shouldRenderSelectionOutline ?? ( () => false );
 
 	return {
 		clearSelection,
+		isSelectedBusinessObject(businessObject) {
+
+			return selectedBusinessObject === businessObject;
+
+		},
 
 		resolveBusinessObject(mesh, placedModel, pipesByName) {
 
@@ -68,6 +75,7 @@ export function createPropertySelectionController(
 		selectBusinessObject(businessObject, properties, highlightObject) {
 
 			clearSelection();
+			selectedBusinessObject = businessObject;
 			const highlightRoot = highlightObject ?? businessObject;
 			highlightRoot.traverse( ( child ) => {
 				if ( child instanceof THREE.Mesh ) {
@@ -122,6 +130,7 @@ export function createPropertySelectionController(
 		}
 
 		selectedMeshes = [];
+		selectedBusinessObject = null;
 
 	}
 
