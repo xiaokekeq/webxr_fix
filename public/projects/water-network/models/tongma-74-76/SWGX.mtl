@@ -14,7 +14,7 @@ newmtl shui
 	Ni 1.5200
 	Ke 0.0000 0.0000 0.0000
 	illum 2
-	map_Kd maps\blue.jpg
+	map_Kd maps/blue.jpg
 
 newmtl huang
 	Kd 0.5000 0.5000 0.5000
@@ -29,7 +29,7 @@ newmtl huang
 	Ni 1.5200
 	Ke 0.0000 0.0000 0.0000
 	illum 2
-	map_Kd maps\yellow.jpg
+	map_Kd maps/yellow.jpg
 
 newmtl hlan
 	Kd 0.5000 0.5000 0.5000
@@ -44,7 +44,7 @@ newmtl hlan
 	Ni 1.5200
 	Ke 0.0000 0.0000 0.0000
 	illum 2
-	map_Kd maps\YQ.jpg
+	map_Kd maps/YQ.jpg
 
 newmtl lv
 	Kd 0.5000 0.5000 0.5000
@@ -59,7 +59,7 @@ newmtl lv
 	Ni 1.5200
 	Ke 0.0000 0.0000 0.0000
 	illum 2
-	map_Kd maps\ssj.jpg
+	map_Kd maps/ssj.jpg
 
 newmtl hong
 	Kd 0.5000 0.5000 0.5000
@@ -74,7 +74,7 @@ newmtl hong
 	Ni 1.5200
 	Ke 0.0000 0.0000 0.0000
 	illum 2
-	map_Kd maps\Z.jpg
+	map_Kd maps/Z.jpg
 
 newmtl niantu333
 	Kd 0.5000 0.5000 0.5000
@@ -89,4 +89,4 @@ newmtl niantu333
 	Ni 1.5200
 	Ke 0.0000 0.0000 0.0000
 	illum 2
-	map_Kd maps\T_Road_1k009.jpg
+	map_Kd maps/T_Road_1k009.jpg

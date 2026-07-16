@@ -31,7 +31,8 @@ describe( 'model catalog boundaries', () => {
 			normalizeModelCatalogItem( waterCatalog[ 0 ] ),
 			'https://example.test/water-network/projects/water-network/models.json'
 		);
-		expect( item.modelUrl ).toBe( 'https://example.test/water-network/projects/water-network/models/tongma-74-76/model.fbx' );
+		expect( item.modelUrl ).toBe( 'https://example.test/water-network/projects/water-network/models/tongma-74-76/SWGX.obj' );
+		expect( item.materialUrl ).toBe( 'https://example.test/water-network/projects/water-network/models/tongma-74-76/SWGX.mtl' );
 		expect( item.configUrl ).toBe( 'https://example.test/water-network/projects/water-network/configs/tongma-74-76.config.json' );
 		expect( item.pipesUrl ).toBe( 'https://example.test/water-network/projects/water-network/properties/tongma-74-76.pipes.json' );
 	} );
