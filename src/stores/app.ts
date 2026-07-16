@@ -1,171 +1,89 @@
-import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { computed, ref } from 'vue';
+import { defineStore } from 'pinia';
+import {
+	waterNetworkUi,
+	type Checkpoint,
+	type PatrolTask,
+	type TodoItem,
+	type WaterNetworkUiContent
+} from '@/features/app/water-network-ui.js';
 
-export interface Checkpoint {
-  id: string;
-  name: string;
-  lng: number;
-  lat: number;
-  checked: boolean;
-  riskFlag?: string;
-  note?: string;
-  images?: string[];
-}
-
-export interface PatrolTask {
-  id: string;
-  title: string;
-  section: string;
-  patrolRange?: string;
-  patrolDistance?: string;
-  priority: string;
-  planTime?: string;
-  team?: string;
-  teamCount?: number;
-  teamAvatars?: string[];
-  status: string;
-  riskLevel: string;
-  assignee?: string;
-  startTime: string;
-  endTime?: string;
-  checkpoints: Checkpoint[];
-}
-
-export interface DamSection {
-  id: string;
-  name: string;
-  lng: number;
-  lat: number;
-}
+export type { Checkpoint, PatrolTask, TodoItem };
+export type DamSection = WaterNetworkUiContent['sites'][ number ];
 
 export interface RiskAlert {
-  id: string;
-  type: string;
-  level: string;
-  location: string;
-  lng: number;
-  lat: number;
-  desc: string;
-  time: string;
-  value?: number;
-  unit?: string;
+	id: string;
+	type: string;
+	level: string;
+	location: string;
+	lng: number;
+	lat: number;
+	desc: string;
+	time: string;
 }
 
-export interface TodoItem {
-  id: string;
-  content: string;
-  type: string;
-  done: boolean;
-}
+export const useAppStore = defineStore( 'app', () => {
+	const uiContent = waterNetworkUi;
+	const currentDam = ref<DamSection>( uiContent.sites[ 0 ] );
+	const damSections = ref<DamSection[]>( uiContent.sites );
+	const weather = ref( uiContent.weather );
+	const waterLevel = ref( Number( uiContent.dashboard.pressure.value ) );
+	const patrolTasks = ref<PatrolTask[]>( [ uiContent.dashboard.task ] );
+	const riskAlerts = ref<RiskAlert[]>( [] );
+	const todoItems = ref<TodoItem[]>( uiContent.dashboard.todoItems );
+	const riskStats = ref( uiContent.dashboard.riskStats );
 
-export const useAppStore = defineStore("app", () => {
-  const currentDam = ref<DamSection>({
-    id: "1",
-    name: "江宁堤段 K12+400",
-    lng: 114.315,
-    lat: 30.607,
-  });
-  const damSections = ref<DamSection[]>([
-    { id: "1", name: "江宁堤段 K12+400", lng: 114.315, lat: 30.607 },
-    { id: "2", name: "江宁堤段 K18+200", lng: 114.35, lat: 30.58 },
-    { id: "3", name: "江宁堤段 K15+800", lng: 114.29, lat: 30.62 },
-  ]);
+	const totalCheckpoints = computed( () => patrolTasks.value.reduce( ( total, task ) => total + task.checkpoints.length, 0 ) );
+	const checkedCount = computed( () => patrolTasks.value.reduce( ( total, task ) => total + task.checkpoints.filter( ( checkpoint ) => checkpoint.checked ).length, 0 ) );
+	const patrolProgress = computed( () => totalCheckpoints.value === 0 ? 0 : Math.round( checkedCount.value / totalCheckpoints.value * 100 ) );
+	const undoneCount = computed( () => todoItems.value.filter( ( item ) => item.done === false ).length );
+	const todayTask = computed( () => patrolTasks.value.find( ( task ) => task.status !== 'completed' ) ?? null );
+	const estimatedCompleteTime = computed( () => todayTask.value?.planTime ?? '--' );
+	const isWaterOverWarning = computed( () => false );
 
-  const weather = ref({ icon: "☀️", desc: "晴", temp: 32 });
-  const waterLevel = ref(21.35);
-  const isWaterOverWarning = computed(() => waterLevel.value >= 23);
+	function switchDam(site: DamSection): void {
+		currentDam.value = site;
+	}
 
-  const patrolTasks = ref<PatrolTask[]>([]);
-  const riskAlerts = ref<RiskAlert[]>([]);
-  const todoItems = ref<TodoItem[]>([
-    { id: "t1", content: "PZ-12 渗流异常需核查", type: "risk", done: false },
-    { id: "t2", content: "巡检二班交接登记", type: "shift", done: false },
-    { id: "t3", content: "应急物资盘点检查", type: "supply", done: false },
-  ]);
+	function setPatrolTasks(tasks: PatrolTask[]): void {
+		patrolTasks.value = tasks;
+	}
 
-  const totalCheckpoints = computed(() =>
-    patrolTasks.value.reduce((s, t) => s + t.checkpoints.length, 0),
-  );
-  const checkedCount = computed(() =>
-    patrolTasks.value.reduce(
-      (s, t) => s + t.checkpoints.filter((c) => c.checked).length,
-      0,
-    ),
-  );
-  const patrolProgress = computed(() =>
-    totalCheckpoints.value
-      ? Math.round((checkedCount.value / totalCheckpoints.value) * 100)
-      : 0,
-  );
-  const undoneCount = computed(
-    () => todoItems.value.filter((t) => !t.done).length,
-  );
+	function addRiskAlert(alert: RiskAlert): void {
+		riskAlerts.value.push( alert );
+	}
 
-  const todayTask = computed(
-    () => patrolTasks.value.find((t) => t.status !== "completed") || null,
-  );
+	function toggleTodo(id: string): void {
+		const item = todoItems.value.find( ( candidate ) => candidate.id === id );
+		if ( item !== undefined ) item.done = item.done === false;
+	}
 
-  const estimatedCompleteTime = computed(() => {
-    const task = todayTask.value;
-    if (!task?.planTime) return "--";
-    const parts = task.planTime.split(" ");
-    if (parts.length < 2) return "--";
-    const datePart = parts[0].slice(5); // MM-DD
-    const timePart = parts[1].split("-").pop() || ""; // HH:mm (end time)
-    return `${datePart} ${timePart}`;
-  });
+	function updateCheckpoint(taskId: string, checkpointId: string, data: Partial<Checkpoint>): void {
+		const checkpoint = patrolTasks.value.find( ( task ) => task.id === taskId )?.checkpoints.find( ( item ) => item.id === checkpointId );
+		if ( checkpoint !== undefined ) Object.assign( checkpoint, data );
+	}
 
-  const riskStats = ref({
-    fixedPoints: 12,
-    pendingReview: 3,
-    monitorAlerts: 2,
-    historyRisks: 47,
-  });
-
-  function setPatrolTasks(list: PatrolTask[]) {
-    patrolTasks.value = list;
-  }
-  function addRiskAlert(a: RiskAlert) {
-    riskAlerts.value.push(a);
-  }
-  function switchDam(dam: DamSection) {
-    currentDam.value = dam;
-  }
-  function toggleTodo(id: string) {
-    const item = todoItems.value.find((t) => t.id === id);
-    if (item) item.done = !item.done;
-  }
-  function updateCheckpoint(
-    taskId: string,
-    cpId: string,
-    data: Partial<Checkpoint>,
-  ) {
-    const task = patrolTasks.value.find((t) => t.id === taskId);
-    if (!task) return;
-    const cp = task.checkpoints.find((c) => c.id === cpId);
-    if (cp) Object.assign(cp, data);
-  }
-
-  return {
-    currentDam,
-    damSections,
-    weather,
-    waterLevel,
-    isWaterOverWarning,
-    patrolTasks,
-    riskAlerts,
-    todoItems,
-    totalCheckpoints,
-    checkedCount,
-    patrolProgress,
-    undoneCount,
-    todayTask,
-    estimatedCompleteTime,
-    riskStats,
-    setPatrolTasks,
-    addRiskAlert,
-    switchDam,
-    toggleTodo,
-    updateCheckpoint,
-  };
-});
+	return {
+		uiContent,
+		currentDam,
+		damSections,
+		weather,
+		waterLevel,
+		isWaterOverWarning,
+		patrolTasks,
+		riskAlerts,
+		todoItems,
+		riskStats,
+		totalCheckpoints,
+		checkedCount,
+		patrolProgress,
+		undoneCount,
+		todayTask,
+		estimatedCompleteTime,
+		switchDam,
+		setPatrolTasks,
+		addRiskAlert,
+		toggleTodo,
+		updateCheckpoint
+	};
+} );

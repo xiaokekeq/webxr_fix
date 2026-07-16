@@ -1,0 +1,88 @@
+{
+  "application": {
+    "name": "供水管网智慧运维",
+    "shortName": "供水管网",
+    "arEntryLabel": "进入 AR 巡查"
+  },
+  "sites": [
+    { "id": "east-01", "name": "东城供水片区 · 1 号管网", "lng": 118.735944, "lat": 31.940047 },
+    { "id": "east-02", "name": "东城供水片区 · 2 号管网", "lng": 118.74112, "lat": 31.94431 }
+  ],
+  "weather": { "icon": "☀️", "desc": "晴", "temp": 32 },
+  "dashboard": {
+    "pressure": { "label": "管网压力", "value": "0.42", "unit": "MPa", "status": "运行正常" },
+    "taskTitle": "今日巡检任务",
+    "riskTitle": "管网告警概览",
+    "routeTitle": "巡检路线预览",
+    "progressTitle": "今日进度",
+    "todoTitle": "待办提醒",
+    "route": { "distance": "2.5 km", "duration": "45 min", "checkpointCount": 3 },
+    "task": {
+      "id": "water-patrol-001",
+      "title": "东城片区供水管网日常巡检",
+      "section": "东城路 DN400 给水干管",
+      "patrolRange": "东城路 1 号阀门井至 3 号阀门井",
+      "patrolDistance": "2.5 km",
+      "priority": "medium",
+      "planTime": "今日 08:00-12:00",
+      "team": "管网运维一组",
+      "teamCount": 3,
+      "status": "in_progress",
+      "riskLevel": "medium",
+      "startTime": "2026-07-16T08:00:00+08:00",
+      "checkpoints": [
+        { "id": "valve-01", "name": "1 号阀门井", "lng": 118.735944, "lat": 31.940047, "checked": true },
+        { "id": "valve-02", "name": "2 号阀门井", "lng": 118.73831, "lat": 31.94208, "checked": false },
+        { "id": "valve-03", "name": "3 号阀门井", "lng": 118.74112, "lat": 31.94431, "checked": false }
+      ]
+    },
+    "riskStats": { "fixedPoints": 12, "pendingReview": 3, "monitorAlerts": 2, "historyRisks": 8 },
+    "todoItems": [
+      { "id": "pressure-01", "content": "复核东城路 DN400 管段压力波动", "type": "risk", "done": false },
+      { "id": "valve-02", "content": "完成 2 号阀门井现场巡检", "type": "patrol", "done": false },
+      { "id": "record-01", "content": "补充昨日漏损处置记录", "type": "record", "done": false }
+    ],
+    "quickMenus": [
+      { "icon": "⌖", "label": "管网地图", "desc": "查看管线与点位", "path": "/map" },
+      { "icon": "◉", "label": "告警记录", "desc": "查看处置进度", "path": "/records" },
+      { "icon": "▣", "label": "AR 巡查", "desc": "现场识别管网设施", "path": "/water-network/ar?autoStart=1" }
+    ]
+  },
+  "map": {
+	"title": "供水管网地图",
+    "zoom": 15,
+    "legend": [
+      { "type": "checkpoint", "label": "巡检点" },
+      { "type": "risk", "label": "告警点" },
+      { "type": "station", "label": "压力监测点" }
+    ],
+    "markers": [
+      { "id": "valve-01", "lng": 118.735944, "lat": 31.940047, "type": "checkpoint", "label": "1 号阀门井" },
+      { "id": "valve-02", "lng": 118.73831, "lat": 31.94208, "type": "checkpoint", "label": "2 号阀门井" },
+      { "id": "leak-01", "lng": 118.73942, "lat": 31.94271, "type": "risk", "label": "压力异常待复核", "riskLevel": "medium" },
+      { "id": "pressure-01", "lng": 118.74112, "lat": 31.94431, "type": "station", "label": "3 号压力监测点" }
+    ],
+    "route": [[118.735944, 31.940047], [118.73831, 31.94208], [118.74112, 31.94431]]
+  },
+  "records": {
+    "title": "供水管网运维记录",
+    "items": [
+      { "icon": "⌖", "label": "巡检记录", "count": "32 条", "path": "/records/patrol" },
+      { "icon": "!", "label": "告警处置", "count": "8 条", "path": "/records/history" },
+      { "icon": "▤", "label": "维修工单", "count": "12 条", "path": "/records" }
+    ]
+  },
+  "profile": {
+    "title": "我的",
+    "avatar": "运",
+    "name": "管网运维员",
+    "role": "东城供水片区 · 现场巡检",
+    "items": [
+      { "icon": "人", "label": "个人信息" },
+      { "icon": "铃", "label": "消息通知" },
+      { "icon": "设", "label": "系统设置" },
+      { "icon": "册", "label": "运维手册" },
+      { "icon": "准", "label": "模型配准", "path": "/model-calibration" }
+    ]
+  }
+}

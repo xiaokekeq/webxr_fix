@@ -508,9 +508,12 @@ function exitPage(): void {
 	void router.push( '/' );
 }
 
-onMounted( () => {
-	void mountEngineHosts();
+onMounted( async () => {
+	await mountEngineHosts();
 	store.actions.setWorkflowMode( 'ar-inspection' );
+	if ( route.query.autoStart === '1' && sceneReady.value ) {
+		store.actions.enterAr();
+	}
 } );
 
 onUnmounted( () => {
