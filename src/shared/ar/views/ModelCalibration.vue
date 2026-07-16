@@ -31,13 +31,6 @@ const markerCalibrationOverlayOpen = ref( false );
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
-const trackingWarningText = computed( () => {
-	if ( hasArSession.value === false ) return '';
-	if ( engine.value.xrSessionVisibilityState !== 'visible' ) return 'AR 会话暂时不可见，模型位置已保留';
-	if ( engine.value.xrTrackingStatus === 'emulated' ) return '环境跟踪正在使用估算位置，请缓慢移动设备并保持光线充足';
-	if ( engine.value.xrTrackingStatus === 'unavailable' ) return '环境跟踪不稳定，请缓慢移动设备并保持光线充足';
-	return '';
-} );
 const sceneReady = computed( () => engine.value.modelRuntimeLoad.modelRuntimeLoadState === 'ready' );
 const hitTestReady = computed(
 	() => engine.value.arSessionPhase === 'ready-to-place'
@@ -347,7 +340,6 @@ function setArOverlayClass(active: boolean): void {
 
 <template>
 	<div class="calibration-page" :class="{ 'ar-active': hasArSession }">
-		<div v-if="trackingWarningText" class="ar-tracking-warning">{{ trackingWarningText }}</div>
 		<div class="page-scroll">
 			<header
 				v-if="showMarkerCalibrationOverlay === false"
