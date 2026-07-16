@@ -19,6 +19,7 @@ import type {
 	ArWorkflowMode,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
+import type { XrTrackingStatus } from '@/features/ar/types/runtime-types.js';
 import {
 	type MarkerSolutionApplyDiagnostics,
 	type MarkerSolutionApplyResult,
@@ -48,6 +49,7 @@ interface MarkerCalibrationRuntimeOptions {
 	getSiteId(): string | null;
 	getCurrentSessionId(): string | null;
 	isPresenting(): boolean;
+	getTrackingStatus(): XrTrackingStatus;
 	hasGroundHit(): boolean;
 	getHitPosition(target: THREE.Vector3): THREE.Vector3 | null;
 	getDemoModelConfig(): DemoModelConfig | null;
@@ -64,7 +66,6 @@ interface MarkerCalibrationRuntimeOptions {
 			calibrationSiteId: string | null;
 			calibrationMarkerId: string;
 			source?: 'marker-calibration';
-			placeModel?: boolean;
 			capturedCornersAr?: THREE.Vector3[];
 		}
 	): boolean;
@@ -245,6 +246,11 @@ export class MarkerCalibrationRuntime {
 			return;
 		}
 
+		if ( this.options.getTrackingStatus() !== 'normal' ) {
+			this.options.setStatus( '环境跟踪不稳定，请恢复后再开始 Marker 校正。' );
+			return;
+		}
+
 		const markerPose = this.options.getPrimaryConfiguredMarkerPose();
 		if ( markerPose === null ) {
 			this.options.setStatus( '当前模型没有可用于 Marker 校正的控制标志配置。' );
@@ -308,6 +314,11 @@ export class MarkerCalibrationRuntime {
 
 		if ( this.options.isPresenting() === false ) {
 			this.options.setStatus( '请先进入当前 AR 会话，再采集 Marker 角点。' );
+			return;
+		}
+
+		if ( this.options.getTrackingStatus() !== 'normal' ) {
+			this.options.setStatus( '环境跟踪不稳定，已暂停 Marker 角点采集。' );
 			return;
 		}
 
@@ -392,6 +403,11 @@ export class MarkerCalibrationRuntime {
 		if ( this.options.isPresenting() === false ) {
 			this.options.setStatus( '请先进入当前 AR 会话，再应用 Marker 校正。' );
 			return this.failSolveOrApply( 'session-validation', 'ar-session-not-presenting' );
+		}
+
+		if ( this.options.getTrackingStatus() !== 'normal' ) {
+			this.options.setStatus( '环境跟踪不稳定，已暂停 Marker 校正确认。' );
+			return this.failSolveOrApply( 'session-validation', 'tracking-not-normal' );
 		}
 
 		const demoModelConfig = this.options.getDemoModelConfig();
@@ -499,7 +515,6 @@ export class MarkerCalibrationRuntime {
 				calibrationSiteId: this.calibrationIdentity?.siteId ?? this.options.getSiteId(),
 				calibrationMarkerId: this.calibrationIdentity?.markerId ?? markerId,
 				source: 'marker-calibration',
-				placeModel: false,
 				capturedCornersAr: this.currentSessionMarkerCornerCaptures.map( ( item ) => item.arPosition.clone() )
 			} );
 			if ( applied ) {

@@ -1,6 +1,7 @@
 ﻿import type { PipeRecord } from '@/models/types/pipe-record.js';
 import type { ModelCatalogItem } from '@/models/catalog/model-api.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
+import type { XrSessionVisibilityState, XrTrackingStatus } from '@/features/ar/types/runtime-types.js';
 
 export type WorkspaceMode = 'browse' | 'registration' | 'inspection';
 export type AppMode = 'pre-ar' | 'ar-session';
@@ -270,6 +271,9 @@ export interface RegistrationStoreState {
 	arSupportState: ArSupportState;
 	arSupportMessage: string;
 	arSessionPhase: ArSessionPhase;
+	xrTrackingStatus: XrTrackingStatus;
+	xrSessionVisibilityState: XrSessionVisibilityState;
+	referenceSpaceResetCount: number;
 	workspaceMode: WorkspaceMode;
 	undergroundMaterialMode: 'solid' | 'xray';
 	undergroundInspectionTool: 'complete' | 'layer-peeling' | 'section-cut';

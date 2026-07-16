@@ -1,21 +1,47 @@
 import * as THREE from 'three';
-import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
-import { clearPlacedModel, placeModelWithMatrix } from '@/engine/core/model.js';
+import type { ARSceneBundle, XrTrackingStatus } from '@/features/ar/types/runtime-types.js';
+import { clearPlacedModel } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
-import {
-	solveGroundPlaneRigidTransform,
-	type EngineeringControlPoint,
-	type EngineeringRegistrationSolution
-} from '@/localization/coarse/engineering-registration.js';
-import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
+import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import { createDefaultTargetGuidanceState } from '@/localization/core/registration-store.js';
 import { createPlacementSummaryState } from '@/engine/session/view-state.js';
+import { composeModelRawLocalToArMatrix } from './runtime.js';
 import {
-	composeModelRawLocalToArMatrix,
-	createPlacementBaseFromArLocalizationSolution,
-	placeAdjustedModel
-} from './runtime.js';
+	correctUpsideDownModelMatrix,
+	ModelTransformRuntime,
+	type ModelPlacementPhase,
+	type ModelTransformAuditEntry,
+	type ModelTransformCommitReason,
+	type ModelTransformGuardOptions
+} from './model-transform-runtime.js';
 import type { PropertySelectionController } from '@/engine/interaction/property-selection.js';
+
+export type ModelLifecycleReason =
+	| 'explicit-reset'
+	| 'model-changed'
+	| 'session-start'
+	| 'session-ended'
+	| 'disposed';
+
+export type ModelVisibilityReason =
+	| 'model-not-ready'
+	| 'session-active'
+	| 'session-ended'
+	| 'explicit-user-hide'
+	| 'project-capability';
+
+export interface ModelLifecycleAuditEntry {
+	event: 'created' | 'removed';
+	reason: ModelTransformCommitReason | ModelLifecycleReason;
+	timestamp: number;
+	modelUuid: string;
+}
+
+export interface ModelVisibilityState {
+	visible: boolean;
+	reason: ModelVisibilityReason;
+	timestamp: number;
+}
 
 interface CreatePlacementSessionOptions {
 	store: {
@@ -26,6 +52,7 @@ interface CreatePlacementSessionOptions {
 	};
 	sceneBundle: ARSceneBundle;
 	propertySelection: PropertySelectionController;
+	transformGuard?: Partial<ModelTransformGuardOptions>;
 	setStatus(message: string): void;
 	updateRegistrationStatusDetail(message: string): void;
 }
@@ -33,24 +60,22 @@ interface CreatePlacementSessionOptions {
 export interface PlacementSession {
 	getPlacedModel(): THREE.Group | null;
 	getArPlacedModel(): THREE.Group | null;
-	getPlacementBase(): ManualPlacementBase | null;
-	getAutoPlacementPending(): boolean;
-	markAutoPlacementPending(): void;
-	cancelAutoPlacement(): void;
-	resetPlacement(): void;
-	requestAutoPlacement(modelTemplate: THREE.Group | null): void;
-	attemptLocalizedPlacement(args: {
-		modelTemplate: THREE.Group | null;
-		registrationSolution: EngineeringRegistrationSolution | null;
-		arFromEnuSolutionOverride?: ArFromEnuSolution | null;
-		modelOrientationTarget: THREE.Quaternion;
-		onPlacementBaseResolved?(base: ManualPlacementBase): void;
-	}): void;
+	getPlacementPhase(): ModelPlacementPhase;
+	getCommittedModelMatrix(target?: THREE.Matrix4): THREE.Matrix4 | null;
+	getTransformAudit(): readonly ModelTransformAuditEntry[];
+	getLastLifecycleEvent(): ModelLifecycleAuditEntry | null;
+	getVisibilityState(): ModelVisibilityState;
+	setTrackingStatus(status: XrTrackingStatus): void;
+	setCommittedModelVisible(visible: boolean, reason: ModelVisibilityReason): void;
+	resetPlacement(reason?: ModelLifecycleReason): void;
+	dispose(): void;
 	placeEngineeringModelFromCurrentArFromEnu(args: {
 		modelTemplate: THREE.Group | null;
 		registrationSolution: EngineeringRegistrationSolution | null;
 		arFromEnuSolution: ArFromEnuSolution | null;
 		currentSessionId?: string | null;
+		reason: ModelTransformCommitReason;
+		source: string;
 	}): boolean;
 }
 
@@ -59,60 +84,33 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	const {
 		store,
 		sceneBundle,
-	propertySelection,
-	setStatus,
-	updateRegistrationStatusDetail
+		propertySelection,
+		setStatus,
+		updateRegistrationStatusDetail
 	} = options;
-
+	const transformRuntime = new ModelTransformRuntime( options.transformGuard );
 	let arPlacedModel: THREE.Group | null = null;
-	let arPlacementBase: ManualPlacementBase | null = null;
-	let autoPlacementPending = false;
+	let lastLifecycleEvent: ModelLifecycleAuditEntry | null = null;
+	let visibilityState: ModelVisibilityState = {
+		visible: false,
+		reason: 'model-not-ready',
+		timestamp: Date.now()
+	};
+
+	function applyCommittedModelVisibility(visible: boolean, reason: ModelVisibilityReason): void {
+
+		if ( sceneBundle.arModelAnchor.visible !== visible ) sceneBundle.arModelAnchor.visible = visible;
+		if ( visibilityState.visible !== visible || visibilityState.reason !== reason ) {
+			visibilityState = { visible, reason, timestamp: Date.now() };
+		}
+
+	}
+
+	applyCommittedModelVisibility( false, 'model-not-ready' );
+
 	function updatePlacementSummary(): void {
 
 		store.patch( { placementSummary: createPlacementSummaryState( arPlacedModel ) } );
-
-	}
-
-	function resetArPlacementAnchorTransform(): void {
-
-		sceneBundle.arPlacementAnchor.position.set( 0, 0, 0 );
-		sceneBundle.arPlacementAnchor.quaternion.identity();
-		sceneBundle.arPlacementAnchor.scale.set( 1, 1, 1 );
-		sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
-
-	}
-	function createAdjustedPlacementFromBase(base: ManualPlacementBase): {
-		position: THREE.Vector3;
-		orientation: THREE.Quaternion;
-		scale: number;
-		matrix?: THREE.Matrix4;
-	} {
-
-		return {
-			position: base.position.clone(),
-			orientation: base.orientation.clone(),
-			scale: base.scale,
-			matrix: base.matrix?.clone()
-		};
-
-	}
-
-	function placeFromPlacementBase(modelTemplate: THREE.Group): void {
-
-		if ( arPlacementBase === null ) {
-			return;
-		}
-
-		const adjustedPlacement = createAdjustedPlacementFromBase( arPlacementBase );
-		resetArPlacementAnchorTransform();
-		arPlacedModel = placeAdjustedModel( {
-			modelTemplate,
-			placedModel: arPlacedModel,
-			modelAnchor: sceneBundle.arModelAnchor,
-			adjustedPlacement
-		} );
-			updateRegistrationStatusDetail( '状态：模型已按工程坐标显示' );
-		updatePlacementSummary();
 
 	}
 
@@ -129,88 +127,70 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		},
 
-		getPlacementBase() {
+		getPlacementPhase() {
 
-			return arPlacementBase;
-
-		},
-
-		getAutoPlacementPending() {
-
-			return autoPlacementPending;
+			return transformRuntime.getPhase();
 
 		},
 
-		markAutoPlacementPending() {
+		getCommittedModelMatrix(target) {
 
-			autoPlacementPending = true;
-
-		},
-
-		cancelAutoPlacement() {
-
-			autoPlacementPending = false;
+			return transformRuntime.getCommittedModelMatrix( target );
 
 		},
 
-		resetPlacement() {
+		getTransformAudit() {
 
+			return transformRuntime.getAudit();
+
+		},
+
+		getLastLifecycleEvent() {
+
+			return lastLifecycleEvent === null ? null : { ...lastLifecycleEvent };
+
+		},
+
+		getVisibilityState() {
+
+			return { ...visibilityState };
+
+		},
+
+		setTrackingStatus(status) {
+
+			transformRuntime.setTrackingStatus( status );
+
+		},
+
+		setCommittedModelVisible(visible, reason) {
+
+			applyCommittedModelVisibility( visible, reason );
+
+		},
+
+		resetPlacement(reason = 'explicit-reset') {
+
+			if ( arPlacedModel !== null ) {
+				lastLifecycleEvent = {
+					event: 'removed',
+					reason,
+					timestamp: Date.now(),
+					modelUuid: arPlacedModel.uuid
+				};
+			}
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
-			autoPlacementPending = false;
-			arPlacementBase = null;
-			resetArPlacementAnchorTransform();
+			transformRuntime.reset();
 			propertySelection.clearSelection();
 			updatePlacementSummary();
 			store.patch( { targetGuidance: createDefaultTargetGuidanceState() } );
 
 		},
 
-		requestAutoPlacement(modelTemplate) {
+		dispose() {
 
-			if ( modelTemplate === null || sceneBundle.renderer.xr.isPresenting === false ) {
-				return;
-			}
-
-			autoPlacementPending = true;
-			updateRegistrationStatusDetail( '状态：等待 Marker 四角点校正' );
-
-		},
-
-		attemptLocalizedPlacement(args) {
-
-			const {
-				modelTemplate,
-				registrationSolution,
-				arFromEnuSolutionOverride,
-				modelOrientationTarget,
-				onPlacementBaseResolved
-			} = args;
-
-			if (
-				autoPlacementPending === false
-				|| modelTemplate === null
-				|| registrationSolution === null
-			) {
-				return;
-			}
-
-			if ( arFromEnuSolutionOverride === null || arFromEnuSolutionOverride === undefined ) {
-				updateRegistrationStatusDetail( '状态：等待 Marker 四角点定位' );
-				setStatus( '请先完成 Marker 四角点校正后再进行工程放置。' );
-				autoPlacementPending = false;
-				return;
-			}
-
-			arPlacementBase = createPlacementBaseFromArLocalizationSolution( {
-				arFromEnuSolution: arFromEnuSolutionOverride,
-				modelTemplate,
-				registrationSolution,
-				modelOrientationTarget
-			} );
-			onPlacementBaseResolved?.( arPlacementBase );
-			placeFromPlacementBase( modelTemplate );
-			autoPlacementPending = false;
-			setStatus( '模型已按工程坐标显示，未使用 hit-test 决定最终位置。' );
+			this.resetPlacement( 'disposed' );
+			transformRuntime.dispose();
 
 		},
 
@@ -220,7 +200,9 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				modelTemplate,
 				registrationSolution,
 				arFromEnuSolution,
-				currentSessionId
+				currentSessionId,
+				reason,
+				source
 			} = args;
 
 			if ( modelTemplate === null || registrationSolution === null || arFromEnuSolution === null ) {
@@ -235,19 +217,32 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				return false;
 			}
 
-			const effectiveRegistrationSolution = registrationSolution;
-			const engineeringMatrix = composeModelRawLocalToArMatrix( {
-				arFromEnuSolution,
-				registrationSolution: effectiveRegistrationSolution
-			} );
-			resetArPlacementAnchorTransform();
-			arPlacementBase = null;
-			arPlacedModel = placeModelWithMatrix(
-				modelTemplate,
-				arPlacedModel,
-				sceneBundle.arModelAnchor,
-				engineeringMatrix
+			const engineeringMatrix = correctUpsideDownModelMatrix(
+				composeModelRawLocalToArMatrix( {
+					arFromEnuSolution,
+					registrationSolution
+				} )
 			);
+			const wasCreated = arPlacedModel === null;
+			arPlacedModel = transformRuntime.commitModelTransform( {
+				modelTemplate,
+				currentModel: arPlacedModel,
+				parent: sceneBundle.arModelAnchor,
+				commit: {
+					matrix: engineeringMatrix,
+					reason,
+					source,
+					confirmed: true
+				}
+			} );
+			if ( wasCreated ) {
+				lastLifecycleEvent = {
+					event: 'created',
+					reason,
+					timestamp: Date.now(),
+					modelUuid: arPlacedModel.uuid
+				};
+			}
 			applyModelInstanceUserData( arPlacedModel, {
 				id: registrationSolution.modelId,
 				name: registrationSolution.modelId,
@@ -255,12 +250,10 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			} );
 			updateRegistrationStatusDetail( '状态：模型已按工程矩阵显示' );
 			updatePlacementSummary();
-			setStatus( '模型已按工程矩阵显示，未使用 hit-test 决定最终位置。' );
-			autoPlacementPending = false;
+			setStatus( '模型已按工程矩阵显示，hit-test 仅继续更新准星。' );
 			return true;
 
-		},
-
+		}
 	};
 
 }

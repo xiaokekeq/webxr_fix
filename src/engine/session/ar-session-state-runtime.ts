@@ -8,7 +8,6 @@ interface CreateArSessionStateRuntimeOptions {
 	isPresenting(): boolean;
 	hasGroundHit(): boolean;
 	hasPlacedModel(): boolean;
-	isAutoPlacementPending(): boolean;
 }
 
 export interface ArSessionStateRuntime {
@@ -26,8 +25,7 @@ export function createArSessionStateRuntime(
 		store,
 		isPresenting,
 		hasGroundHit,
-		hasPlacedModel,
-		isAutoPlacementPending
+		hasPlacedModel
 	} = options;
 
 	let hasCommittedPlacement = false;
@@ -62,11 +60,6 @@ export function createArSessionStateRuntime(
 			if ( isPresenting() === false ) {
 				hasCommittedPlacement = false;
 				patchPhase( 'scanning' );
-				return;
-			}
-
-			if ( isAutoPlacementPending() ) {
-				patchPhase( 'placing' );
 				return;
 			}
 

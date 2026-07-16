@@ -37,21 +37,14 @@ function createOptions(
 
 	return {
 		placementSession: {} as never,
-		getWorkflowMode: () => 'ar-inspection',
-		getSiteId: () => null,
 		getCurrentSessionId: () => null,
-		getInspectionTargetId: () => null,
-		getInspectionStableFrameCount: () => 0,
 		getPreferredLocalizationOverride: () => localization,
 		getModelTemplate: () => model,
 		getRegistrationSolution: () => registration,
 		getRuntimeLoadStatus: () => ( {
 			modelRuntimeLoadState: 'ready'
 		} as never ),
-		getHitTestController: () => ( {} as never ),
-		getModelOrientationTarget: () => new THREE.Quaternion(),
 		onBeforePlacementRequest: vi.fn(),
-		onPlacementBaseResolved: vi.fn(),
 		applyModelLayerVisibility: vi.fn(),
 		syncRegistrationChainDebug: vi.fn(),
 		syncLocalizationDebug: vi.fn(),

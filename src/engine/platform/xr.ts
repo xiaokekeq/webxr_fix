@@ -3,7 +3,9 @@ import type {
 	ARSceneBundle,
 	ArSessionStartResult,
 	SetStatus,
-	XRHitTestController
+	XRHitTestController,
+	XrSessionVisibilityState,
+	XrTrackingStatus
 } from '@/features/ar/types/runtime-types.js';
 import {
 	createXRHitTestController,
@@ -18,7 +20,9 @@ interface CreateXRSessionRuntimeOptions {
 	onSessionStart(result: ArSessionStartResult): void;
 	onSessionEnd(): void;
 	canReportStatus(): boolean;
-	onAttemptAutoPlacement(): void;
+	onTrackingStatusChange(status: XrTrackingStatus): void;
+	onSessionVisibilityChange(state: XrSessionVisibilityState): void;
+	onReferenceSpaceReset(): void;
 	onFrameUpdate(frame: XRFrame): void;
 }
 
@@ -39,16 +43,39 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		onSessionStart,
 		onSessionEnd,
 		canReportStatus,
-		onAttemptAutoPlacement,
+		onTrackingStatusChange,
+		onSessionVisibilityChange,
+		onReferenceSpaceReset,
 		onFrameUpdate
 	} = options;
+	let activeSession: XRSession | null = null;
+	let activeReferenceSpace: XRReferenceSpace | null = null;
+	const handleVisibilityChange = (): void => {
+		onSessionVisibilityChange( readVisibilityState( activeSession ) );
+	};
+	const handleReferenceSpaceReset = (): void => {
+		onReferenceSpaceReset();
+	};
+	const handleSessionStart = (result: ArSessionStartResult): void => {
+		activeSession = result.session;
+		activeSession.addEventListener( 'visibilitychange', handleVisibilityChange );
+		onSessionVisibilityChange( readVisibilityState( activeSession ) );
+		onSessionStart( result );
+	};
+	const handleSessionEnd = (): void => {
+		activeSession?.removeEventListener( 'visibilitychange', handleVisibilityChange );
+		activeReferenceSpace?.removeEventListener( 'reset', handleReferenceSpaceReset );
+		activeSession = null;
+		activeReferenceSpace = null;
+		onSessionEnd();
+	};
 	const xrHitTest = createXRHitTestController( {
 		renderer: sceneBundle.renderer,
 		reticle: sceneBundle.reticle,
 		xrButtonWrap,
 		setStatus,
-		onSessionStart,
-		onSessionEnd,
+		onSessionStart: handleSessionStart,
+		onSessionEnd: handleSessionEnd,
 		canReportStatus
 	} );
 	const errorCounts = new Map<string, number>();
@@ -100,8 +127,15 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		renderFrame(_time: number, frame?: XRFrame) {
 
 			if ( sceneBundle.renderer.xr.isPresenting && frame ) {
+				const referenceSpace = sceneBundle.renderer.xr.getReferenceSpace();
+				if ( referenceSpace !== activeReferenceSpace ) {
+					activeReferenceSpace?.removeEventListener( 'reset', handleReferenceSpaceReset );
+					activeReferenceSpace = referenceSpace;
+					activeReferenceSpace?.addEventListener( 'reset', handleReferenceSpaceReset );
+				}
+				const viewerPose = referenceSpace === null ? null : frame.getViewerPose( referenceSpace ) ?? null;
+				onTrackingStatusChange( resolveXrTrackingStatus( viewerPose ) );
 				runFrameStage( 'hit-test', () => xrHitTest.update( frame ) );
-				runFrameStage( 'auto-placement', onAttemptAutoPlacement );
 				runFrameStage( 'frame-update', () => onFrameUpdate( frame ) );
 			}
 			runFrameStage( 'renderer-render', () => {
@@ -116,5 +150,21 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 
 		}
 	};
+
+}
+
+export function resolveXrTrackingStatus(
+	viewerPose: { emulatedPosition?: boolean } | null
+): XrTrackingStatus {
+
+	if ( viewerPose === null ) return 'unavailable';
+	return viewerPose.emulatedPosition === true ? 'emulated' : 'normal';
+
+}
+
+function readVisibilityState(session: XRSession | null): XrSessionVisibilityState {
+
+	const state = session?.visibilityState;
+	return state === 'hidden' || state === 'visible-blurred' ? state : 'visible';
 
 }

@@ -6,8 +6,11 @@ import { createPropertySelectionController } from '@/engine/interaction/property
 import { createModelSession } from '@/engine/model/session.js';
 import type { LoadedModelRuntimeBundle } from '@/engine/model/runtime.js';
 import {
-	createPlacementSession
+	createPlacementSession,
+	type ModelLifecycleAuditEntry,
+	type ModelVisibilityState
 } from '@/engine/placement/session.js';
+import type { ModelPlacementPhase, ModelTransformAuditEntry } from '@/engine/placement/model-transform-runtime.js';
 import { createArSessionStateRuntime } from '@/engine/session/ar-session-state-runtime.js';
 import {
 	exportRegistrationSnapshotFile,
@@ -100,7 +103,11 @@ import type {
 	SiteCalibrationBaseline,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
-import type { ArSessionStartResult } from '@/features/ar/types/runtime-types.js';
+import type {
+	ArSessionStartResult,
+	XrSessionVisibilityState,
+	XrTrackingStatus
+} from '@/features/ar/types/runtime-types.js';
 import type { ArSessionContext } from '@/features/ar/types/ar-session-context.js';
 import type { ProjectRepositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
@@ -125,6 +132,7 @@ type EngineeringPlacementBlockReason =
 	| 'corners-captured-not-applied'
 	| 'transform-missing'
 	| 'transform-session-mismatch'
+	| 'tracking-not-normal'
 	| 'mock-production-blocked'
 	| 'model-registration-missing';
 
@@ -143,7 +151,6 @@ interface MarkerSolutionApplyMetadata {
 	calibrationSiteId: string | null;
 	calibrationMarkerId: string;
 	source?: 'marker-calibration';
-	placeModel?: boolean;
 	capturedCornersAr?: THREE.Vector3[];
 }
 
@@ -152,6 +159,10 @@ export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
 	hasSelection: boolean;
 	currentStatus: string;
+	modelPlacementPhase: ModelPlacementPhase;
+	modelTransformAudit: readonly ModelTransformAuditEntry[];
+	lastModelLifecycleEvent: ModelLifecycleAuditEntry | null;
+	modelVisibility: ModelVisibilityState;
 }
 
 export type ModelPlacementResult =
@@ -170,6 +181,9 @@ function createInitialState(projectName = '现场辅助核查'): RegistrationSto
 		arSupportState: 'checking',
 		arSupportMessage: '正在检测当前设备是否支持 WebXR AR。',
 		arSessionPhase: 'scanning',
+		xrTrackingStatus: 'unavailable',
+		xrSessionVisibilityState: 'hidden',
+		referenceSpaceResetCount: 0,
 		workspaceMode: 'browse',
 		...DEFAULT_UNDERGROUND_DISPLAY_STATE,
 		transparentXrayValue: 0,
@@ -221,7 +235,15 @@ function createInitialState(projectName = '现场辅助核查'): RegistrationSto
 }
 
 export function createInitialThreeEngineSnapshot(projectName?: string): ThreeEngineSnapshot {
-	return { ...createInitialState( projectName ), hasSelection: false, currentStatus: '正在准备 AR 运行环境' };
+	return {
+		...createInitialState( projectName ),
+		hasSelection: false,
+		currentStatus: '正在准备 AR 运行环境',
+		modelPlacementPhase: 'ready',
+		modelTransformAudit: [],
+		lastModelLifecycleEvent: null,
+		modelVisibility: { visible: false, reason: 'model-not-ready', timestamp: 0 }
+	};
 }
 
 function hasSelectedPipe(state: RegistrationStoreState): boolean {
@@ -252,7 +274,6 @@ export class ThreeEngine {
 	private readonly store: RegistrationStore;
 	private readonly sceneBundle;
 	private readonly xrButtonWrap: HTMLDivElement;
-	private readonly modelOrientation = new THREE.Quaternion();
 	private readonly localizationDebugLayer = new LocalizationDebugLayer();
 	private readonly materialStateRuntime = new MaterialStateRuntime();
 	private readonly enclosureShell = new TexturedEnclosureShell();
@@ -304,8 +325,6 @@ export class ThreeEngine {
 	private lastAnnotationLabelsSignature = '';
 	private siteBaselineLoadRequestId = 0;
 	private pipesByName = new Map<string, PipeRecord>();
-	private lastAppliedMarkerSolutionId: string | null = null;
-	private autoPlacementInFlightSolutionId: string | null = null;
 	private readonly handleWebglContextLost = ( event: Event ) => {
 		( event as WebGLContextEvent ).preventDefault();
 		arError( '[WebGLContextLost]', { xrPresenting: this.sceneBundle.renderer.xr.isPresenting } );
@@ -338,6 +357,7 @@ export class ThreeEngine {
 			store: this.store,
 			sceneBundle: this.sceneBundle,
 			propertySelection: this.propertySelection,
+			transformGuard: projectConfig.transformGuard,
 			setStatus: ( message ) => {
 				statusRuntime.setStatus( message );
 				this.emit();
@@ -376,8 +396,7 @@ export class ThreeEngine {
 			store: this.store,
 			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
-			hasPlacedModel: () => this.placementSession.getArPlacedModel() !== null,
-			isAutoPlacementPending: () => this.placementSession.getAutoPlacementPending()
+			hasPlacedModel: () => this.placementSession.getArPlacedModel() !== null
 		} );
 
 		this.sceneHostRuntime = createSceneHostRuntime( {
@@ -394,19 +413,12 @@ export class ThreeEngine {
 		this.inspectionMarkerWorkflow = new InspectionMarkerWorkflow( {
 			getWorkflowMode: () => this.workflowMode,
 			getInspectionPlacementSource: () => this.store.getState().inspectionPlacementSource,
-			getCurrentSessionId: () => this.currentArSessionId,
-			getSiteId: () => this.demoModelConfig?.siteId ?? this.currentArSessionContext?.siteId ?? null,
-			getControlTargets: () => this.getCurrentControlTargets(),
 			getPrimaryTargetId: () => this.getCurrentControlTargets()[ 0 ]?.id ?? null,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
 			hasPlacedModel: () => this.placementSession.getPlacedModel() !== null,
 			setStatus: ( message ) => {
 				statusRuntime.setStatus( message );
 				this.emit();
-			},
-			requestPreferredPlacement: () => {
-				this.pointerSelection.suppressSelectionFor( 1200 );
-				this.placementWorkflow.requestAutoPlacement();
 			},
 			startManualCalibration: ( message ) => {
 				this.markerCalibrationRuntime.startCurrentSessionCalibration();
@@ -420,6 +432,7 @@ export class ThreeEngine {
 			getSiteId: () => this.demoModelConfig?.modelId ?? null,
 			getCurrentSessionId: () => this.currentArSessionId,
 			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
+			getTrackingStatus: () => this.store.getState().xrTrackingStatus,
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
 			getHitPosition: ( target ) => this.xrRuntime.getHitTestController().getHitPosition( target ),
 			getDemoModelConfig: () => this.getSessionSiteConfig(),
@@ -470,24 +483,17 @@ export class ThreeEngine {
 
 		this.placementWorkflow = new PlacementWorkflow( {
 			placementSession: this.placementSession,
-			getWorkflowMode: () => this.workflowMode,
-			getSiteId: () => this.demoModelConfig?.siteId ?? this.currentArSessionContext?.siteId ?? null,
 			getCurrentSessionId: () => this.currentArSessionId,
-			getInspectionTargetId: () => this.activeMarkerLocalizationResult?.markerId ?? this.inspectionMarkerWorkflow.getStableTargetId(),
-			getInspectionStableFrameCount: () => this.inspectionMarkerWorkflow.getStableFrameCount(),
 			getPreferredLocalizationOverride: () => this.getPreferredFormalLocalizationOverride(),
 			getModelTemplate: () => this.modelTemplate,
 			getRegistrationSolution: () => this.registrationSolution,
 			getRuntimeLoadStatus: () => this.store.getState().modelRuntimeLoad,
-			getHitTestController: () => this.xrRuntime.getHitTestController(),
-			getModelOrientationTarget: () => this.modelOrientation,
-				onBeforePlacementRequest: () => {
-					this.propertySelection.clearSelection();
-					this.pointerSelection.suppressSelectionFor( 1200 );
+			onBeforePlacementRequest: () => {
+				this.propertySelection.clearSelection();
+				this.pointerSelection.suppressSelectionFor( 1200 );
 			},
-			onPlacementBaseResolved: () => {},
 			applyModelLayerVisibility: () => {
-				this.applyModelLayerVisibility( 'auto-placement' );
+				this.applyModelLayerVisibility();
 			},
 			syncRegistrationChainDebug: () => {
 				this.syncRegistrationChainDebug();
@@ -589,7 +595,7 @@ export class ThreeEngine {
 			onSelectionCleared: () => {
 				this.clearAnnotationDetail();
 				this.visualizationStateRuntime.syncVisualizationState();
-				this.applyModelLayerVisibility( 'selection-cleared' );
+				this.applyModelLayerVisibility();
 			},
 			handlePreSelectionRaycast: ( selection ) => {
 				if ( this.annotationLabelsController.hitDetailPanel( selection.raycaster ) ) {
@@ -610,7 +616,9 @@ export class ThreeEngine {
 			},
 			getPlacedModel: () => this.placementSession.getPlacedModel(),
 			getWorkspaceMode: () => this.store.getState().workspaceMode,
-			getPipesByName: () => this.pipesByName
+			getPipesByName: () => this.pipesByName,
+			canSelect: () => this.store.getState().xrTrackingStatus === 'normal'
+				&& this.store.getState().xrSessionVisibilityState === 'visible'
 		} );
 
 		this.modelSession = createModelSession( {
@@ -621,7 +629,7 @@ export class ThreeEngine {
 				this.emit();
 			},
 			resetPlacement: () => {
-				this.placementSession.resetPlacement();
+				this.placementSession.resetPlacement( 'model-changed' );
 				this.annotationLayer.clearModelPlacement();
 				this.syncArSessionPhase();
 				this.emit();
@@ -666,16 +674,11 @@ export class ThreeEngine {
 			},
 			onRuntimeBundleReady: ( bundle, modelLoadRequestId ) => {
 				this.initializeOptionalModelVisuals( bundle, modelLoadRequestId );
-				this.tryAutoPlaceAppliedMarkerSolution();
 			},
 			onRuntimeLoadFailed: ( error ) => {
 				this.syncRegistrationChainDebug();
 			},
-			onLoadManualRegistration: () => {},
-			canRequestAutoPlacement: () => false,
-			requestAutoPlacement: () => {
-				this.placementWorkflow.requestAutoPlacement();
-			}
+			onLoadManualRegistration: () => {}
 		} );
 
 		this.xrRuntime = createXRSessionRuntime( {
@@ -691,12 +694,15 @@ export class ThreeEngine {
 			onSessionEnd: () => {
 				this.handleXRSessionEnd();
 			},
-			canReportStatus: () => (
-				this.placementSession.getArPlacedModel() === null
-				&& this.placementSession.getAutoPlacementPending() === false
-			),
-			onAttemptAutoPlacement: () => {
-				this.placementWorkflow.attemptAutoPlacement();
+			canReportStatus: () => this.placementSession.getArPlacedModel() === null,
+			onTrackingStatusChange: ( status ) => {
+				this.handleTrackingStatusChange( status );
+			},
+			onSessionVisibilityChange: ( state ) => {
+				this.handleSessionVisibilityChange( state );
+			},
+			onReferenceSpaceReset: () => {
+				this.handleReferenceSpaceReset();
 			},
 			onFrameUpdate: ( frame ) => {
 				this.safeFrameTask( 'real-depth', () => {
@@ -753,7 +759,11 @@ export class ThreeEngine {
 		return {
 			...state,
 			hasSelection: hasSelectedPipe( state ),
-			currentStatus: this.currentStatus
+			currentStatus: this.currentStatus,
+			modelPlacementPhase: this.placementSession.getPlacementPhase(),
+			modelTransformAudit: this.placementSession.getTransformAudit(),
+			lastModelLifecycleEvent: this.placementSession.getLastLifecycleEvent(),
+			modelVisibility: this.placementSession.getVisibilityState()
 		};
 
 	}
@@ -822,7 +832,7 @@ export class ThreeEngine {
 			} );
 
 			await this.modelSession.initializeCatalog();
-			this.applyModelLayerVisibility( 'initialization' );
+			this.applyModelLayerVisibility();
 			this.syncSceneHost();
 		} catch ( error ) {
 			arError( 'AR engine initialization failed:', error );
@@ -853,6 +863,7 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
 		this.visualizationStateRuntime.restoreVisualizationControllers();
+		this.placementSession.dispose();
 		this.materialStateRuntime.dispose();
 		this.sectionCutController?.dispose();
 		this.enclosureShell.dispose();
@@ -920,7 +931,7 @@ export class ThreeEngine {
 			this.layerVisibility.setHiddenLayerCount(
 				mapLayerPeelingValue( clampedValue, this.layerVisibility.getState().length )
 			);
-			this.applyModelLayerVisibility( 'layer-peeling-value-changed' );
+			this.applyModelLayerVisibility();
 		}
 
 	}
@@ -952,7 +963,7 @@ export class ThreeEngine {
 		if ( this.layerVisibility !== null ) {
 			this.layerVisibility.setHiddenLayerCount( tool === 'layer-peeling' ? mapLayerPeelingValue( state.layerPeelingValue, this.layerVisibility.getState().length ) : 0 );
 		}
-		this.applyModelLayerVisibility( 'inspection-tool-changed' );
+		this.applyModelLayerVisibility();
 
 	}
 
@@ -1180,45 +1191,6 @@ export class ThreeEngine {
 		}
 
 		return this.placeModelFromCurrentMarkerSolution( guard );
-
-	}
-
-	private tryAutoPlaceAppliedMarkerSolution(): void {
-
-		const arFromEnuSolution = this.getActiveMarkerArFromEnuSolutionForCurrentSession();
-		if (
-			arFromEnuSolution === null
-			|| this.modelTemplate === null
-			|| this.registrationSolution === null
-			|| this.placementSession.getArPlacedModel() !== null
-		) {
-			return;
-		}
-
-		const solutionId = `${arFromEnuSolution.sessionId ?? 'none'}:${arFromEnuSolution.timestamp}`;
-		if ( this.lastAppliedMarkerSolutionId === solutionId || this.autoPlacementInFlightSolutionId === solutionId ) {
-			return;
-		}
-
-		const guard = this.validateEngineeringPlacementPreconditions();
-		if ( guard.ok === false ) {
-			return;
-		}
-
-		this.autoPlacementInFlightSolutionId = solutionId;
-		this.placeModelFromCurrentMarkerSolution( guard, 'marker-applied-model-runtime-ready' )
-			.then( () => {
-				if ( this.placementSession.getArPlacedModel() !== null ) {
-					this.lastAppliedMarkerSolutionId = solutionId;
-				}
-			} )
-			.catch( ( error ) => {
-				this.setStatus( error instanceof Error ? `Marker 校正后的模型放置失败：${error.message}` : 'Marker 校正后的模型放置失败。' );
-				arError( '[MarkerModelAutoPlacementFailed]', { solutionId, error } );
-			} )
-			.finally( () => {
-				this.autoPlacementInFlightSolutionId = null;
-			} );
 
 	}
 
@@ -1617,6 +1589,14 @@ export class ThreeEngine {
 
 	private validateEngineeringPlacementPreconditions(): EngineeringPlacementGuardResult {
 
+		if ( this.store.getState().xrTrackingStatus !== 'normal' ) {
+			return {
+				ok: false,
+				reason: 'tracking-not-normal',
+				message: '环境跟踪不稳定，已暂停模型放置。'
+			};
+		}
+
 		if ( this.store.getState().modelRuntimeLoad.modelRuntimeLoadState !== 'ready' ) {
 			return {
 				ok: false,
@@ -1754,39 +1734,6 @@ export class ThreeEngine {
 		if ( rmsError > MODEL_CONTROL_POINT_PLACEMENT_RMS_LIMIT_METERS ) {
 			this.setStatus( message );
 		}
-
-	}
-	private applyPlacedRootWorldMatrix(placedModel: THREE.Group, rootWorldMatrix: THREE.Matrix4): void {
-
-		const parentInverse = placedModel.parent === null
-			? new THREE.Matrix4()
-			: placedModel.parent.matrixWorld.clone().invert();
-		const localMatrix = rootWorldMatrix.clone().premultiply( parentInverse );
-		placedModel.matrixAutoUpdate = false;
-		placedModel.matrix.copy( localMatrix );
-		placedModel.matrix.decompose( placedModel.position, placedModel.quaternion, placedModel.scale );
-		placedModel.updateMatrixWorld( true );
-
-	}
-
-	private correctPlacedModelUpAxis(): void {
-
-		const placedModel = this.placementSession.getArPlacedModel();
-		if ( placedModel === null ) {
-			return;
-		}
-
-		placedModel.updateMatrixWorld( true );
-		const wrapperWorldUp = new THREE.Vector3( 0, 1, 0 ).transformDirection( placedModel.matrixWorld ).normalize();
-		if ( wrapperWorldUp.dot( new THREE.Vector3( 0, 1, 0 ) ) >= 0 ) {
-			return;
-		}
-
-		const rootPosition = placedModel.getWorldPosition( new THREE.Vector3() );
-		const rootQuaternion = placedModel.getWorldQuaternion( new THREE.Quaternion() );
-		const rootScale = placedModel.getWorldScale( new THREE.Vector3() );
-		const correction = new THREE.Quaternion().setFromUnitVectors( wrapperWorldUp, new THREE.Vector3( 0, 1, 0 ) );
-		this.applyPlacedRootWorldMatrix( placedModel, new THREE.Matrix4().compose( rootPosition, correction.multiply( rootQuaternion ), rootScale ) );
 
 	}
 	private applyCurrentSessionMarkerSolution(
@@ -1961,10 +1908,8 @@ export class ThreeEngine {
 			rmsErrorMeters: solution.rmsErrorMeters,
 			sampleCount: solution.correspondenceCount
 		};
-		this.placementSession.cancelAutoPlacement();
 		this.syncRegistrationChainDebug();
 		this.syncLocalizationDebug();
-		queueMicrotask( () => this.tryAutoPlaceAppliedMarkerSolution() );
 		this.setStatus(
 			this.modelTemplate === null || this.registrationSolution === null
 				? 'Marker 校正成功，正在等待模型资源。'
@@ -1976,8 +1921,7 @@ export class ThreeEngine {
 	}
 
 	private async placeModelFromCurrentMarkerSolution(
-		guard: EngineeringPlacementGuardResult,
-		reason = 'engineering-place-button'
+		guard: EngineeringPlacementGuardResult
 	): Promise<ModelPlacementResult> {
 
 		const arFromEnuSolution = guard.arFromEnuSolution ?? this.getActiveMarkerArFromEnuSolutionForCurrentSession();
@@ -1992,7 +1936,6 @@ export class ThreeEngine {
 			return { ok: false, stage: 'placement', reason: 'placed-model-missing', message: '模型放置未生成可显示对象。' };
 		}
 
-		this.correctPlacedModelUpAxis();
 		this.updateModelControlPointPlacementStatus( arFromEnuSolution );
 		this.refreshModelLocalAnnotations();
 		return { ok: true, placedModelUuid: this.placementSession.getArPlacedModel()?.uuid ?? '' };
@@ -2078,10 +2021,55 @@ export class ThreeEngine {
 
 	}
 
+	private handleTrackingStatusChange(status: XrTrackingStatus): void {
+
+		const previous = this.store.getState().xrTrackingStatus;
+		if ( previous === status ) return;
+		this.placementSession.setTrackingStatus( status );
+		this.store.patch( { xrTrackingStatus: status } );
+		if ( status === 'unavailable' ) {
+			this.setStatus( '环境跟踪暂时不可用，请缓慢移动设备并保持光线充足。' );
+		} else if ( status === 'emulated' ) {
+			this.setStatus( '环境跟踪正在使用估算位置，已暂停放置和校正。' );
+		} else if ( previous !== 'normal' && this.sceneBundle.renderer.xr.isPresenting ) {
+			this.setStatus( '环境跟踪已恢复；模型保留原位置，不会自动重新放置。' );
+		}
+
+	}
+
+	private handleSessionVisibilityChange(state: XrSessionVisibilityState): void {
+
+		if ( this.store.getState().xrSessionVisibilityState === state ) return;
+		this.store.patch( { xrSessionVisibilityState: state } );
+		if ( state === 'visible' ) {
+			this.setStatus( 'AR 会话已恢复；模型状态和位置已保留。' );
+			return;
+		}
+		this.setStatus( 'AR 会话暂时不可见，已暂停交互并保留模型位置。' );
+
+	}
+
+	private handleReferenceSpaceReset(): void {
+
+		this.store.patch( {
+			referenceSpaceResetCount: this.store.getState().referenceSpaceResetCount + 1
+		} );
+		this.handleTrackingStatusChange( 'unavailable' );
+		this.setStatus( 'XR 参考空间已更新；模型矩阵未被应用层重复补偿。' );
+
+	}
+
 	private handleXRSessionStart(result: ArSessionStartResult): void {
 
 		if ( result.depthGranted ) this.realDepthProvider.initialize( result.session );
 		else this.realDepthProvider.dispose();
+		this.placementSession.setTrackingStatus( 'unavailable' );
+		this.store.patch( {
+			xrTrackingStatus: 'unavailable',
+			xrSessionVisibilityState: result.session.visibilityState === 'hidden' || result.session.visibilityState === 'visible-blurred'
+				? result.session.visibilityState
+				: 'visible'
+		} );
 		this.sessionLifecycleRuntime.handleXRSessionStart();
 		this.arSessionGeneration += 1;
 		this.syncArSessionContext();
@@ -2097,6 +2085,11 @@ export class ThreeEngine {
 		this.annotationLayer.setSelected( null );
 		this.clearAnnotationDetail();
 		this.sessionLifecycleRuntime.handleXRSessionEnd();
+		this.placementSession.setTrackingStatus( 'unavailable' );
+		this.store.patch( {
+			xrTrackingStatus: 'unavailable',
+			xrSessionVisibilityState: 'hidden'
+		} );
 		this.currentArSessionContext = null;
 
 	}
@@ -2214,8 +2207,12 @@ export class ThreeEngine {
 
 	private syncSceneHost(): void {
 
-		this.sceneBundle.arPlacementAnchor.visible = this.sceneBundle.renderer.xr.isPresenting;
-		this.sceneBundle.arModelAnchor.visible = this.sceneBundle.renderer.xr.isPresenting;
+		const presenting = this.sceneBundle.renderer.xr.isPresenting;
+		this.sceneBundle.arPlacementAnchor.visible = presenting;
+		this.placementSession.setCommittedModelVisible(
+			presenting,
+			presenting ? 'session-active' : 'session-ended'
+		);
 		this.syncAttachmentInfoBoardVisibility();
 		this.sceneHostRuntime.sync();
 
@@ -2661,7 +2658,7 @@ export class ThreeEngine {
 
 	}
 
-	private applyModelLayerVisibility(caller: 'auto-placement' | 'selection-cleared' | 'inspection-tool-changed' | 'layer-peeling-value-changed' | 'initialization' = 'initialization'): void {
+	private applyModelLayerVisibility(): void {
 
 		this.visualizationStateRuntime.applyModelLayerVisibility();
 

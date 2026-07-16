@@ -1,6 +1,5 @@
 import type {
-	ArWorkflowMode,
-	VisualControlTarget
+	ArWorkflowMode
 } from '@/features/ar/types/workflow.js';
 import type {
 	InspectionPlacementSource
@@ -12,14 +11,10 @@ const STATUS_MANUAL_MARKER_PLANE_READY = 'hit-test 已就绪，请继续采集 M
 interface InspectionMarkerWorkflowOptions {
 	getWorkflowMode(): ArWorkflowMode;
 	getInspectionPlacementSource(): InspectionPlacementSource;
-	getCurrentSessionId(): string | null;
-	getSiteId(): string | null;
-	getControlTargets(): VisualControlTarget[];
 	getPrimaryTargetId(): string | null;
 	hasGroundHit(): boolean;
 	hasPlacedModel(): boolean;
 	setStatus(message: string): void;
-	requestPreferredPlacement(): void;
 	startManualCalibration(message: string): void;
 }
 
@@ -83,25 +78,6 @@ export class InspectionMarkerWorkflow {
 		if ( this.options.getInspectionPlacementSource() === 'manual-marker' && this.options.hasGroundHit() ) {
 			this.options.setStatus( STATUS_MANUAL_MARKER_PLANE_READY );
 		}
-
-	}
-
-	private buildLogPayload(args: {
-		reason: string;
-	}): Record<string, unknown> {
-
-		const target = this.options.getControlTargets()[ 0 ];
-		return {
-			mode: this.options.getWorkflowMode(),
-			siteId: this.options.getSiteId(),
-			sessionId: this.options.getCurrentSessionId(),
-			source: this.options.getInspectionPlacementSource(),
-			targetId: this.options.getPrimaryTargetId(),
-			targetName: target?.name ?? target?.markerId ?? null,
-			hasHitTest: this.options.hasGroundHit(),
-			reason: args.reason,
-			createdAt: Date.now()
-		};
 
 	}
 

@@ -37,7 +37,7 @@ export class SessionLifecycleRuntime {
 	resetPlacement(): void {
 
 		this.options.arSessionStateRuntime.markPlacementCommitted( false );
-		this.options.placementSession.resetPlacement();
+		this.options.placementSession.resetPlacement( 'explicit-reset' );
 		this.options.syncArSessionPhase();
 		this.options.syncSceneHost();
 		this.options.setStatus(
@@ -57,7 +57,7 @@ export class SessionLifecycleRuntime {
 		this.options.markerCalibrationRuntime.resetRuntimeState();
 		this.options.arSessionStateRuntime.handleSessionStart();
 		this.options.suppressSelection( 1200 );
-		this.options.placementSession.resetPlacement();
+		this.options.placementSession.resetPlacement( 'session-start' );
 		this.options.refreshSiteCalibrationBaselineState( { silentStatus: true } );
 		this.options.markerCalibrationRuntime.syncState();
 		this.options.syncArSessionPhase();
@@ -75,7 +75,7 @@ export class SessionLifecycleRuntime {
 		this.options.setCurrentSessionId( null );
 		this.options.markerCalibrationRuntime.resetRuntimeState();
 		this.options.arSessionStateRuntime.handleSessionEnd();
-		this.options.placementSession.resetPlacement();
+		this.options.placementSession.resetPlacement( 'session-ended' );
 		this.options.syncRegistrationChainDebug();
 		this.options.syncSceneHost();
 		this.options.emit();

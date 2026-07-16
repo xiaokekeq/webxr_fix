@@ -43,6 +43,13 @@ const engine = computed( () => store.engine );
 const { activeAdjustment, floatingAdjustment, selectMaterial, selectTool } = useUndergroundDisplayControls( engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
+const trackingWarningText = computed( () => {
+	if ( hasArSession.value === false ) return '';
+	if ( engine.value.xrSessionVisibilityState !== 'visible' ) return 'AR 会话暂时不可见，模型位置已保留';
+	if ( engine.value.xrTrackingStatus === 'emulated' ) return '环境跟踪正在使用估算位置，请缓慢移动设备并保持光线充足';
+	if ( engine.value.xrTrackingStatus === 'unavailable' ) return '环境跟踪不稳定，请缓慢移动设备并保持光线充足';
+	return '';
+} );
 const currentModel = computed(
 	() => engine.value.availableModels.find( ( item ) => item.id === engine.value.selectedModelId )
 );
@@ -167,11 +174,12 @@ const calibrationStatusCards = computed( () => [
 const showMarkerCalibrationOverlay = computed(
 	() => hasArSession.value && markerCalibrationOverlayOpen.value && engine.value.markerCalibration.active
 );
+const trackingNormal = computed( () => engine.value.xrTrackingStatus === 'normal' && engine.value.xrSessionVisibilityState === 'visible' );
 const canStartMarkerCalibration = computed(
-	() => hasArSession.value && hitTestReady.value && canUseMarkerCorners.value
+	() => hasArSession.value && trackingNormal.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canCaptureMarkerCorner = computed(
-	() => showMarkerCalibrationOverlay.value && hitTestReady.value && canUseMarkerCorners.value
+	() => showMarkerCalibrationOverlay.value && trackingNormal.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canApplyMarkerCalibration = computed(
 	() => showMarkerCalibrationOverlay.value
@@ -205,6 +213,7 @@ const markerApplyBlockedReason = computed( () => {
 } );
 const canPlaceEngineeringModel = computed(
 	() => hasArSession.value
+		&& trackingNormal.value
 		&& configStatus.value.hasSiteOrigin
 		&& configStatus.value.hasControlTargets
 		&& canUseMarkerCorners.value
@@ -300,7 +309,7 @@ const workflowHint = computed( () => {
 		return '空间校正完成，模型已显示。';
 	}
 	if ( localizationReady.value ) {
-		return '空间校正完成，等待模型自动放置。';
+		return '空间校正完成，请确认后放置模型。';
 	}
 	if ( hitTestReady.value ) {
 		return '请完成控制标志四角校正。';
@@ -536,6 +545,7 @@ function setArOverlayClass(active: boolean): void {
 
 <template>
 	<div class="inspect-page" :class="{ 'ar-active': hasArSession }">
+		<div v-if="trackingWarningText" class="ar-tracking-warning" data-ar-ui="true">{{ trackingWarningText }}</div>
 		<div class="page-scroll">
 			<header
 			v-if="showMarkerCalibrationOverlay === false"

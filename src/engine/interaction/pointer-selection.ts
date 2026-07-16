@@ -30,6 +30,7 @@ interface CreatePointerSelectionSessionOptions {
 	getPlacedModel(): THREE.Group | null;
 	getWorkspaceMode(): WorkspaceMode;
 	getPipesByName(): Map<string, PipeRecord>;
+	canSelect?(): boolean;
 	dragThresholdPx?: number;
 }
 
@@ -59,6 +60,7 @@ export function createPointerSelectionSession(
 		getPlacedModel,
 		getWorkspaceMode,
 		getPipesByName,
+		canSelect = () => true,
 		dragThresholdPx = DEFAULT_DRAG_THRESHOLD_PX
 	} = options;
 
@@ -79,7 +81,7 @@ export function createPointerSelectionSession(
 
 	function handleScreenPointerDown(clientX: number, clientY: number): void {
 
-		if ( isSelectionSuppressed() ) {
+		if ( isSelectionSuppressed() || canSelect() === false ) {
 			return;
 		}
 
@@ -90,7 +92,7 @@ export function createPointerSelectionSession(
 
 	function handleScreenPointerUp(clientX: number, clientY: number): void {
 
-		if ( isSelectionSuppressed() ) {
+		if ( isSelectionSuppressed() || canSelect() === false ) {
 			hasPendingPointerSelection = false;
 			return;
 		}
@@ -151,7 +153,7 @@ export function createPointerSelectionSession(
 
 		handleArSelect() {
 
-			if ( isSelectionSuppressed() ) {
+			if ( isSelectionSuppressed() || canSelect() === false ) {
 				return;
 			}
 

@@ -40,6 +40,12 @@ export interface ArProjectLabels {
 	enterAr: string;
 }
 
+export interface ArTransformGuardConfig {
+	maxAbsoluteTranslationMeters: number;
+	maxAutomaticTranslationMeters: number;
+	maxAutomaticRotationDegrees: number;
+}
+
 export interface ProjectUiContent {
 	application: { name: string; shortName: string; arEntryLabel: string };
 	sites: Array<{ id: string; name: string; lng: number; lat: number }>;
@@ -108,6 +114,8 @@ export interface ArProjectConfig {
 	ui: ProjectUiContent;
 	propertySchemaUrl?: string;
 	componentPropertyHud?: ComponentPropertyHudConfig;
+	/** Physical-site calibration knob; shared defaults are used when omitted. */
+	transformGuard?: Partial<ArTransformGuardConfig>;
 }
 
 export interface ArApplicationContext {

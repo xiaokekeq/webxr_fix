@@ -1,7 +1,5 @@
 import { arWarn } from '@/engine/debug/ar-logger.js';
 import * as THREE from 'three';
-import type { XRHitTestController } from '@/features/ar/types/runtime-types.js';
-import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
 import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import type { ModelRuntimeLoadStatus } from '@/localization/core/registration-store.js';
@@ -9,19 +7,12 @@ import type { PlacementSession } from './session.js';
 
 interface PlacementWorkflowOptions {
 	placementSession: PlacementSession;
-	getWorkflowMode(): ArWorkflowMode;
-	getSiteId(): string | null;
 	getCurrentSessionId(): string | null;
-	getInspectionTargetId(): string | null;
-	getInspectionStableFrameCount(): number;
 	getPreferredLocalizationOverride(): ArFromEnuSolution | null;
 	getModelTemplate(): THREE.Group | null;
 	getRegistrationSolution(): EngineeringRegistrationSolution | null;
 	getRuntimeLoadStatus(): ModelRuntimeLoadStatus;
-	getHitTestController(): XRHitTestController;
-	getModelOrientationTarget(): THREE.Quaternion;
 	onBeforePlacementRequest(): void;
-	onPlacementBaseResolved(headingDeg: number): void;
 	applyModelLayerVisibility(): void;
 	syncRegistrationChainDebug(): void;
 	syncLocalizationDebug(): void;
@@ -61,107 +52,27 @@ export class PlacementWorkflow {
 		}
 
 		this.options.onBeforePlacementRequest();
-		const localizationOverride = localization;
 		const hadPlacedModel = this.options.placementSession.getPlacedModel() !== null;
 		const placed = this.options.placementSession.placeEngineeringModelFromCurrentArFromEnu( {
 			modelTemplate,
 			registrationSolution,
-			arFromEnuSolution: localizationOverride,
-			currentSessionId: this.options.getCurrentSessionId()
+			arFromEnuSolution: localization,
+			currentSessionId: this.options.getCurrentSessionId(),
+			reason: hadPlacedModel ? 'marker-confirmed' : 'initial-placement',
+			source: 'PlacementWorkflow.placeLocalizedModel()'
 		} );
 		if ( placed ) {
 			this.options.applyModelLayerVisibility();
 			this.options.syncRegistrationChainDebug();
 			this.options.syncLocalizationDebug();
-			if ( hadPlacedModel === false ) {
-				this.options.onPlacementCompleted();
-			}
+			if ( hadPlacedModel === false ) this.options.onPlacementCompleted();
 			this.options.syncArSessionPhase();
 			this.options.emit();
 			return;
 		}
-		this.options.syncArSessionPhase();
-
-		if ( this.options.placementSession.getPlacedModel() === null ) {
-			this.options.setStatus(
-				this.options.placementSession.getAutoPlacementPending()
-					? '正在按 Marker 校正结果放置模型...'
-					: '工程放置未完成，请重试。'
-			);
-		}
-
-	}
-
-	requestAutoPlacement(): void {
-
-		this.options.placementSession.requestAutoPlacement( this.options.getModelTemplate() );
-		if ( this.options.getWorkflowMode() === 'ar-inspection' ) {
-			const localizationOverride = this.options.getPreferredLocalizationOverride();
-		}
-		this.attemptAutoPlacement();
-
-	}
-
-	attemptAutoPlacement(): void {
-
-		const hadPlacedModel = this.options.placementSession.getPlacedModel() !== null;
-		const localizationOverride = this.options.getPreferredLocalizationOverride();
-		if ( localizationOverride === null ) {
-			if ( this.options.getHitTestController().hasGroundHit() ) {
-				arWarn( '[HitTestReadyButLocalizationMissing]', this.createPlacementLogPayload( {
-					source: 'unknown',
-					localizationReady: false
-				} ) );
-			}
-			return;
-		}
-
-
-		this.options.placementSession.attemptLocalizedPlacement( {
-			modelTemplate: this.options.getModelTemplate(),
-			registrationSolution: this.options.getRegistrationSolution(),
-			arFromEnuSolutionOverride: localizationOverride,
-			modelOrientationTarget: this.options.getModelOrientationTarget(),
-			onPlacementBaseResolved: ( base ) => {
-				this.options.onPlacementBaseResolved( base.siteContext?.headingDeg ?? 0 );
-			}
-		} );
-		this.options.applyModelLayerVisibility();
-		this.options.syncRegistrationChainDebug();
-		this.options.syncLocalizationDebug();
-
-		const placedModel = this.options.placementSession.getPlacedModel();
-		if ( hadPlacedModel === false && placedModel !== null ) {
-			this.options.onPlacementCompleted();
-		}
 
 		this.options.syncArSessionPhase();
-		this.options.emit();
-
-	}
-
-	private createPlacementLogPayload(args: {
-		source: string;
-		localizationReady: boolean;
-	}): Record<string, unknown> {
-
-		return {
-			mode: 'marker-corners-4',
-			workflowMode: this.options.getWorkflowMode(),
-			siteId: this.options.getSiteId(),
-			modelId: this.options.getSiteId(),
-			sessionId: this.options.getCurrentSessionId(),
-			targetId: this.options.getInspectionTargetId(),
-			source: args.source,
-			hasSiteOrigin: this.options.getRegistrationSolution() !== null,
-			hasModelLocalToEnu: this.options.getRegistrationSolution() !== null,
-			modelLocalToEnuSource: this.options.getRegistrationSolution() === null ? 'missing' : 'control-points',
-			hitTestReady: this.options.getHitTestController().hasGroundHit(),
-			usesHitTestForFinalPose: false,
-			localizationReady: args.localizationReady,
-			modelPlaced: this.options.placementSession.getPlacedModel() !== null,
-			createdAt: Date.now()
-		};
+		this.options.setStatus( '工程放置未完成，请重试。' );
 
 	}
 

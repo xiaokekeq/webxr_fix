@@ -44,8 +44,6 @@ interface CreateModelSessionOptions {
 	onRuntimeBundleReady(bundle: LoadedModelRuntimeBundle, modelLoadRequestId: number): void;
 	onRuntimeLoadFailed(error: ModelRuntimeLoadError, modelLoadRequestId: number): void;
 	onLoadManualRegistration(modelId: string): void;
-	canRequestAutoPlacement(): boolean;
-	requestAutoPlacement(): void;
 }
 
 export interface ModelSessionController {
@@ -66,15 +64,30 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 		onRuntimeBundleLoaded,
 		onRuntimeBundleReady,
 		onRuntimeLoadFailed,
-		onLoadManualRegistration,
-		canRequestAutoPlacement,
-		requestAutoPlacement
+		onLoadManualRegistration
 	} = options;
 
 	let currentModelDefinition: ModelCatalogItem | null = null;
 	let modelLoadRequestId = 0;
+	let loadingModelId: string | null = null;
+	let loadingModelPromise: Promise<void> | null = null;
 
-	async function loadSelectedModelResources(modelDefinition: ModelCatalogItem): Promise<void> {
+	function loadSelectedModelResources(modelDefinition: ModelCatalogItem): Promise<void> {
+
+		if ( currentModelDefinition?.id === modelDefinition.id ) return Promise.resolve();
+		if ( loadingModelId === modelDefinition.id && loadingModelPromise !== null ) return loadingModelPromise;
+		loadingModelId = modelDefinition.id;
+		const request = performModelLoad( modelDefinition );
+		loadingModelPromise = request.finally( () => {
+			if ( loadingModelId !== modelDefinition.id ) return;
+			loadingModelId = null;
+			loadingModelPromise = null;
+		} );
+		return loadingModelPromise;
+
+	}
+
+	async function performModelLoad(modelDefinition: ModelCatalogItem): Promise<void> {
 
 		const requestId = ++modelLoadRequestId;
 
@@ -166,10 +179,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 				? '\u72b6\u6001\uff1a\u6a21\u578b\u5df2\u5c31\u7eea\uff0c\u4f46\u63a7\u5236\u70b9\u6570\u636e\u9700\u8981\u590d\u6838'
 				: '\u72b6\u6001\uff1a\u6a21\u578b\u5df2\u5c31\u7eea\uff0c\u7b49\u5f85\u8bc6\u522b\u5e73\u9762'
 		} );
-
-		if ( canRequestAutoPlacement() ) {
-			requestAutoPlacement();
-		}
 
 		setStatus(
 			`\u5df2\u52a0\u8f7d ${modelDefinition.name}\uff0cRMS ${bundle.registrationSolution.modelToSite.rmsErrorMeters.toFixed( 3 )}m\u3002`

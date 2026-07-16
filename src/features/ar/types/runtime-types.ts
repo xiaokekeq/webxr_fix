@@ -1,6 +1,8 @@
 import type * as THREE from 'three';
 
 export type SetStatus = (message: string) => void;
+export type XrTrackingStatus = 'normal' | 'emulated' | 'unavailable';
+export type XrSessionVisibilityState = 'visible' | 'visible-blurred' | 'hidden';
 
 export interface ArSessionStartResult {
 	session: XRSession;
