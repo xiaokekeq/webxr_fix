@@ -731,6 +731,9 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.domElement.addEventListener( 'pointerup', this.handleCanvasPointerUp );
 		this.sceneBundle.renderer.domElement.addEventListener( 'pointercancel', this.handleCanvasPointerCancel );
 		this.sceneBundle.renderer.domElement.addEventListener( 'webglcontextlost', this.handleWebglContextLost );
+		window.addEventListener( 'pointerdown', this.handleImmersiveScreenPointerDown, true );
+		window.addEventListener( 'pointerup', this.handleImmersiveScreenPointerUp, true );
+		window.addEventListener( 'pointercancel', this.handleImmersiveScreenPointerCancel, true );
 		window.addEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionend', this.unbindArSelectionSession );
@@ -860,6 +863,9 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerup', this.handleCanvasPointerUp );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointercancel', this.handleCanvasPointerCancel );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'webglcontextlost', this.handleWebglContextLost );
+		window.removeEventListener( 'pointerdown', this.handleImmersiveScreenPointerDown, true );
+		window.removeEventListener( 'pointerup', this.handleImmersiveScreenPointerUp, true );
+		window.removeEventListener( 'pointercancel', this.handleImmersiveScreenPointerCancel, true );
 		window.removeEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
@@ -2607,7 +2613,8 @@ export class ThreeEngine {
 
 	private handleCanvasPointerDown = (event: PointerEvent): void => {
 
-		if ( this.sceneBundle.renderer.xr.isPresenting || isArUiInteractiveEvent( event ) ) {
+		if ( this.sceneBundle.renderer.xr.isPresenting ) return;
+		if ( isArUiInteractiveEvent( event ) ) {
 			this.pointerSelection.cancelPendingPointerSelection();
 			return;
 		}
@@ -2617,9 +2624,9 @@ export class ThreeEngine {
 
 	private handleCanvasPointerUp = (event: PointerEvent): void => {
 
+		if ( this.sceneBundle.renderer.xr.isPresenting ) return;
 		if (
-			this.sceneBundle.renderer.xr.isPresenting
-			|| isArUiInteractiveEvent( event )
+			isArUiInteractiveEvent( event )
 			|| this.arDomOverlayInputGuard?.isUiOwnedPointerEvent( event ) === true
 		) {
 			this.pointerSelection.cancelPendingPointerSelection();
@@ -2632,6 +2639,39 @@ export class ThreeEngine {
 	private handleCanvasPointerCancel = (): void => {
 
 		this.pointerSelection.cancelPendingPointerSelection();
+
+	};
+
+	private handleImmersiveScreenPointerDown = (event: PointerEvent): void => {
+
+		if ( this.sceneBundle.renderer.xr.isPresenting === false ) return;
+		if ( isArUiInteractiveEvent( event ) ) {
+			this.pointerSelection.cancelPendingPointerSelection();
+			return;
+		}
+		this.pointerSelection.handlePointerDown( event );
+
+	};
+
+	private handleImmersiveScreenPointerUp = (event: PointerEvent): void => {
+
+		if ( this.sceneBundle.renderer.xr.isPresenting === false ) return;
+		if (
+			isArUiInteractiveEvent( event )
+			|| this.arDomOverlayInputGuard?.ownsPointer( event.pointerId ) === true
+		) {
+			this.pointerSelection.cancelPendingPointerSelection();
+			return;
+		}
+		this.pointerSelection.handlePointerUp( event );
+
+	};
+
+	private handleImmersiveScreenPointerCancel = (): void => {
+
+		if ( this.sceneBundle.renderer.xr.isPresenting ) {
+			this.pointerSelection.cancelPendingPointerSelection();
+		}
 
 	};
 

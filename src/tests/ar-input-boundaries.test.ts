@@ -34,10 +34,12 @@ describe( 'AR input boundaries', () => {
 
 	} );
 
-	it( 'keeps immersive scene selection on XR select without delayed DOM-pointer deduplication', () => {
+	it( 'uses tap coordinates for immersive screen input and XR select for other input sources', () => {
 
 		expect( threeEngineSource ).toContain( "addEventListener( 'select', this.pointerSelection.handleArSelect )" );
-		expect( threeEngineSource ).not.toContain( 'handleGlobalArPointer' );
+		expect( threeEngineSource ).toContain( "window.addEventListener( 'pointerup', this.handleImmersiveScreenPointerUp, true )" );
+		expect( pointerSelectionSource ).toContain( "event?.inputSource.targetRayMode === 'screen'" );
+		expect( pointerSelectionSource ).toContain( 'immersiveScreenPointerObserved' );
 		expect( pointerSelectionSource ).not.toMatch( /suppressSelection|selectionSuppressed|lastScreenSelectionTime|< 240/ );
 		expect( sessionLifecycleSource ).not.toContain( 'suppressSelection' );
 		expect( pointerSelectionSource ).not.toContain( 'placeModel' );

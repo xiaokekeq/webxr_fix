@@ -40,7 +40,7 @@ export interface PointerSelectionSession {
 	handleScreenPointerDown(clientX: number, clientY: number): void;
 	handleScreenPointerUp(clientX: number, clientY: number): void;
 	cancelPendingPointerSelection(): void;
-	handleArSelect(): void;
+	handleArSelect(event?: XRInputSourceEvent): void;
 }
 
 const DEFAULT_DRAG_THRESHOLD_PX = 10;
@@ -70,12 +70,14 @@ export function createPointerSelectionSession(
 	const xrRayOrigin = new THREE.Vector3();
 	const xrRayDirection = new THREE.Vector3();
 	let hasPendingPointerSelection = false;
+	let immersiveScreenPointerObserved = false;
 
 	function handleScreenPointerDown(clientX: number, clientY: number): void {
 
 		if ( canSelect() === false ) {
 			return;
 		}
+		if ( sceneBundle.renderer.xr.isPresenting ) immersiveScreenPointerObserved = true;
 
 		hasPendingPointerSelection = true;
 		pointerDownPosition.set( clientX, clientY );
@@ -147,8 +149,12 @@ export function createPointerSelectionSession(
 
 		},
 
-		handleArSelect() {
+		handleArSelect(event) {
 
+			if (
+				event?.inputSource.targetRayMode === 'screen'
+				&& immersiveScreenPointerObserved
+			) return;
 			if ( canSelect() === false ) {
 				return;
 			}

@@ -155,4 +155,37 @@ describe( 'pointer selection', () => {
 
 	} );
 
+	it( 'falls back to XR screen select until the pointer path is observed', () => {
+
+		const handlePreSelectionRaycast = vi.fn( () => true );
+		const session = createPointerSelectionSession( {
+			sceneBundle: {
+				camera: new THREE.PerspectiveCamera(),
+				renderer: {
+					domElement: { getBoundingClientRect: () => ( { left: 0, top: 0, width: 100, height: 100 } ) },
+					xr: { isPresenting: true, getCamera: () => new THREE.PerspectiveCamera() }
+				}
+			} as unknown as ARSceneBundle,
+			propertySelection: createPropertySelectionController( {} ),
+			setStatus: vi.fn(),
+			onInspectSelection: vi.fn(),
+			handlePreSelectionRaycast,
+			getPlacedModel: () => null,
+			getWorkspaceMode: () => 'browse',
+			getPipesByName: () => new Map()
+		} );
+
+		const screenSelectEvent = {
+			inputSource: { targetRayMode: 'screen' }
+		} as XRInputSourceEvent;
+		session.handleArSelect( screenSelectEvent );
+		expect( handlePreSelectionRaycast ).toHaveBeenCalledOnce();
+
+		handlePreSelectionRaycast.mockClear();
+		session.handleScreenPointerDown( 50, 50 );
+		session.handleArSelect( screenSelectEvent );
+		expect( handlePreSelectionRaycast ).not.toHaveBeenCalled();
+
+	} );
+
 } );
