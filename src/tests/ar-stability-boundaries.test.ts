@@ -48,9 +48,10 @@ describe( 'AR model stability boundaries', () => {
 
 	it( 'isolates DOM HUD clicks from canvas selection and placement', () => {
 
-		expect( pipeHudSource ).toContain( 'data-ar-ui="true"' );
+		expect( pipeHudSource ).toContain( 'data-ar-ui-interactive' );
 		expect( pipeHudSource ).toContain( '@pointerdown.stop' );
-		expect( workspaceSource ).toContain( 'data-ar-ui="true"' );
+		expect( pipeHudSource ).toContain( '@pointerup.stop' );
+		expect( workspaceSource ).toContain( 'data-ar-ui-interactive' );
 		expect( workspaceSource ).toContain( 'trackingNormal.value' );
 
 	} );

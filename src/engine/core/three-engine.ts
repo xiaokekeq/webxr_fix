@@ -2,6 +2,11 @@ import { arWarn, arError } from '@/engine/debug/ar-logger.js';
 import * as THREE from 'three';
 import type { PipeRecord } from '@/models/types/pipe-record.js';
 import { createPointerSelectionSession } from '@/engine/interaction/pointer-selection.js';
+import {
+	installArDomOverlayInputGuard,
+	isArUiInteractiveEvent,
+	type ArDomOverlayInputGuard
+} from '@/engine/interaction/ar-dom-overlay-input-guard.js';
 import { createPropertySelectionController } from '@/engine/interaction/property-selection.js';
 import { createModelSession } from '@/engine/model/session.js';
 import type { LoadedModelRuntimeBundle } from '@/engine/model/runtime.js';
@@ -298,6 +303,8 @@ export class ThreeEngine {
 	private readonly registrationStateRuntime;
 	private readonly placementWorkflow;
 	private readonly listeners = new Set<() => void>();
+	private arDomOverlayInputGuard: ArDomOverlayInputGuard | null = null;
+	private arSelectionSession: XRSession | null = null;
 
 	private initialized = false;
 	private disposed = false;
@@ -490,7 +497,6 @@ export class ThreeEngine {
 			getRuntimeLoadStatus: () => this.store.getState().modelRuntimeLoad,
 			onBeforePlacementRequest: () => {
 				this.propertySelection.clearSelection();
-				this.pointerSelection.suppressSelectionFor( 1200 );
 			},
 			applyModelLayerVisibility: () => {
 				this.applyModelLayerVisibility();
@@ -547,9 +553,6 @@ export class ThreeEngine {
 			},
 			setStatus: ( message ) => {
 				this.setStatus( message );
-			},
-			suppressSelection: ( durationMs ) => {
-				this.pointerSelection.suppressSelectionFor( durationMs );
 			},
 			placementSession: this.placementSession,
 			arSessionStateRuntime: this.arSessionStateRuntime,
@@ -724,11 +727,10 @@ export class ThreeEngine {
 		} );
 
 		this.sceneBundle.renderer.setAnimationLoop( this.xrRuntime.renderFrame );
-		this.sceneBundle.renderer.domElement.addEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
-		this.sceneBundle.renderer.domElement.addEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
+		this.sceneBundle.renderer.domElement.addEventListener( 'pointerdown', this.handleCanvasPointerDown );
+		this.sceneBundle.renderer.domElement.addEventListener( 'pointerup', this.handleCanvasPointerUp );
+		this.sceneBundle.renderer.domElement.addEventListener( 'pointercancel', this.handleCanvasPointerCancel );
 		this.sceneBundle.renderer.domElement.addEventListener( 'webglcontextlost', this.handleWebglContextLost );
-		window.addEventListener( 'pointerdown', this.handleGlobalArPointerDown, true );
-		window.addEventListener( 'pointerup', this.handleGlobalArPointerUp, true );
 		window.addEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionend', this.unbindArSelectionSession );
@@ -854,14 +856,15 @@ export class ThreeEngine {
 		this.disposed = true;
 		this.sceneBundle.renderer.setAnimationLoop( null );
 		this.realDepthProvider.dispose();
-		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
-		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
+		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerdown', this.handleCanvasPointerDown );
+		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerup', this.handleCanvasPointerUp );
+		this.sceneBundle.renderer.domElement.removeEventListener( 'pointercancel', this.handleCanvasPointerCancel );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'webglcontextlost', this.handleWebglContextLost );
-		window.removeEventListener( 'pointerdown', this.handleGlobalArPointerDown, true );
-		window.removeEventListener( 'pointerup', this.handleGlobalArPointerUp, true );
 		window.removeEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
+		this.unbindArSelectionSession();
+		this.disposeArDomOverlayInputGuard();
 		this.visualizationStateRuntime.restoreVisualizationControllers();
 		this.placementSession.dispose();
 		this.materialStateRuntime.dispose();
@@ -877,7 +880,6 @@ export class ThreeEngine {
 
 	closePropertyPanel(): void {
 
-		this.pointerSelection.suppressSelectionFor( 1000 );
 		this.propertySelection.clearSelection();
 		this.clearAnnotationDetail();
 		this.annotationLayer.setSelected( null );
@@ -1171,8 +1173,14 @@ export class ThreeEngine {
 			return Promise.resolve();
 		}
 		this.syncArSessionContext();
-		this.pointerSelection.suppressSelectionFor( 1200 );
-		return this.xrRuntime.requestSession();
+		if ( this.arDomOverlayInputGuard !== null ) {
+			return Promise.resolve();
+		}
+		const domOverlayRoot = document.body;
+		this.arDomOverlayInputGuard = installArDomOverlayInputGuard( domOverlayRoot );
+		return this.xrRuntime.requestSession( domOverlayRoot ).then( ( started ) => {
+			if ( started === false ) this.disposeArDomOverlayInputGuard();
+		} );
 
 	}
 
@@ -2079,6 +2087,7 @@ export class ThreeEngine {
 	private handleXRSessionEnd(): void {
 
 		this.arSessionEndPending = false;
+		this.disposeArDomOverlayInputGuard();
 		this.realDepthProvider.dispose();
 		this.arCoordinateService.clear();
 		this.annotationLayer.clear();
@@ -2580,51 +2589,58 @@ export class ThreeEngine {
 	private bindArSelectionSession = (): void => {
 
 		const session = this.sceneBundle.renderer.xr.getSession();
-		session?.addEventListener( 'select', this.pointerSelection.handleArSelect );
+		if ( session === null || session === this.arSelectionSession ) return;
+		this.arSelectionSession?.removeEventListener( 'select', this.pointerSelection.handleArSelect );
+		this.arSelectionSession = session;
+		this.arSelectionSession.addEventListener( 'select', this.pointerSelection.handleArSelect );
+		this.pointerSelection.cancelPendingPointerSelection();
 
 	};
 
 	private unbindArSelectionSession = (): void => {
 
-		const session = this.sceneBundle.renderer.xr.getSession();
-		session?.removeEventListener( 'select', this.pointerSelection.handleArSelect );
+		this.arSelectionSession?.removeEventListener( 'select', this.pointerSelection.handleArSelect );
+		this.arSelectionSession = null;
+		this.pointerSelection.cancelPendingPointerSelection();
 
 	};
 
-	private shouldHandleGlobalArPointerEvent(event: PointerEvent): boolean {
+	private handleCanvasPointerDown = (event: PointerEvent): void => {
 
-		if ( this.sceneBundle.renderer.xr.isPresenting === false ) {
-			return false;
+		if ( this.sceneBundle.renderer.xr.isPresenting || isArUiInteractiveEvent( event ) ) {
+			this.pointerSelection.cancelPendingPointerSelection();
+			return;
 		}
+		this.pointerSelection.handlePointerDown( event );
 
-		const target = event.target;
-		if ( target instanceof Element ) {
-			return target.closest( '[data-ar-ui="true"]' ) === null;
+	};
+
+	private handleCanvasPointerUp = (event: PointerEvent): void => {
+
+		if (
+			this.sceneBundle.renderer.xr.isPresenting
+			|| isArUiInteractiveEvent( event )
+			|| this.arDomOverlayInputGuard?.isUiOwnedPointerEvent( event ) === true
+		) {
+			this.pointerSelection.cancelPendingPointerSelection();
+			return;
 		}
+		this.pointerSelection.handlePointerUp( event );
 
-		return true;
+	};
+
+	private handleCanvasPointerCancel = (): void => {
+
+		this.pointerSelection.cancelPendingPointerSelection();
+
+	};
+
+	private disposeArDomOverlayInputGuard(): void {
+
+		this.arDomOverlayInputGuard?.dispose();
+		this.arDomOverlayInputGuard = null;
 
 	}
-
-	private handleGlobalArPointerDown = (event: PointerEvent): void => {
-
-		if ( this.shouldHandleGlobalArPointerEvent( event ) === false ) {
-			return;
-		}
-
-		this.pointerSelection.handleScreenPointerDown( event.clientX, event.clientY );
-
-	};
-
-	private handleGlobalArPointerUp = (event: PointerEvent): void => {
-
-		if ( this.shouldHandleGlobalArPointerEvent( event ) === false ) {
-			return;
-		}
-
-		this.pointerSelection.handleScreenPointerUp( event.clientX, event.clientY );
-
-	};
 
 	private handleWindowResize = (): void => {
 

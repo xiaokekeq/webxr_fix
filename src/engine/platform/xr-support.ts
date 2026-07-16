@@ -15,7 +15,6 @@ interface CreateXRHitTestControllerOptions {
 	setStatus: SetStatus;
 	onSessionStart?: (result: ArSessionStartResult) => void;
 	onSessionEnd?: () => void;
-	onSelect?: () => void;
 	canReportStatus?: () => boolean;
 }
 
@@ -51,7 +50,7 @@ export async function detectImmersiveArSupport(): Promise<ImmersiveArSupportInfo
 
 export function createXRHitTestController(options: CreateXRHitTestControllerOptions): XRHitTestController {
 
-	const { renderer, reticle, xrButtonWrap, setStatus, onSessionStart, onSessionEnd, onSelect, canReportStatus } = options;
+	const { renderer, reticle, xrButtonWrap, setStatus, onSessionStart, onSessionEnd, canReportStatus } = options;
 	let hitTestSource: XRHitTestSource | null = null;
 	let hitTestSourceRequested = false;
 	let lastSuccessfulHitTime = 0;
@@ -61,7 +60,6 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 	let anchorSupportDetected = false;
 	let recentHitSamples: Array<{ position: THREE.Vector3; time: number }> = [];
 	let sessionRequestPending = false;
-	let activeSession: XRSession | null = null;
 	let pendingStartResult: ArSessionStartResult | null = null;
 
 	function setup(): void {
@@ -80,12 +78,15 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		if ( session === null ) {
 			return;
 		}
-		activeSession = session;
-		session.addEventListener( 'select', handleSelect );
 		const startResult = pendingStartResult ?? createSessionResult( session, true, false, null );
 		pendingStartResult = null;
 		onSessionStart?.( startResult );
-		setStatus( '已进入 AR，请缓慢移动手机，让系统持续识别地面或墙面。' );
+		if ( startResult.domOverlayGranted ) {
+			setStatus( '已进入 AR，请缓慢移动手机，让系统持续识别地面或墙面。' );
+		} else {
+			arWarn( '[XRDOMOverlayUnavailable]', { inputIsolation: 'beforexrselect unavailable' } );
+			setStatus( '当前设备未授予 DOM Overlay；HTML 控件和 beforexrselect 输入隔离不可用。' );
+		}
 
 		const viewerSpace = await session.requestReferenceSpace( 'viewer' );
 		if ( session.requestHitTestSource === undefined ) {
@@ -104,19 +105,11 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 	function handleSessionEnd(): void {
 
 		sessionRequestPending = false;
-		activeSession?.removeEventListener( 'select', handleSelect );
-		activeSession = null;
 		pendingStartResult = null;
 		reticle.visible = false;
 		resetHitState();
 		onSessionEnd?.();
 		setStatus( 'AR 会话已结束，可再次进入 AR。' );
-
-	}
-
-	function handleSelect(): void {
-
-		onSelect?.();
 
 	}
 
@@ -255,23 +248,25 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		getHitTestQuality,
 		supportsAnchors,
 		createAnchorFromLatestHit,
-		async requestSession() {
+		async requestSession(domOverlayRoot) {
 
 			if ( renderer.xr.isPresenting || sessionRequestPending || navigator.xr === undefined ) {
-				return;
+				return false;
 			}
 			sessionRequestPending = true;
 			setStatus( '正在请求 AR 会话...' );
 			try {
-				pendingStartResult = await requestArSession( navigator.xr );
+				pendingStartResult = await requestArSession( navigator.xr, domOverlayRoot );
 				renderer.xr.setReferenceSpaceType( 'local' );
 				await renderer.xr.setSession( pendingStartResult.session );
+				return true;
 			} catch ( error ) {
 				sessionRequestPending = false;
 				pendingStartResult = null;
 				arError( 'XR session request failed:', error );
 				setStatus( error instanceof Error ? `AR 会话启动失败：${error.message}` : 'AR 会话启动失败。' );
 			}
+			return false;
 
 		}
 	};
@@ -292,12 +287,12 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 
 }
 
-async function requestArSession(xr: XRSystem): Promise<ArSessionStartResult> {
+async function requestArSession(xr: XRSystem, domOverlayRoot: HTMLElement): Promise<ArSessionStartResult> {
 
 	const fallbackInit: XRSessionInit = {
 		requiredFeatures: [ 'hit-test' ],
 		optionalFeatures: [ 'dom-overlay', 'anchors' ],
-		domOverlay: { root: document.body }
+		domOverlay: { root: domOverlayRoot }
 	};
 	const depthInit = {
 		requiredFeatures: [ 'hit-test', 'depth-sensing' ],
@@ -307,7 +302,7 @@ async function requestArSession(xr: XRSystem): Promise<ArSessionStartResult> {
 			dataFormatPreference: [ 'luminance-alpha' ],
 			matchDepthView: true
 		},
-		domOverlay: { root: document.body }
+		domOverlay: { root: domOverlayRoot }
 	};
 	try {
 		return createSessionResult( await xr.requestSession( 'immersive-ar', depthInit as XRSessionInit ), true, false, null );
@@ -330,6 +325,8 @@ function createSessionResult(session: XRSession, depthRequested: boolean, fallba
 	const depthUsage = readSessionDepthUsage( session );
 	return {
 		session,
+		domOverlayGranted: session.domOverlayState !== undefined,
+		domOverlayType: session.domOverlayState?.type ?? null,
 		depthRequested,
 		depthGranted: depthUsage !== null,
 		depthUsage,

@@ -347,12 +347,15 @@ function setArOverlayClass(active: boolean): void {
 
 <template>
 	<div class="calibration-page" :class="{ 'ar-active': hasArSession }">
-		<div v-if="trackingWarningText" class="ar-tracking-warning" data-ar-ui="true">{{ trackingWarningText }}</div>
+		<div v-if="trackingWarningText" class="ar-tracking-warning">{{ trackingWarningText }}</div>
 		<div class="page-scroll">
 			<header
 				v-if="showMarkerCalibrationOverlay === false"
 				class="page-header"
-				data-ar-ui="true"
+				data-ar-ui-interactive
+				@pointerdown.stop
+				@pointerup.stop
+				@pointercancel.stop
 				@click.stop
 			>
 				<div>
@@ -369,7 +372,10 @@ function setArOverlayClass(active: boolean): void {
 				<div
 					v-if="!hasArSession"
 					class="launch-overlay"
-					data-ar-ui="true"
+					data-ar-ui-interactive
+					@pointerdown.stop
+					@pointerup.stop
+					@pointercancel.stop
 					@click.stop
 				>
 					<div class="launch-badge">RTK</div>
@@ -397,7 +403,10 @@ function setArOverlayClass(active: boolean): void {
 			<section
 				v-if="hasArSession && ui.drawerOpen && showMarkerCalibrationOverlay === false"
 				class="bottom-sheet"
-				data-ar-ui="true"
+				data-ar-ui-interactive
+				@pointerdown.stop
+				@pointerup.stop
+				@pointercancel.stop
 				@click.stop
 			>
 				<div class="sheet-header">
@@ -470,7 +479,10 @@ function setArOverlayClass(active: boolean): void {
 		<section
 			v-if="showMarkerCalibrationOverlay"
 			class="marker-calibration-overlay"
-			data-ar-ui="true"
+			data-ar-ui-interactive
+			@pointerdown.stop
+			@pointerup.stop
+			@pointercancel.stop
 			@click.stop
 		>
 			<div class="marker-calibration-title">手动 Marker 四角点校正</div>
@@ -512,7 +524,10 @@ function setArOverlayClass(active: boolean): void {
 			v-if="hasArSession && showMarkerCalibrationOverlay === false"
 			class="action-dock action-dock-compact"
 			aria-label="AR 校验操作"
-			data-ar-ui="true"
+			data-ar-ui-interactive
+			@pointerdown.stop
+			@pointerup.stop
+			@pointercancel.stop
 			@click.stop
 		>
 			<button type="button" class="dock-item dock-item-primary" @click.stop="toggleWorkspacePanel">

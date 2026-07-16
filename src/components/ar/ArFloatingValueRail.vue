@@ -68,17 +68,17 @@ function onKeydown(event: KeyboardEvent): void {
 	<div
 		ref="railRef"
 		class="floating-value-rail"
-		data-ar-ui="true"
+		data-ar-ui-interactive
 		role="slider"
 		tabindex="0"
 		:aria-label="ariaLabel"
 		:aria-valuemin="min"
 		:aria-valuemax="max"
 		:aria-valuenow="modelValue"
-		@pointerdown="onPointerDown"
-		@pointermove="onPointerMove"
-		@pointerup="finish"
-		@pointercancel="finish"
+		@pointerdown.stop="onPointerDown"
+		@pointermove.stop="onPointerMove"
+		@pointerup.stop="finish"
+		@pointercancel.stop="finish"
 		@lostpointercapture="finish"
 		@keydown="onKeydown"
 		@click.stop

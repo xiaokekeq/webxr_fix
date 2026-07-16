@@ -23,7 +23,6 @@ interface SessionLifecycleRuntimeOptions {
 	syncSceneHost(): void;
 	emit(): void;
 	setStatus(message: string): void;
-	suppressSelection(durationMs: number): void;
 	placementSession: PlacementSession;
 	arSessionStateRuntime: ArSessionStateRuntime;
 	inspectionMarkerWorkflow: InspectionMarkerWorkflow;
@@ -56,7 +55,6 @@ export class SessionLifecycleRuntime {
 		this.options.resetMarkerLocalizationCorrection();
 		this.options.markerCalibrationRuntime.resetRuntimeState();
 		this.options.arSessionStateRuntime.handleSessionStart();
-		this.options.suppressSelection( 1200 );
 		this.options.placementSession.resetPlacement( 'session-start' );
 		this.options.refreshSiteCalibrationBaselineState( { silentStatus: true } );
 		this.options.markerCalibrationRuntime.syncState();
@@ -88,7 +86,6 @@ export class SessionLifecycleRuntime {
 		if ( this.options.store.getState().workspaceMode !== 'browse' ) {
 			this.options.store.patch( { workspaceMode: 'browse' } );
 		}
-		this.options.suppressSelection( 1200 );
 		this.options.syncSceneHost();
 
 		const activeMarkerSolution = this.options.getActiveMarkerArFromEnuSolution();

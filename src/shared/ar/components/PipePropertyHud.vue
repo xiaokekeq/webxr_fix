@@ -35,11 +35,13 @@ const rows = computed( () => showsAnnotation.value
 	<div v-if="selectedComponent !== null || annotationDetail.visible" class="pipe-property-hud" aria-live="polite">
 		<section
 			class="pipe-property-card"
-			data-ar-ui="true"
+			data-ar-ui-interactive
 			role="dialog"
 			aria-modal="false"
 			:aria-label="`${panelTitle}详情`"
 			@pointerdown.stop
+			@pointerup.stop
+			@pointercancel.stop
 			@click.stop
 		>
 			<header class="pipe-property-header">
@@ -48,16 +50,19 @@ const rows = computed( () => showsAnnotation.value
 					<h2 :title="panelTitle">{{ panelTitle }}</h2>
 				</div>
 				<button
+					data-ar-ui-interactive
 					type="button"
 					class="pipe-property-close"
 					aria-label="关闭构件信息"
-					@click="emit('close')"
+					@pointerdown.stop
+					@pointerup.stop
+					@click.stop="emit('close')"
 				>
 					×
 				</button>
 			</header>
 
-			<div class="pipe-property-content">
+			<div class="pipe-property-content" data-ar-ui-interactive>
 				<dl class="pipe-property-list">
 					<div v-for="row in rows" :key="row.key" class="pipe-property-row">
 						<dt>{{ row.label }}</dt>

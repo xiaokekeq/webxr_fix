@@ -6,6 +6,8 @@ export type XrSessionVisibilityState = 'visible' | 'visible-blurred' | 'hidden';
 
 export interface ArSessionStartResult {
 	session: XRSession;
+	domOverlayGranted: boolean;
+	domOverlayType: XRDOMOverlayType | null;
 	depthRequested: boolean;
 	depthGranted: boolean;
 	depthUsage: 'cpu-optimized' | null;
@@ -38,7 +40,7 @@ export interface XRHitTestController {
 	getHitTestQuality(): XRHitTestQuality | null;
 	supportsAnchors(): boolean;
 	createAnchorFromLatestHit(): Promise<XRAnchorHandle | null>;
-	requestSession(): Promise<void>;
+	requestSession(domOverlayRoot: HTMLElement): Promise<boolean>;
 }
 
 export interface XRHitTestQuality {

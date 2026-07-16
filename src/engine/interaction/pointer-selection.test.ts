@@ -117,4 +117,42 @@ describe( 'pointer selection', () => {
 
 	} );
 
+	it( 'lets the XR pre-selection branch win before pipe picking', () => {
+
+		const camera = new THREE.PerspectiveCamera( 60, 1, 0.1, 100 );
+		camera.position.set( 0, 0, 5 );
+		camera.lookAt( 0, 0, 0 );
+		camera.updateMatrixWorld();
+		const pipe = new THREE.Mesh( new THREE.BoxGeometry(), new THREE.MeshBasicMaterial() );
+		const placedModel = new THREE.Group();
+		placedModel.add( pipe );
+		placedModel.updateMatrixWorld( true );
+		const handlePreSelectionRaycast = vi.fn( () => true );
+		const onSelectionApplied = vi.fn();
+		const session = createPointerSelectionSession( {
+			sceneBundle: {
+				camera,
+				renderer: {
+					domElement: { getBoundingClientRect: () => ( { left: 0, top: 0, width: 100, height: 100 } ) },
+					xr: { isPresenting: true, getCamera: () => camera }
+				}
+			} as unknown as ARSceneBundle,
+			propertySelection: createPropertySelectionController( {} ),
+			setStatus: vi.fn(),
+			onInspectSelection: vi.fn(),
+			onSelectionApplied,
+			handlePreSelectionRaycast,
+			getPlacedModel: () => placedModel,
+			getWorkspaceMode: () => 'browse',
+			getPipesByName: () => new Map()
+		} );
+
+		session.handleArSelect();
+
+		expect( handlePreSelectionRaycast ).toHaveBeenCalledOnce();
+		expect( handlePreSelectionRaycast ).toHaveBeenCalledWith( expect.objectContaining( { source: 'xr-select' } ) );
+		expect( onSelectionApplied ).not.toHaveBeenCalled();
+
+	} );
+
 } );
