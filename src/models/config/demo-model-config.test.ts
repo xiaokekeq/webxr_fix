@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import dz1207ConfigText from '../../../public/projects/dam/configs/dz1207.config.json?raw';
 import waterNetworkConfigText from '../../../public/projects/water-network/configs/waternetwork.config.json?raw';
-import waterNetworkObjText from '../../../public/projects/water-network/models/SWGX.obj?raw';
 import waterNetworkPipesText from '../../../public/projects/water-network/properties/waternetwork.pipes.json?raw';
 import { createEnuFrame, geodeticToEnu } from '@/localization/core/geodesy.js';
 import { solveEngineeringRegistration, transformSiteEnuToModelLocal } from '@/localization/coarse/engineering-registration.js';
@@ -60,10 +59,23 @@ describe( 'RTK control-point normalization', () => {
 		const config = normalizeDemoModelConfig( JSON.parse( waterNetworkConfigText ) );
 		const marker = config.markers.find( ( item ) => item.id === 'marker-warning-707' );
 		const pipes = JSON.parse( waterNetworkPipesText ) as { pipes: Array<{ code?: string }> };
-		const pipeObjectNames: Record<string, string> = {
-			'WN-74-76-001': 'Line014',
-			'WN-74-76-002': '对象002',
-			'WN-74-76-004': '对象004'
+		const surfaceEdges: Record<string, [ THREE.Vector3, THREE.Vector3 ]> = {
+			'ANOM-001': [
+				new THREE.Vector3( -20.5375, -71.8008, -0.344 ),
+				new THREE.Vector3( 146.0411, -71.8008, -0.7561 )
+			],
+			'ANOM-002': [
+				new THREE.Vector3( -20.5123, -70.304, -0.0554 ),
+				new THREE.Vector3( 146.0101, -70.304, -0.4675 )
+			],
+			'ANOM-003': [
+				new THREE.Vector3( -20.5123, -70.304, -0.6612 ),
+				new THREE.Vector3( 146.0101, -70.304, -1.0733 )
+			],
+			'ANOM-004': [
+				new THREE.Vector3( -20.5393, -72.0008, -1.0904 ),
+				new THREE.Vector3( 146.0392, -72.0008, -1.5025 )
+			]
 		};
 		expect( marker?.cornersEnu ).toHaveLength( 4 );
 		const markerCenterEnu = marker!.cornersEnu!.reduce(
@@ -81,27 +93,19 @@ describe( 'RTK control-point normalization', () => {
 			expect( anomaly.markerId ).toBe( marker!.id );
 			expect( pipes.pipes.some( ( pipe ) => pipe.code === anomaly.pipeId ) ).toBe( true );
 			expect( anomaly.maxMarkerDistanceMeters ).toBeUndefined();
-			if ( anomaly.id !== 'ANOM-004' ) {
-				expect( containsModelVertex(
-					waterNetworkObjText,
-					anomaly.placement!.modelLocalPosition,
-					pipeObjectNames[ anomaly.pipeId! ]
-				) ).toBe( true );
-			}
+			const position = new THREE.Vector3(
+				anomaly.placement!.modelLocalPosition.x,
+				anomaly.placement!.modelLocalPosition.y,
+				anomaly.placement!.modelLocalPosition.z
+			);
+			const [ edgeStart, edgeEnd ] = surfaceEdges[ anomaly.id ];
+			expect( position.distanceTo(
+				edgeStart.clone().lerp( edgeEnd, ( position.x - edgeStart.x ) / ( edgeEnd.x - edgeStart.x ) )
+			) ).toBeLessThan( 0.0001 );
+			expect( position.distanceTo( markerCenterModelLocal ) ).toBeGreaterThan( 3 );
 		}
 		const danger = anomalies.find( ( anomaly ) => anomaly.id === 'ANOM-004' )!;
-		const dangerPosition = new THREE.Vector3(
-			danger.placement!.modelLocalPosition.x,
-			danger.placement!.modelLocalPosition.y,
-			danger.placement!.modelLocalPosition.z
-		);
 		expect( danger.severity ).toBe( 'danger' );
-		expect( dangerPosition.distanceTo( markerCenterModelLocal ) ).toBeGreaterThan( 3 );
-		const pipeStart = new THREE.Vector3( -20.5393, -72.0008, -1.0904 );
-		const pipeEnd = new THREE.Vector3( 146.0392, -72.0008, -1.5025 );
-		expect( dangerPosition.distanceTo(
-			pipeStart.clone().lerp( pipeEnd, ( dangerPosition.x - pipeStart.x ) / ( pipeEnd.x - pipeStart.x ) )
-		) ).toBeLessThan( 0.0001 );
 
 		for ( let index = 0; index < anomalies.length; index += 1 ) {
 			for ( let otherIndex = index + 1; otherIndex < anomalies.length; otherIndex += 1 ) {
@@ -114,25 +118,6 @@ describe( 'RTK control-point normalization', () => {
 } );
 
 } );
-
-function containsModelVertex(
-	objText: string,
-	modelLocal: { x: number; y: number; z: number },
-	objectName: string
-): boolean {
-
-	const sourceVertex = new THREE.Vector3( modelLocal.x, - modelLocal.z, modelLocal.y );
-	const start = objText.indexOf( `# object ${objectName}` );
-	const end = objText.indexOf( '# object ', start + 1 );
-	if ( start < 0 ) return false;
-	return objText.slice( start, end < 0 ? undefined : end ).split( /\r?\n/ ).some( ( line ) => {
-		const values = line.trim().split( /\s+/ );
-		if ( values[ 0 ] !== 'v' || values.length < 4 ) return false;
-		return new THREE.Vector3( Number( values[ 1 ] ), Number( values[ 2 ] ), Number( values[ 3 ] ) )
-			.distanceTo( sourceVertex ) < 1e-6;
-	} );
-
-}
 
 function createRawConfig(overrides: { enu?: [ number, number, number ]; world?: { lat: number; lng: number; height: number } } = {}) {
 

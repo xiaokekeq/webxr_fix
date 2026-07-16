@@ -109,7 +109,7 @@
       "pipeId": "WN-74-76-001",
       "placement": {
         "mode": "model-local",
-        "modelLocalPosition": { "x": -20.5375, "y": -71.8008, "z": -0.344 }
+        "modelLocalPosition": { "x": -8, "y": -71.8008, "z": -0.375 }
       },
       "leaderHeightMeters": 0.9,
       "interactionDistanceMeters": 5,
@@ -133,7 +133,7 @@
       "pipeId": "WN-74-76-004",
       "placement": {
         "mode": "model-local",
-        "modelLocalPosition": { "x": -20.5123, "y": -70.304, "z": -0.0554 }
+        "modelLocalPosition": { "x": -12, "y": -70.304, "z": -0.0765 }
       },
       "leaderHeightMeters": 1.05,
       "interactionDistanceMeters": 5,
@@ -157,7 +157,7 @@
       "pipeId": "WN-74-76-002",
       "placement": {
         "mode": "model-local",
-        "modelLocalPosition": { "x": -20.5123, "y": -70.304, "z": -0.6612 }
+        "modelLocalPosition": { "x": -16, "y": -70.304, "z": -0.6724 }
       },
       "leaderHeightMeters": 1.2,
       "interactionDistanceMeters": 5,
