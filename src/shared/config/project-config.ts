@@ -1,5 +1,10 @@
 import type { App, InjectionKey } from 'vue';
 import { computed, inject } from 'vue';
+import type { ProjectRepositories } from '@/services/repository-factory.js';
+
+export type ProjectDataSourceConfig =
+	| { kind: 'local-json'; modelCatalogUrl: string }
+	| { kind: 'api'; apiBaseUrl: string };
 
 export interface ArProjectCapabilities {
 	markerRegistration: boolean;
@@ -81,26 +86,34 @@ export interface ArProjectConfig {
 	projectId: 'dam' | 'water-network';
 	basePath: string;
 	assetBaseUrl: string;
-	modelCatalogUrl: string;
+	dataSource: ProjectDataSourceConfig;
 	defaultModelId: string;
 	showModelSelector: boolean;
 	labels: ArProjectLabels;
 	capabilities: ArProjectCapabilities;
 	ui: ProjectUiContent;
 	propertySchemaUrl?: string;
-	apiBaseUrl?: string;
 }
 
-const projectConfigKey: InjectionKey<ArProjectConfig> = Symbol( 'project-config' );
+export interface ArApplicationContext {
+	projectConfig: ArProjectConfig;
+	repositories: ProjectRepositories;
+}
 
-export function provideProjectConfig(app: App, config: ArProjectConfig): void {
-	app.provide( projectConfigKey, config );
+const applicationContextKey: InjectionKey<ArApplicationContext> = Symbol( 'ar-application-context' );
+
+export function provideArApplicationContext(app: App, context: ArApplicationContext): void {
+	app.provide( applicationContextKey, context );
+}
+
+export function useArApplicationContext(): ArApplicationContext {
+	const context = inject( applicationContextKey );
+	if ( context === undefined ) throw new Error( 'AR application context was not provided.' );
+	return context;
 }
 
 export function useProjectConfig(): ArProjectConfig {
-	const config = inject( projectConfigKey );
-	if ( config === undefined ) throw new Error( 'Project config was not provided.' );
-	return config;
+	return useArApplicationContext().projectConfig;
 }
 
 export function useProjectUi() {

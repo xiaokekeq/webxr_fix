@@ -2,13 +2,16 @@ import ui from './data/ui.json';
 import type { ArProjectConfig, ProjectUiContent } from '@/shared/config/project-config.js';
 
 const assetBaseUrl = `${import.meta.env.BASE_URL}projects/dam/`;
+const modelCatalogUrl = `${assetBaseUrl}models.json`;
 
 export const damProjectConfig: ArProjectConfig = {
 	schemaVersion: '1.0',
 	projectId: 'dam',
 	basePath: import.meta.env.BASE_URL,
 	assetBaseUrl,
-	modelCatalogUrl: `${assetBaseUrl}models.json`,
+	dataSource: import.meta.env.VITE_DATA_SOURCE === 'api'
+		? { kind: 'api', apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? '' }
+		: { kind: 'local-json', modelCatalogUrl },
 	defaultModelId: 'dz1207',
 	showModelSelector: true,
 	labels: {

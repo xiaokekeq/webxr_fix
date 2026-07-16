@@ -2,8 +2,8 @@
   {
     "id": "tongma-74-76-fbx",
     "name": "东城供水管网 74-76",
-    "modelUrl": "models/tongma-74-76/SWGX.obj",
-    "materialUrl": "models/tongma-74-76/SWGX.mtl",
+    "modelUrl": "models/SWGX.obj",
+    "materialUrl": "models/SWGX.mtl",
     "assetTransform": { "upAxis": "y", "unitScale": 1.0 },
     "configUrl": "configs/tongma-74-76.config.json",
     "pipesUrl": "properties/tongma-74-76.pipes.json"

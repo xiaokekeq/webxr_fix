@@ -10,6 +10,7 @@ import type { CreateInspectionRecordInput } from '@/services/repositories/inspec
 import { mapLegacyDisplayMode, type LegacyArDisplayMode, type UndergroundInspectionTool, type UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import type { MarkerSolutionApplyResult } from '@/engine/inspection/marker-solution-apply-result.js';
 import type { ArProjectCapabilities, ArProjectConfig } from '@/shared/config/project-config.js';
+import type { ProjectRepositories } from '@/services/repository-factory.js';
 
 export interface InspectionDraft {
 	result: string;
@@ -52,7 +53,7 @@ export interface LoadModelArController {
 		clearMarkerLocalizationCorrection(): void;
 		resetPlacement(): void;
 		setInspectionPlacementSource(source: InspectionPlacementSource): void;
-	enterAr(): void;
+		enterAr(): Promise<void>;
 		placeModel(): Promise<ModelPlacementResult>;
 		exitAr(): void;
 		saveInspectionRecord(input: Omit<CreateInspectionRecordInput, 'siteId'>): void;
@@ -67,10 +68,13 @@ export function assertArCapability(capabilities: ArProjectCapabilities, capabili
 	if ( capabilities[ capability ] === false ) throw new Error( `AR capability disabled: ${capability}` );
 }
 
-export function createLoadModelArController(config: ArProjectConfig): LoadModelArController {
+export function createLoadModelArController(
+	config: ArProjectConfig,
+	repositories: ProjectRepositories
+): LoadModelArController {
 
 	const capabilities = config.capabilities;
-	const engine = new ThreeEngine( config );
+	const engine = new ThreeEngine( config, repositories );
 	const listeners = new Set<() => void>();
 
 	const unsubscribeEngine = engine.subscribe( () => {
@@ -262,7 +266,7 @@ export function createLoadModelArController(config: ArProjectConfig): LoadModelA
 
 			enterAr() {
 
-				engine.enterAr();
+				return engine.enterAr();
 
 			},
 

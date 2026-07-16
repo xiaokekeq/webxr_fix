@@ -45,7 +45,7 @@
     "quickMenus": [
       { "icon": "⌖", "label": "管网地图", "desc": "查看管线与点位", "path": "/map" },
       { "icon": "◉", "label": "告警记录", "desc": "查看处置进度", "path": "/records" },
-      { "icon": "▣", "label": "AR 巡查", "desc": "现场识别管网设施", "path": "/ar?autoStart=1" }
+      { "icon": "▣", "label": "AR 巡查", "desc": "现场识别管网设施", "path": "/ar" }
     ]
   },
   "map": {

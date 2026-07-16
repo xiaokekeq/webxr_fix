@@ -18,7 +18,9 @@ import type { CreateInspectionRecordInput } from '@/services/repositories/inspec
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import type { LegacyArDisplayMode } from '@/engine/visualization/underground-display-state.js';
 import type { MarkerSolutionApplyResult } from '@/engine/inspection/marker-solution-apply-result.js';
-import type { ArProjectConfig } from '@/shared/config/project-config.js';
+import type { ArApplicationContext } from '@/shared/config/project-config.js';
+
+export type ArStoreDependencies = ArApplicationContext;
 
 interface ControllerUiState {
 	drawerOpen: boolean;
@@ -56,7 +58,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 	const engineSnapshotRef = shallowRef<ThreeEngineSnapshot>( createInitialThreeEngineSnapshot() );
 	const uiStateRef = shallowRef<ControllerUiState>( createInitialUiState() );
 	const initializedRef = shallowRef( false );
-	const projectConfigRef = shallowRef<ArProjectConfig | null>( null );
+	const dependenciesRef = shallowRef<ArStoreDependencies | null>( null );
 	let unsubscribe: (() => void) | null = null;
 	let initializePromise: Promise<void> | null = null;
 	let previousEngineState = engineSnapshotRef.value;
@@ -67,8 +69,11 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 			return controllerRef.value;
 		}
 
-		if ( projectConfigRef.value === null ) throw new Error( 'AR store must be configured before use.' );
-		const controller = createLoadModelArController( projectConfigRef.value );
+		if ( dependenciesRef.value === null ) throw new Error( 'AR store must be configured before use.' );
+		const controller = createLoadModelArController(
+			dependenciesRef.value.projectConfig,
+			dependenciesRef.value.repositories
+		);
 		controllerRef.value = controller;
 		engineSnapshotRef.value = controller.getEngineState();
 		previousEngineState = engineSnapshotRef.value;
@@ -91,12 +96,16 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 	}
 
-	function configure(config: ArProjectConfig): void {
-		if ( projectConfigRef.value !== null && projectConfigRef.value.projectId !== config.projectId ) {
+	function configure(dependencies: ArStoreDependencies): void {
+		if ( dependenciesRef.value !== null && dependenciesRef.value.projectConfig.projectId !== dependencies.projectConfig.projectId ) {
 			throw new Error( 'AR store cannot switch projects at runtime.' );
 		}
-		projectConfigRef.value = config;
-		engineSnapshotRef.value = createInitialThreeEngineSnapshot( config.labels.appTitle );
+		if ( dependenciesRef.value !== null && dependenciesRef.value.repositories !== dependencies.repositories ) {
+			throw new Error( 'AR store cannot replace repositories at runtime.' );
+		}
+		if ( dependenciesRef.value !== null ) return;
+		dependenciesRef.value = dependencies;
+		engineSnapshotRef.value = createInitialThreeEngineSnapshot( dependencies.projectConfig.labels.appTitle );
 	}
 
 	function patchUiState(patch: Partial<ControllerUiState>): void {
@@ -148,7 +157,7 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 		initializePromise = null;
 		initializedRef.value = false;
 		uiStateRef.value = createInitialUiState();
-		engineSnapshotRef.value = createInitialThreeEngineSnapshot( projectConfigRef.value?.labels.appTitle );
+		engineSnapshotRef.value = createInitialThreeEngineSnapshot( dependenciesRef.value?.projectConfig.labels.appTitle );
 		if ( unsubscribe !== null ) {
 			unsubscribe();
 			unsubscribe = null;
@@ -380,9 +389,9 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 
 		},
 
-		enterAr(): void {
+		enterAr(): Promise<void> {
 
-			ensureController().actions.enterAr();
+			return ensureController().actions.enterAr();
 
 		},
 

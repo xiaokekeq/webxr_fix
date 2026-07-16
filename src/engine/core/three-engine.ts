@@ -100,7 +100,7 @@ import type {
 } from '@/features/ar/types/workflow.js';
 import type { ArSessionStartResult } from '@/features/ar/types/runtime-types.js';
 import type { ArSessionContext } from '@/features/ar/types/ar-session-context.js';
-import { repositories } from '@/services/repository-factory.js';
+import type { ProjectRepositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
 import { validateSiteCalibrationBaselineForStorage } from '@/services/repositories/site-baseline-repository.js';
 import { RealDepthProvider } from '@/engine/depth/real-depth-provider.js';
@@ -305,7 +305,10 @@ export class ThreeEngine {
 		( event as WebGLContextEvent ).preventDefault();
 		arError( '[WebGLContextLost]', { xrPresenting: this.sceneBundle.renderer.xr.isPresenting } );
 	};
-	constructor(private readonly projectConfig: ArProjectConfig) {
+	constructor(
+		private readonly projectConfig: ArProjectConfig,
+		private readonly repositories: ProjectRepositories
+	) {
 
 		this.store = createRegistrationStore( createInitialState( projectConfig.labels.appTitle ) );
 		this.xrButtonWrap = document.createElement( 'div' );
@@ -441,7 +444,7 @@ export class ThreeEngine {
 			store: this.store,
 			getWorkflowMode: () => this.workflowMode,
 			getCurrentSessionId: () => this.currentArSessionId,
-			getRepositoryDataSource: () => repositories.dataSource,
+			getRepositoryDataSource: () => this.repositories.dataSource,
 			getSessionSiteConfig: () => this.getSessionSiteConfig(),
 			getActiveRuntimeConfig: () => this.getActiveRuntimeConfig(),
 			getActiveModelTemplate: () => this.getActiveModelTemplate(),
@@ -587,6 +590,7 @@ export class ThreeEngine {
 		} );
 
 		this.modelSession = createModelSession( {
+			repositories: this.repositories,
 			store: this.store,
 			setStatus: ( message ) => {
 				statusRuntime.setStatus( message );
@@ -1009,7 +1013,7 @@ export class ThreeEngine {
 			arError( '[SiteBaselineSaveFailed]', {
 				mode: this.workflowMode,
 				siteId: baseline.siteId,
-				dataSource: repositories.dataSource,
+				dataSource: this.repositories.dataSource,
 				repository: 'siteBaseline',
 				sessionId: this.currentArSessionId,
 				targetId: null,
@@ -1020,7 +1024,7 @@ export class ThreeEngine {
 			return;
 		}
 
-		void repositories.siteBaseline.save( baseline ).then( () => {
+		void this.repositories.siteBaseline.save( baseline ).then( () => {
 			this.activeSiteCalibrationBaseline = baseline;
 			this.syncArSessionContext();
 			this.refreshSiteCalibrationBaselineState( { silentStatus: true } );
@@ -1031,7 +1035,7 @@ export class ThreeEngine {
 			arError( '[SiteBaselineSaveFailed]', {
 				mode: this.workflowMode,
 				siteId: baseline.siteId,
-				dataSource: repositories.dataSource,
+				dataSource: this.repositories.dataSource,
 				repository: 'siteBaseline',
 				sessionId: this.currentArSessionId,
 				targetId: null,
@@ -1120,16 +1124,19 @@ export class ThreeEngine {
 
 	}
 
-	enterAr(): void {
+	enterAr(): Promise<void> {
 
 		if ( this.store.getState().arSupportState !== 'supported' ) {
 			this.setStatus( this.store.getState().arSupportMessage );
-			return;
+			return Promise.resolve();
 		}
-		void this.ensureArSessionContextReady().then( () => {
-			this.pointerSelection.suppressSelectionFor( 1200 );
-			this.xrRuntime.requestSession();
-		} );
+		if ( this.store.getState().modelRuntimeLoad.modelRuntimeLoadState !== 'ready' || this.demoModelConfig === null ) {
+			this.setStatus( this.getRuntimePlacementBlockedMessage( '模型配置尚未准备完成。' ) );
+			return Promise.resolve();
+		}
+		this.syncArSessionContext();
+		this.pointerSelection.suppressSelectionFor( 1200 );
+		return this.xrRuntime.requestSession();
 
 	}
 
@@ -1230,14 +1237,14 @@ export class ThreeEngine {
 			createdAt: Date.now(),
 			...input
 		};
-		void repositories.inspection.create( nextRecord ).then( ( record ) => {
+		void this.repositories.inspection.create( nextRecord ).then( ( record ) => {
 			this.setStatus( `已保存巡查记录：${record.result}` );
 			this.emit();
 		} ).catch( ( error ) => {
 			arError( '[InspectionRecordSaveFailed]', {
 				mode: this.workflowMode,
 				siteId,
-				dataSource: repositories.dataSource,
+				dataSource: this.repositories.dataSource,
 				repository: 'inspection',
 				targetId: null,
 				imageUrl: nextRecord.snapshotUrl ?? null,
@@ -1257,7 +1264,7 @@ export class ThreeEngine {
 			return;
 		}
 
-		void repositories.inspection.listBySite( siteId ).then( ( records ) => {
+		void this.repositories.inspection.listBySite( siteId ).then( ( records ) => {
 			this.setStatus( `当前站点共有 ${records.length} 条巡查记录。` );
 			this.emit();
 		} ).catch( () => {
@@ -1437,17 +1444,6 @@ export class ThreeEngine {
 
 	}
 
-	private async ensureArSessionContextReady(): Promise<void> {
-
-		this.syncArSessionContext();
-		if ( this.workflowMode !== 'ar-inspection' || this.demoModelConfig === null ) {
-			return;
-		}
-
-		await this.loadSiteCalibrationBaseline( { silentStatus: true } );
-
-	}
-
 	private async loadSiteCalibrationBaseline(options?: {
 		silentStatus?: boolean;
 	}): Promise<SiteCalibrationBaseline | null> {
@@ -1463,7 +1459,7 @@ export class ThreeEngine {
 		const requestId = ++this.siteBaselineLoadRequestId;
 
 		try {
-			const baseline = await repositories.siteBaseline.load( siteId );
+			const baseline = await this.repositories.siteBaseline.load( siteId );
 			if ( requestId !== this.siteBaselineLoadRequestId || this.demoModelConfig?.siteId !== siteId ) {
 				return this.activeSiteCalibrationBaseline;
 			}
@@ -1487,7 +1483,7 @@ export class ThreeEngine {
 			arError( '[SiteBaselineLoadFailed]', {
 				mode: this.workflowMode,
 				siteId,
-				dataSource: repositories.dataSource,
+				dataSource: this.repositories.dataSource,
 				repository: 'siteBaseline',
 				sessionId: this.currentArSessionId,
 				targetId: null,

@@ -2,14 +2,14 @@
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-interface TabItem { key: string; label: string; path: string; icon: string; autoStart?: boolean; }
+interface TabItem { key: string; label: string; path: string; icon: string; }
 
 const TEXT = { navLabel: '主导航', home: '首页', ar: 'AR 巡查', map: '地图', records: '记录', profile: '我的' } as const;
 const route = useRoute();
 const router = useRouter();
 const tabs = computed<TabItem[]>( () => [
 	{ key: 'home', label: TEXT.home, path: '/', icon: '⌂' },
-	{ key: 'ar', label: TEXT.ar, path: '/ar', icon: 'AR', autoStart: true },
+	{ key: 'ar', label: TEXT.ar, path: '/ar', icon: 'AR' },
 	{ key: 'map', label: TEXT.map, path: '/map', icon: '◫' },
 	{ key: 'records', label: TEXT.records, path: '/records', icon: '☰' },
 	{ key: 'profile', label: TEXT.profile, path: '/profile', icon: '◉' }
@@ -17,7 +17,7 @@ const tabs = computed<TabItem[]>( () => [
 const activePath = computed( () => tabs.value.find( ( item ) => route.path === item.path || item.path !== '/' && route.path.startsWith( `${item.path}/` ) )?.path ?? '/' );
 
 function navigate(tab: TabItem): void {
-	if ( route.path !== tab.path ) void router.push( { path: tab.path, query: tab.autoStart ? { autoStart: '1' } : undefined } );
+	if ( route.path !== tab.path ) void router.push( tab.path );
 }
 </script>
 

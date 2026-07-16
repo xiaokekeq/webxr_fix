@@ -36,7 +36,7 @@ export interface XRHitTestController {
 	getHitTestQuality(): XRHitTestQuality | null;
 	supportsAnchors(): boolean;
 	createAnchorFromLatestHit(): Promise<XRAnchorHandle | null>;
-	requestSession(): void;
+	requestSession(): Promise<void>;
 }
 
 export interface XRHitTestQuality {

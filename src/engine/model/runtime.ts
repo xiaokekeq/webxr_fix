@@ -22,7 +22,7 @@ import {
 	readPlaceableTemplateReport,
 	readPlaceableTemplateTransform
 } from '@/engine/core/model.js';
-import { repositories } from '@/services/repository-factory.js';
+import type { ProjectRepositories } from '@/services/repository-factory.js';
 
 export type ModelRuntimeLoadStage =
 	| 'pipe-records'
@@ -197,6 +197,7 @@ function getErrorMessage(error: unknown): string {
 export async function loadModelRuntimeBundle(
 	modelDefinition: ModelCatalogItem,
 	setStatus: SetStatus,
+	repositories: Pick<ProjectRepositories, 'model' | 'siteConfig'>,
 	report?: (event: ModelRuntimeLoadEvent) => void
 ): Promise<LoadedModelRuntimeBundle> {
 

@@ -1,11 +1,9 @@
-import { normalizeModelCatalogItem } from './model-catalog-normalizer.js';
 import type { ModelCatalogItem } from './model-types.js';
-import { repositories } from '@/services/repository-factory.js';
+import type { ModelRepository } from '@/services/repositories/model-repository.js';
 
-export async function fetchModelCatalog(): Promise<ModelCatalogItem[]> {
+export async function fetchModelCatalog(modelRepository: ModelRepository): Promise<ModelCatalogItem[]> {
 
-	void normalizeModelCatalogItem;
-	return repositories.model.listModels();
+	return modelRepository.listModels();
 
 }
 

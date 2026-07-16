@@ -25,7 +25,7 @@ interface CreateXRSessionRuntimeOptions {
 export interface XRSessionRuntime {
 	setup(): void;
 	detectSupport(): Promise<ImmersiveArSupportInfo>;
-	requestSession(): void;
+	requestSession(): Promise<void>;
 	renderFrame(time: number, frame?: XRFrame): void;
 	getHitTestController(): XRHitTestController;
 }
@@ -93,7 +93,7 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 
 		requestSession() {
 
-			xrHitTest.requestSession();
+			return xrHitTest.requestSession();
 
 		},
 

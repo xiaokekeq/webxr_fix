@@ -45,7 +45,7 @@
     "quickMenus": [
       { "icon": "⌖", "label": "堤坝地图", "desc": "查看巡查点位", "path": "/map" },
       { "icon": "◉", "label": "风险记录", "desc": "查看处置进度", "path": "/records" },
-      { "icon": "▣", "label": "堤坝 AR", "desc": "现场模型核查", "path": "/ar?autoStart=1" }
+      { "icon": "▣", "label": "堤坝 AR", "desc": "现场模型核查", "path": "/ar" }
     ]
   },
   "map": {

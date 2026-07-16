@@ -46,7 +46,7 @@ export class FetchHttpClient implements HttpClient {
 	): Promise<T> {
 
 		const controller = new AbortController();
-		const timeoutId = window.setTimeout( () => {
+		const timeoutId = globalThis.setTimeout( () => {
 			controller.abort();
 		}, this.options.timeoutMs ?? 10000 );
 
@@ -75,7 +75,7 @@ export class FetchHttpClient implements HttpClient {
 
 			throw error;
 		} finally {
-			window.clearTimeout( timeoutId );
+			globalThis.clearTimeout( timeoutId );
 		}
 
 	}

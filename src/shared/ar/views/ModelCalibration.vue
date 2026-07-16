@@ -6,6 +6,7 @@ import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
+import { useArApplicationContext } from '@/shared/config/project-config.js';
 
 type CalibrationPanelView = 'overview' | 'model' | 'marker' | 'ar-check';
 
@@ -17,16 +18,20 @@ const PANEL_OPTIONS: Array<{ value: CalibrationPanelView; label: string }> = [
 ];
 
 const route = useRoute();
+const applicationContext = useArApplicationContext();
 const store = useArShellStore();
+store.configure( applicationContext );
 
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
+const isEnteringAr = ref( false );
 const activePanelView = ref<CalibrationPanelView>( 'overview' );
 const markerCalibrationOverlayOpen = ref( false );
 
 const engine = computed( () => store.engine );
 const ui = computed( () => store.ui );
 const hasArSession = computed( () => engine.value.appMode === 'ar-session' );
+const sceneReady = computed( () => engine.value.modelRuntimeLoad.modelRuntimeLoadState === 'ready' );
 const hitTestReady = computed(
 	() => engine.value.arSessionPhase === 'ready-to-place'
 		|| engine.value.arSessionPhase === 'placing'
@@ -237,11 +242,13 @@ async function mountEngineHosts(): Promise<void> {
 	} );
 }
 
-async function startArSession(): Promise<void> {
-	await mountEngineHosts();
-	await nextTick();
+function startArSession(): void {
+	if ( isEnteringAr.value || hasArSession.value || sceneReady.value === false ) return;
+	isEnteringAr.value = true;
 	store.actions.setWorkflowMode( 'site-baseline-config' );
-	store.actions.enterAr();
+	void store.actions.enterAr().finally( () => {
+		isEnteringAr.value = false;
+	} );
 }
 
 function handleModelChange(event: Event): void {
@@ -369,8 +376,8 @@ function setArOverlayClass(active: boolean): void {
 							</option>
 						</select>
 					</label>
-					<button type="button" class="launch-button" @click.stop="startArSession">
-						进入 AR 校验
+					<button type="button" class="launch-button" :disabled="sceneReady === false || isEnteringAr" @click.stop="startArSession">
+						{{ isEnteringAr ? '正在进入…' : '进入 AR 校验' }}
 					</button>
 				</div>
 			</section>

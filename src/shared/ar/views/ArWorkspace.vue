@@ -10,7 +10,7 @@ import { canApplyMockEngineeringCalibration } from '@/engine/session/registratio
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { useUndergroundDisplayControls } from '@/features/ar/composables/use-underground-display-controls.js';
 import { useArShellStore } from '@/features/ar/stores/ar-shell.js';
-import { useProjectConfig } from '@/shared/config/project-config.js';
+import { useArApplicationContext } from '@/shared/config/project-config.js';
 
 type InspectPanelView = 'display' | 'localization' | 'record';
 
@@ -22,12 +22,14 @@ const PANEL_OPTIONS: Array<{ value: InspectPanelView; label: string }> = [
 
 const route = useRoute();
 const router = useRouter();
-const projectConfig = useProjectConfig();
+const applicationContext = useArApplicationContext();
+const projectConfig = applicationContext.projectConfig;
 const store = useArShellStore();
-store.configure( projectConfig );
+store.configure( applicationContext );
 
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
+const isEnteringAr = ref( false );
 const activePanelView = ref<InspectPanelView>( 'localization' );
 const markerCalibrationOverlayOpen = ref( false );
 const markerApplyFeedback = ref<{
@@ -360,12 +362,13 @@ async function initializeSceneModel(): Promise<void> {
 
 }
 
-async function startArSession(): Promise<void> {
-	await mountEngineHosts();
-	if ( sceneReady.value === false ) return;
-	await nextTick();
+function startArSession(): void {
+	if ( isEnteringAr.value || hasArSession.value || sceneReady.value === false ) return;
+	isEnteringAr.value = true;
 	store.actions.setWorkflowMode( 'ar-inspection' );
-	store.actions.enterAr();
+	void store.actions.enterAr().finally( () => {
+		isEnteringAr.value = false;
+	} );
 }
 
 function handleModelChange(event: Event): void {
@@ -512,9 +515,6 @@ function exitPage(): void {
 onMounted( async () => {
 	await mountEngineHosts();
 	store.actions.setWorkflowMode( 'ar-inspection' );
-	if ( route.query.autoStart === '1' && sceneReady.value ) {
-		store.actions.enterAr();
-	}
 } );
 
 onUnmounted( () => {
@@ -572,8 +572,8 @@ function setArOverlayClass(active: boolean): void {
 							</option>
 						</select>
 					</label>
-					<button type="button" class="launch-button" :disabled="sceneReady === false" @click.stop="startArSession">
-						{{ projectConfig.labels.enterAr }}
+					<button type="button" class="launch-button" :disabled="sceneReady === false || isEnteringAr" @click.stop="startArSession">
+						{{ isEnteringAr ? '正在进入…' : projectConfig.labels.enterAr }}
 					</button>
 				</div>
 			</section>

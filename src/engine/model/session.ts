@@ -32,8 +32,10 @@ import {
 	activateRuntimeBundle,
 	type ModelRuntimeActivationResult
 } from './runtime-bundle-activation.js';
+import type { ProjectRepositories } from '@/services/repository-factory.js';
 
 interface CreateModelSessionOptions {
+	repositories: Pick<ProjectRepositories, 'model' | 'siteConfig'>;
 	store: RegistrationStore;
 	setStatus: SetStatus;
 	resetPlacement(): void;
@@ -56,6 +58,7 @@ export interface ModelSessionController {
 export function createModelSession(options: CreateModelSessionOptions): ModelSessionController {
 
 	const {
+		repositories,
 		store,
 		setStatus,
 		resetPlacement,
@@ -93,7 +96,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 
 		let bundle: LoadedModelRuntimeBundle;
 		try {
-			bundle = await loadModelRuntimeBundle( modelDefinition, setStatus, ( event ) => {
+			bundle = await loadModelRuntimeBundle( modelDefinition, setStatus, repositories, ( event ) => {
 				if ( requestId === modelLoadRequestId ) patchRuntimeLoadEvent( store, requestId, event );
 			} );
 		} catch ( error ) {
@@ -177,7 +180,7 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 	return {
 		async initializeCatalog() {
 
-			const availableModels = await fetchModelCatalog();
+			const availableModels = await fetchModelCatalog( repositories.model );
 			if ( availableModels.length === 0 ) {
 				throw new Error( '\u5f53\u524d\u9879\u76ee\u6a21\u578b\u76ee\u5f55\u4e2d\u6ca1\u6709\u53ef\u7528\u6a21\u578b\u3002' );
 			}
