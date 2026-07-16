@@ -253,6 +253,13 @@ export interface AnnotationDetailState {
 	fields: AnnotationDetailField[];
 }
 
+/** Selected component data rendered by a DOM Overlay HUD, never by Three.js. */
+export interface SelectedComponentState {
+	componentId: string;
+	displayName: string;
+	properties: Record<string, unknown>;
+}
+
 export interface RegistrationStoreState {
 	projectName: string;
 	modelUrl: string;
@@ -277,6 +284,7 @@ export interface RegistrationStoreState {
 	pipeList: PipeRecord[];
 	propertyPanel: PropertyPanelState;
 	selectedAnnotationId: string | null;
+	selectedComponent: SelectedComponentState | null;
 	inspectionPlacementSource: InspectionPlacementSource;
 	registrationMetrics: RegistrationMetricsState;
 	modelScaleSummary: ModelScaleSummaryState;

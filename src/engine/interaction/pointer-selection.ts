@@ -13,6 +13,7 @@ interface CreatePointerSelectionSessionOptions {
 		selection: {
 			businessObject: THREE.Object3D;
 			properties: PipeRecord | null;
+			componentId: string;
 			highlightObject?: THREE.Object3D;
 		}
 	): void;
@@ -39,7 +40,6 @@ export interface PointerSelectionSession {
 	handleScreenPointerUp(clientX: number, clientY: number): void;
 	handleArSelect(): void;
 	suppressSelectionFor(durationMs: number): void;
-	cancelPendingSelection(durationMs?: number): void;
 }
 
 const DEFAULT_DRAG_THRESHOLD_PX = 10;
@@ -74,16 +74,6 @@ export function createPointerSelectionSession(
 	function isSelectionSuppressed(): boolean {
 
 		return performance.now() < selectionSuppressedUntil;
-
-	}
-
-	function cancelPendingSelection(durationMs = 360): void {
-
-		hasPendingPointerSelection = false;
-		selectionSuppressedUntil = Math.max(
-			selectionSuppressedUntil,
-			performance.now() + durationMs
-		);
 
 	}
 
@@ -207,8 +197,6 @@ export function createPointerSelectionSession(
 
 		},
 
-		cancelPendingSelection
-
 	};
 
 	function selectScreenPoint(
@@ -263,7 +251,11 @@ export function createPointerSelectionSession(
 			getPipesByName()
 		);
 		const properties = getPropertiesForBusinessObject( businessObject, clickedMesh );
-		applySelection( businessObject, properties, clickedMesh );
+		applySelection(
+			businessObject,
+			properties,
+			isSelectionProxy( clickedMesh ) ? businessObject : clickedMesh
+		);
 
 	}
 
@@ -274,7 +266,8 @@ export function createPointerSelectionSession(
 	): void {
 
 		const businessName = getBusinessName( businessObject );
-		if ( propertySelection.isSelectedBusinessObject( businessObject ) ) {
+		const componentId = propertySelection.resolveComponentId( businessObject, properties );
+		if ( propertySelection.isSelectedComponent( componentId ) ) {
 			propertySelection.clearSelection();
 			onSelectionCleared?.();
 			onInspectSelection();
@@ -282,8 +275,8 @@ export function createPointerSelectionSession(
 			return;
 		}
 
-		propertySelection.selectBusinessObject( businessObject, properties, highlightObject );
-		onSelectionApplied?.( { businessObject, properties, highlightObject } );
+		const selection = propertySelection.selectBusinessObject( businessObject, properties, highlightObject );
+		onSelectionApplied?.( { businessObject, properties, componentId: selection.componentId, highlightObject } );
 		onInspectSelection();
 
 		if ( getWorkspaceMode() === 'browse' ) {
@@ -338,6 +331,18 @@ export function createPointerSelectionSession(
 				return true;
 			}
 
+			current = current.parent;
+		}
+
+		return false;
+
+	}
+
+	function isSelectionProxy(object: THREE.Object3D): boolean {
+
+		let current: THREE.Object3D | null = object;
+		while ( current !== null ) {
+			if ( current.userData.__selectionProxy === true ) return true;
 			current = current.parent;
 		}
 

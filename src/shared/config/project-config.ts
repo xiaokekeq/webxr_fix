@@ -19,6 +19,20 @@ export interface ArProjectCapabilities {
 	screenshot: boolean;
 }
 
+export interface ComponentPropertyHudField {
+	key: string;
+	label: string;
+	unit?: string;
+}
+
+/**
+ * Project-level opt-in for the DOM property HUD. Projects without this
+ * configuration keep their existing in-scene annotation presentation.
+ */
+export interface ComponentPropertyHudConfig {
+	fields: ComponentPropertyHudField[];
+}
+
 export interface ArProjectLabels {
 	appTitle: string;
 	arTitle: string;
@@ -93,6 +107,7 @@ export interface ArProjectConfig {
 	capabilities: ArProjectCapabilities;
 	ui: ProjectUiContent;
 	propertySchemaUrl?: string;
+	componentPropertyHud?: ComponentPropertyHudConfig;
 }
 
 export interface ArApplicationContext {

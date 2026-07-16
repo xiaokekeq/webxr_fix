@@ -6,6 +6,7 @@ import ArFloatingValueRail from '@/components/ar/ArFloatingValueRail.vue';
 import UndergroundDisplayControls from '@/components/ar/UndergroundDisplayControls.vue';
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
+import PipePropertyHud from '@/shared/ar/components/PipePropertyHud.vue';
 import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { useUndergroundDisplayControls } from '@/features/ar/composables/use-underground-display-controls.js';
@@ -534,13 +535,13 @@ function setArOverlayClass(active: boolean): void {
 </script>
 
 <template>
-	<div class="inspect-page" :class="{ 'ar-active': hasArSession }" @click="store.actions.handleArUiInteraction()">
+	<div class="inspect-page" :class="{ 'ar-active': hasArSession }">
 		<div class="page-scroll">
 			<header
-				v-if="showMarkerCalibrationOverlay === false"
-				class="page-header"
-				@pointerdown.stop="store.actions.handleArUiInteraction()"
-				@click.stop
+			v-if="showMarkerCalibrationOverlay === false"
+			class="page-header"
+			data-ar-ui="true"
+			@click.stop
 			>
 				<div>
 					<div class="page-title">{{ projectConfig.labels.arTitle }}</div>
@@ -556,7 +557,7 @@ function setArOverlayClass(active: boolean): void {
 				<div
 					v-if="!hasArSession"
 					class="launch-overlay"
-					@pointerdown.stop="store.actions.handleArUiInteraction()"
+					data-ar-ui="true"
 					@click.stop
 				>
 					<div class="launch-badge">AR</div>
@@ -580,11 +581,18 @@ function setArOverlayClass(active: boolean): void {
 
 		</div>
 
+		<PipePropertyHud
+			v-if="hasArSession && projectConfig.componentPropertyHud !== undefined"
+			:selected-component="engine.selectedComponent"
+			:fields="projectConfig.componentPropertyHud.fields"
+			@close="store.actions.closePropertyPanel()"
+		/>
+
 		<nav
 			v-if="hasArSession && showMarkerCalibrationOverlay === false"
 			class="action-dock action-dock-compact"
 			aria-label="AR 操作"
-			@pointerdown.stop="store.actions.handleArUiInteraction()"
+			data-ar-ui="true"
 			@click.stop
 		>
 			<button type="button" class="dock-item dock-item-primary" @click.stop="openWorkspacePanel">
@@ -606,14 +614,13 @@ function setArOverlayClass(active: boolean): void {
 			:model-value="floatingAdjustment.value"
 			:ariaLabel="floatingAdjustment.label"
 			@update:model-value="updateFloatingValue"
-			@change-start="store.actions.handleArUiInteraction()"
 		/>
 
 		<transition name="sheet-fade">
 			<section
 				v-if="ui.drawerOpen && showMarkerCalibrationOverlay === false"
 				class="bottom-sheet"
-				@pointerdown.stop="store.actions.handleArUiInteraction()"
+				data-ar-ui="true"
 				@pointermove.stop
 				@pointerup.stop
 				@touchstart.stop
@@ -747,7 +754,6 @@ function setArOverlayClass(active: boolean): void {
 			v-if="showMarkerCalibrationOverlay"
 			class="marker-calibration-overlay"
 			data-ar-ui="true"
-			@pointerdown.stop="store.actions.handleArUiInteraction()"
 			@click.stop
 		>
 			<div class="marker-calibration-title">手动 Marker 四角点校正</div>

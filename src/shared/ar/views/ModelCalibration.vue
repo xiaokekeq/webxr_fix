@@ -338,12 +338,12 @@ function setArOverlayClass(active: boolean): void {
 </script>
 
 <template>
-	<div class="calibration-page" :class="{ 'ar-active': hasArSession }" @click="store.actions.handleArUiInteraction()">
+	<div class="calibration-page" :class="{ 'ar-active': hasArSession }">
 		<div class="page-scroll">
 			<header
 				v-if="showMarkerCalibrationOverlay === false"
 				class="page-header"
-				@pointerdown.stop="store.actions.handleArUiInteraction()"
+				data-ar-ui="true"
 				@click.stop
 			>
 				<div>
@@ -360,7 +360,7 @@ function setArOverlayClass(active: boolean): void {
 				<div
 					v-if="!hasArSession"
 					class="launch-overlay"
-					@pointerdown.stop="store.actions.handleArUiInteraction()"
+					data-ar-ui="true"
 					@click.stop
 				>
 					<div class="launch-badge">RTK</div>
@@ -388,7 +388,7 @@ function setArOverlayClass(active: boolean): void {
 			<section
 				v-if="hasArSession && ui.drawerOpen && showMarkerCalibrationOverlay === false"
 				class="bottom-sheet"
-				@pointerdown.stop="store.actions.handleArUiInteraction()"
+				data-ar-ui="true"
 				@click.stop
 			>
 				<div class="sheet-header">
@@ -462,7 +462,6 @@ function setArOverlayClass(active: boolean): void {
 			v-if="showMarkerCalibrationOverlay"
 			class="marker-calibration-overlay"
 			data-ar-ui="true"
-			@pointerdown.stop="store.actions.handleArUiInteraction()"
 			@click.stop
 		>
 			<div class="marker-calibration-title">手动 Marker 四角点校正</div>
@@ -504,7 +503,7 @@ function setArOverlayClass(active: boolean): void {
 			v-if="hasArSession && showMarkerCalibrationOverlay === false"
 			class="action-dock action-dock-compact"
 			aria-label="AR 校验操作"
-			@pointerdown.stop="store.actions.handleArUiInteraction()"
+			data-ar-ui="true"
 			@click.stop
 		>
 			<button type="button" class="dock-item dock-item-primary" @click.stop="toggleWorkspacePanel">

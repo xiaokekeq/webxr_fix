@@ -32,5 +32,18 @@ export const waterNetworkProjectConfig: ArProjectConfig = {
 		measurement: false,
 		screenshot: true
 	},
+	componentPropertyHud: {
+		fields: [
+			{ key: 'type', label: '管线类型' },
+			{ key: 'diameter', label: '管径' },
+			{ key: 'material', label: '材质' },
+			{ key: 'depth', label: '埋深' },
+			{ key: 'startPoint', label: '起点' },
+			{ key: 'endPoint', label: '终点' },
+			{ key: 'area', label: '所属区域' },
+			{ key: 'status', label: '运行状态' },
+			{ key: 'remark', label: '备注' }
+		]
+	},
 	ui: ui as ProjectUiContent
 };

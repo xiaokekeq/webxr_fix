@@ -8,12 +8,15 @@ interface CreatePropertySelectionControllerOptions {
 
 export interface PropertySelectionResult {
 	businessName: string;
+	componentId: string;
 	properties: PipeRecord | null;
 }
 
 export interface PropertySelectionController {
 	clearSelection(): void;
 	isSelectedBusinessObject(businessObject: THREE.Object3D): boolean;
+	isSelectedComponent(componentId: string): boolean;
+	resolveComponentId(businessObject: THREE.Object3D, properties: PipeRecord | null): string;
 	resolveBusinessObject(
 		mesh: THREE.Object3D,
 		placedModel: THREE.Group | null,
@@ -32,14 +35,26 @@ export function createPropertySelectionController(
 
 	let selectedMeshes: THREE.Mesh[] = [];
 	let selectedOutlines: THREE.LineSegments[] = [];
-	let selectedBusinessObject: THREE.Object3D | null = null;
+	let selectedComponentId: string | null = null;
 	const shouldRenderSelectionOutline = options.shouldRenderSelectionOutline ?? ( () => false );
 
 	return {
 		clearSelection,
 		isSelectedBusinessObject(businessObject) {
 
-			return selectedBusinessObject === businessObject;
+			return selectedComponentId === resolveStableComponentId( businessObject, null );
+
+		},
+
+		isSelectedComponent(componentId) {
+
+			return selectedComponentId === componentId;
+
+		},
+
+		resolveComponentId(businessObject, properties) {
+
+			return resolveStableComponentId( businessObject, properties );
 
 		},
 
@@ -75,10 +90,11 @@ export function createPropertySelectionController(
 		selectBusinessObject(businessObject, properties, highlightObject) {
 
 			clearSelection();
-			selectedBusinessObject = businessObject;
+			const componentId = resolveStableComponentId( businessObject, properties );
+			selectedComponentId = componentId;
 			const highlightRoot = highlightObject ?? businessObject;
 			highlightRoot.traverse( ( child ) => {
-				if ( child instanceof THREE.Mesh ) {
+				if ( child instanceof THREE.Mesh && child.userData.__selectionProxy !== true ) {
 					selectedMeshes.push( child );
 					child.userData.__originalMaterial = child.material;
 
@@ -98,6 +114,7 @@ export function createPropertySelectionController(
 
 			return {
 				businessName: getBusinessName( businessObject ),
+				componentId,
 				properties
 			};
 
@@ -130,7 +147,7 @@ export function createPropertySelectionController(
 		}
 
 		selectedMeshes = [];
-		selectedBusinessObject = null;
+		selectedComponentId = null;
 
 	}
 
@@ -170,5 +187,50 @@ export function createPropertySelectionController(
 		return object.name || 'UnnamedObject';
 
 	}
+
+}
+
+export function resolveStableComponentId(
+	object: THREE.Object3D,
+	properties: PipeRecord | null
+): string {
+
+	let current: THREE.Object3D | null = object;
+	while ( current !== null ) {
+		const explicitId = readComponentId( current.userData.componentId )
+			?? readComponentId( current.userData.pipeId );
+		if ( explicitId !== null ) return explicitId;
+		current = current.parent;
+	}
+
+	const code = readComponentId( properties?.code );
+	if ( code !== null ) return code;
+
+	return `legacy:${normalizeBusinessName( getBusinessNameForComponent( object ) )}`;
+
+}
+
+function readComponentId(value: unknown): string | null {
+
+	if ( typeof value !== 'string' ) return null;
+	const normalized = value.trim();
+	return normalized.length > 0 ? normalized : null;
+
+}
+
+function normalizeBusinessName(value: string): string {
+
+	const normalized = value.trim().replace( /\s+/g, '-' ).toLowerCase();
+	return normalized.length > 0 ? normalized : 'unnamed-pipe';
+
+}
+
+function getBusinessNameForComponent(object: THREE.Object3D): string {
+
+	const userDataBusinessName = object.userData.__businessName;
+	if ( typeof userDataBusinessName === 'string' && userDataBusinessName.length > 0 ) {
+		return userDataBusinessName;
+	}
+	return object.name || 'UnnamedObject';
 
 }

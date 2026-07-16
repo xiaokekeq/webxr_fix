@@ -12,7 +12,7 @@ afterEach( () => vi.unstubAllGlobals() );
 describe( 'model catalog boundaries', () => {
 	it( 'keeps each catalog limited to its own default model', () => {
 		expect( damCatalog.map( ( item ) => ( item as { id: string } ).id ) ).toEqual( [ 'dz1207' ] );
-		expect( waterCatalog.map( ( item ) => ( item as { id: string } ).id ) ).toEqual( [ 'tongma-74-76-fbx' ] );
+		expect( waterCatalog.map( ( item ) => ( item as { id: string } ).id ) ).toEqual( [ 'waternetwork' ] );
 	} );
 
 	it( 'resolves model, config, material and property URLs below the active base', () => {
@@ -33,8 +33,8 @@ describe( 'model catalog boundaries', () => {
 		);
 		expect( item.modelUrl ).toBe( 'https://example.test/water-network/projects/water-network/models/SWGX.obj' );
 		expect( item.materialUrl ).toBe( 'https://example.test/water-network/projects/water-network/models/SWGX.mtl' );
-		expect( item.configUrl ).toBe( 'https://example.test/water-network/projects/water-network/configs/tongma-74-76.config.json' );
-		expect( item.pipesUrl ).toBe( 'https://example.test/water-network/projects/water-network/properties/tongma-74-76.pipes.json' );
+		expect( item.configUrl ).toBe( 'https://example.test/water-network/projects/water-network/configs/waternetwork.config.json' );
+		expect( item.pipesUrl ).toBe( 'https://example.test/water-network/projects/water-network/properties/waternetwork.pipes.json' );
 	} );
 
 	it( 'fails explicitly when a requested model is absent', async () => {

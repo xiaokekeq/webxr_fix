@@ -49,6 +49,7 @@ import {
 	type InspectionPlacementSource,
 	type RegistrationStore,
 	type RegistrationStoreState,
+	type SelectedComponentState,
 	type SectionCutPlaneMode,
 	type WorkspaceMode
 } from '@/localization/core/registration-store.js';
@@ -180,6 +181,7 @@ function createInitialState(projectName = '现场辅助核查'): RegistrationSto
 		modelLayers: [],
 		pipeList: [],
 		selectedAnnotationId: null,
+		selectedComponent: null,
 		propertyPanel: {
 			name: '未选择构件',
 			statusBadge: '未选中',
@@ -224,6 +226,8 @@ export function createInitialThreeEngineSnapshot(projectName?: string): ThreeEng
 function hasSelectedPipe(state: RegistrationStoreState): boolean {
 
 	return (
+		state.selectedComponent !== null
+		||
 		state.propertyPanel.name !== '未选择构件'
 		|| state.propertyPanel.type !== '-'
 		|| state.propertyPanel.diameter !== '-'
@@ -557,6 +561,20 @@ export class ThreeEngine {
 				this.emit();
 			},
 			onSelectionApplied: ( selection ) => {
+				if ( this.hasComponentPropertyHud() ) {
+					if ( selection.properties === null ) {
+						this.clearAnnotationDetail();
+						return;
+					}
+
+					this.showComponentPropertyHud(
+						selection.businessObject,
+						selection.componentId,
+						selection.properties
+					);
+					return;
+				}
+
 				if ( selection.properties === null ) {
 					this.clearAnnotationDetail();
 					return;
@@ -611,6 +629,7 @@ export class ThreeEngine {
 				this.modelRuntimeGeneration += 1;
 				const calibrationCancelled = this.markerCalibrationRuntime.cancelForModelRuntimeChange();
 				this.enclosureShell.dispose();
+				this.disposeComponentPicking( this.modelTemplate );
 				this.modelTemplate = null;
 				this.demoModelConfig = null;
 				this.registrationSolution = null;
@@ -632,6 +651,7 @@ export class ThreeEngine {
 					layerNames: STATIC_LAYER_NAMES,
 					modelLayers: [],
 					selectedAnnotationId: null,
+					selectedComponent: null,
 					annotationDetail: createDefaultAnnotationDetailState(),
 					siteCalibrationBaseline: createDefaultSiteCalibrationBaselineState(),
 					engineeringConfigStatus: createDefaultEngineeringConfigStatusState()
@@ -745,6 +765,9 @@ export class ThreeEngine {
 
 	private activateCoreModelRuntime(bundle: LoadedModelRuntimeBundle): void {
 
+		if ( this.hasComponentPropertyHud() ) {
+			this.prepareComponentPicking( bundle.modelTemplate, bundle.pipesByName );
+		}
 		this.pipesByName = bundle.pipesByName;
 		this.demoModelConfig = bundle.demoModelConfig;
 		this.modelTemplate = bundle.modelTemplate;
@@ -831,16 +854,11 @@ export class ThreeEngine {
 		this.materialStateRuntime.dispose();
 		this.sectionCutController?.dispose();
 		this.enclosureShell.dispose();
+		this.disposeComponentPicking( this.modelTemplate );
 		this.annotationLabelsController.dispose();
 		this.annotationLayer.dispose();
 		this.localizationDebugLayer.dispose();
 		this.sceneBundle.renderer.dispose();
-
-	}
-
-	handleArUiInteraction(): void {
-
-		this.pointerSelection.cancelPendingSelection( 1400 );
 
 	}
 
@@ -2172,6 +2190,111 @@ export class ThreeEngine {
 
 	}
 
+	private hasComponentPropertyHud(): boolean {
+
+		return this.projectConfig.componentPropertyHud !== undefined;
+
+	}
+
+	private showComponentPropertyHud(
+		businessObject: THREE.Object3D,
+		componentId: string,
+		properties: PipeRecord
+	): void {
+
+		const selectedComponent: SelectedComponentState = {
+			componentId,
+			displayName: resolveComponentDisplayName( businessObject, properties ),
+			properties: { ...properties }
+		};
+
+		this.store.patch( {
+			selectedAnnotationId: null,
+			selectedComponent,
+			annotationDetail: createDefaultAnnotationDetailState()
+		} );
+		this.annotationLayer.setSelected( null );
+		this.annotationLabelsController.setDetail( null );
+
+	}
+
+	private prepareComponentPicking(
+		modelTemplate: THREE.Group,
+		pipesByName: Map<string, PipeRecord>
+	): void {
+
+		modelTemplate.updateMatrixWorld( true );
+		modelTemplate.traverse( ( object ) => {
+			const businessName = getBusinessNameFromObject( object );
+			const properties = pipesByName.get( businessName );
+			if ( properties === undefined ) return;
+
+			const componentId = getPipeComponentId( properties, businessName );
+			object.userData.componentId = componentId;
+			object.userData.pipeId = componentId;
+			this.addComponentPickProxy( object, componentId );
+		} );
+
+	}
+
+	private addComponentPickProxy(root: THREE.Object3D, componentId: string): void {
+
+		if ( root.userData.__componentPickProxyPrepared === true ) return;
+
+		const bounds = new THREE.Box3().setFromObject( root );
+		if ( bounds.isEmpty() ) return;
+
+		const size = bounds.getSize( new THREE.Vector3() );
+		const maxAxis = Math.max( size.x, size.y, size.z );
+		if ( Number.isFinite( maxAxis ) === false || maxAxis <= 0 ) return;
+
+		const minimumHitWidth = 0.28;
+		const proxy = new THREE.Mesh(
+			new THREE.BoxGeometry(
+				Math.max( size.x, minimumHitWidth ),
+				Math.max( size.y, minimumHitWidth ),
+				Math.max( size.z, minimumHitWidth )
+			),
+			new THREE.MeshBasicMaterial( {
+				transparent: true,
+				opacity: 0,
+				depthWrite: false,
+				colorWrite: false
+			} )
+		);
+		proxy.name = '__pipe-pick-proxy';
+		proxy.userData = {
+			componentId,
+			pipeId: componentId,
+			__selectionProxy: true
+		};
+		proxy.position.copy( root.worldToLocal( bounds.getCenter( new THREE.Vector3() ) ) );
+		root.add( proxy );
+		root.userData.__componentPickProxyPrepared = true;
+
+	}
+
+	private disposeComponentPicking(modelTemplate: THREE.Group | null): void {
+
+		if ( modelTemplate === null ) return;
+		const proxies: THREE.Mesh[] = [];
+		modelTemplate.traverse( ( object ) => {
+			if ( object instanceof THREE.Mesh && object.userData.__selectionProxy === true ) {
+				proxies.push( object );
+			}
+		} );
+		for ( const proxy of proxies ) {
+			proxy.removeFromParent();
+			proxy.geometry.dispose();
+			if ( Array.isArray( proxy.material ) ) {
+				proxy.material.forEach( ( material ) => material.dispose() );
+			} else {
+				proxy.material.dispose();
+			}
+		}
+
+	}
+
 	private showCanvasModelPropertyPanel(
 		businessObject: THREE.Object3D,
 		properties: PipeRecord | null,
@@ -2195,6 +2318,7 @@ export class ThreeEngine {
 
 		this.store.patch( {
 			selectedAnnotationId: null,
+			selectedComponent: null,
 			annotationDetail: createDefaultAnnotationDetailState()
 		} );
 		this.annotationLayer.setSelected( null );
@@ -2239,6 +2363,7 @@ export class ThreeEngine {
 			preferredLayerName
 		);
 		this.store.patch( {
+			selectedComponent: null,
 			annotationDetail: detailState
 		} );
 		this.annotationLabelsController.setDetail(
@@ -2249,13 +2374,18 @@ export class ThreeEngine {
 
 	private clearAnnotationDetail(): void {
 
-		const current = this.store.getState().annotationDetail;
-		if ( current.visible === false && current.fields.length === 0 ) {
+		const current = this.store.getState();
+		if (
+			current.annotationDetail.visible === false
+			&& current.annotationDetail.fields.length === 0
+			&& current.selectedComponent === null
+		) {
 			return;
 		}
 
 		this.store.patch( {
 			selectedAnnotationId: null,
+			selectedComponent: null,
 			annotationDetail: createDefaultAnnotationDetailState()
 		} );
 		this.annotationLabelsController.setDetail( null );
@@ -2483,6 +2613,7 @@ export class ThreeEngine {
 		this.annotationLayer.setSelected( annotation.id );
 		this.store.patch( {
 			selectedAnnotationId: annotation.id,
+			selectedComponent: null,
 			annotationDetail: this.createEngineeringAnnotationDetailState( annotation )
 		} );
 		this.annotationLabelsController.setDetail( null );
@@ -2586,6 +2717,77 @@ function getBusinessNameFromObject(object: THREE.Object3D | null): string {
 	}
 
 	return object.name || '';
+
+}
+
+function getPipeComponentId(properties: PipeRecord, businessName: string): string {
+
+	const code = readNonEmptyString( properties.code );
+	if ( code !== null ) return code;
+	return `legacy:${normalizeComponentName( businessName )}`;
+
+}
+
+function resolveComponentDisplayName(
+	object: THREE.Object3D,
+	properties: PipeRecord
+): string {
+
+	const extendedProperties = properties as PipeRecord & {
+		displayName?: unknown;
+		shortName?: unknown;
+	};
+	return readNonEmptyString( extendedProperties.displayName )
+		?? readObjectUserDataText( object, 'displayName' )
+		?? readNonEmptyString( extendedProperties.shortName )
+		?? readObjectUserDataText( object, 'shortName' )
+		?? readNonEmptyString( properties.code )
+		?? cleanComponentObjectName( object )
+		?? '未命名管线';
+
+}
+
+function readObjectUserDataText(object: THREE.Object3D, key: string): string | null {
+
+	let current: THREE.Object3D | null = object;
+	while ( current !== null ) {
+		const value = readNonEmptyString( current.userData[ key ] );
+		if ( value !== null ) return value;
+		current = current.parent;
+	}
+	return null;
+
+}
+
+function cleanComponentObjectName(object: THREE.Object3D): string | null {
+
+	const businessName = getBusinessNameFromObject( object ).trim();
+	if ( businessName.length > 0 && businessName.startsWith( '__' ) === false ) {
+		return businessName;
+	}
+
+	let current: THREE.Object3D | null = object;
+	while ( current !== null ) {
+		const name = current.name.trim();
+		if ( name.length > 0 && name.startsWith( '__' ) === false ) return name;
+		current = current.parent;
+	}
+	return null;
+
+}
+
+function readNonEmptyString(value: unknown): string | null {
+
+	if ( typeof value !== 'string' ) return null;
+	const text = value.trim();
+	return text.length > 0 ? text : null;
+
+}
+
+function normalizeComponentName(value: string): string {
+
+	const normalized = value.trim().replace( /\s+/g, '-' ).toLowerCase();
+	return normalized.length > 0 ? normalized : 'unnamed-pipe';
 
 }
 

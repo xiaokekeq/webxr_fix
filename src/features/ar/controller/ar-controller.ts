@@ -28,7 +28,6 @@ export interface LoadModelArController {
 	getEngineState(): ThreeEngineSnapshot;
 	subscribe(listener: () => void): () => void;
 	actions: {
-		handleArUiInteraction(): void;
 		closePropertyPanel(): void;
 		selectModel(modelId: string): void;
 		setDisplayMode(mode: LegacyArDisplayMode): void;
@@ -120,12 +119,6 @@ export function createLoadModelArController(
 		},
 
 		actions: {
-			handleArUiInteraction() {
-
-				engine.handleArUiInteraction();
-
-			},
-
 			closePropertyPanel() {
 
 				engine.closePropertyPanel();

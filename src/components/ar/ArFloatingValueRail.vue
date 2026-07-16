@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 
 const props = withDefaults( defineProps<{ modelValue: number; min?: number; max?: number; step?: number; ariaLabel: string }>(), { min: 0, max: 100, step: 1 } );
-const emit = defineEmits<{ 'update:modelValue': [value: number]; 'change-start': []; 'change-end': [] }>();
+	const emit = defineEmits<{ 'update:modelValue': [value: number]; 'change-end': [] }>();
 const railRef = ref<HTMLElement | null>( null );
 const trackRef = ref<HTMLElement | null>( null );
 const activePointerId = ref<number | null>( null );
@@ -31,7 +31,6 @@ function onPointerDown(event: PointerEvent): void {
 	railRef.value!.setPointerCapture( event.pointerId );
 	activePointerId.value = event.pointerId;
 	trackRect = trackRef.value!.getBoundingClientRect();
-	emit( 'change-start' );
 	update( event );
 }
 
@@ -69,6 +68,7 @@ function onKeydown(event: KeyboardEvent): void {
 	<div
 		ref="railRef"
 		class="floating-value-rail"
+		data-ar-ui="true"
 		role="slider"
 		tabindex="0"
 		:aria-label="ariaLabel"

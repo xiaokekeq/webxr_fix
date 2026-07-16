@@ -240,12 +240,6 @@ export const useArShellStore = defineStore( 'ar-shell', () => {
 	}
 
 	const actions = {
-		handleArUiInteraction(): void {
-
-			ensureController().actions.handleArUiInteraction();
-
-		},
-
 		closePropertyPanel(): void {
 
 			ensureController().actions.closePropertyPanel();
