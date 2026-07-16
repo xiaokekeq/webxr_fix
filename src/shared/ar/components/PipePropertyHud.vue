@@ -78,7 +78,7 @@ const rows = computed( () => (
 	overflow: hidden;
 	border: 1px solid rgba(148, 163, 184, 0.28);
 	border-radius: 18px;
-	background: rgba(6, 16, 29, 0.82);
+	background: rgba(21, 61, 113, 0.48);
 	box-shadow: 0 20px 52px rgba(0, 0, 0, 0.34);
 	backdrop-filter: blur(22px);
 	color: #eff6ff;
