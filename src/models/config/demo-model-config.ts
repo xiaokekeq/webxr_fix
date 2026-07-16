@@ -513,7 +513,9 @@ function normalizeEngineeringAnnotation(
 		: undefined;
 	const leaderHeightMeters = normalizePositiveNumber( raw.leaderHeightMeters, 0.9 );
 	const interactionDistanceMeters = normalizePositiveNumber( raw.interactionDistanceMeters, 5 );
-	const maxMarkerDistanceMeters = normalizePositiveNumber( raw.maxMarkerDistanceMeters, 3 );
+	const maxMarkerDistanceMeters = raw.maxMarkerDistanceMeters === undefined
+		? undefined
+		: normalizePositiveNumber( raw.maxMarkerDistanceMeters, 3 );
 	const severity = normalizeAnnotationSeverity( raw.severity );
 	const type = normalizeAnnotationType( raw.type );
 	const label = normalizeAnnotationLabel( raw.label );

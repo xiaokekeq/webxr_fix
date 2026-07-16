@@ -113,7 +113,6 @@
       },
       "leaderHeightMeters": 0.9,
       "interactionDistanceMeters": 5,
-      "maxMarkerDistanceMeters": 4.2,
       "severity": "danger",
       "status": "待核查",
       "source": "inspection",
@@ -138,7 +137,6 @@
       },
       "leaderHeightMeters": 1.05,
       "interactionDistanceMeters": 5,
-      "maxMarkerDistanceMeters": 4.2,
       "severity": "warning",
       "status": "待核查",
       "source": "inspection",
@@ -163,13 +161,39 @@
       },
       "leaderHeightMeters": 1.2,
       "interactionDistanceMeters": 5,
-      "maxMarkerDistanceMeters": 4.2,
       "severity": "normal",
       "status": "待核查",
       "source": "inspection",
       "properties": {
         "异常编号": "ANOM-003",
         "管线编号": "WN-74-76-002",
+        "锚定方式": "模型局部坐标"
+      },
+      "visible": true,
+      "layerId": "water-anomalies"
+    },
+    {
+      "id": "ANOM-004",
+      "type": "risk",
+      "title": "主管高风险泄漏点",
+      "description": "蓝色主管疑似泄漏的演示危险数据，位于 Marker 3 米范围以外。",
+      "markerId": "marker-warning-707",
+      "pipeId": "WN-74-76-001",
+      "placement": {
+        "mode": "model-local",
+        "modelLocalPosition": { "x": -14, "y": -72.0008, "z": -1.1066 }
+      },
+      "leaderHeightMeters": 1,
+      "severity": "danger",
+      "status": "危险-待处置",
+      "source": "risk",
+      "properties": {
+        "异常编号": "ANOM-004",
+        "管线编号": "WN-74-76-001",
+        "风险等级": "危险",
+        "异常类型": "疑似泄漏",
+        "现场表现": "压力异常并伴随渗漏",
+        "处置建议": "立即隔离管段并安排抢修",
         "锚定方式": "模型局部坐标"
       },
       "visible": true,

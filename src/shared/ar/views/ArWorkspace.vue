@@ -584,6 +584,7 @@ function setArOverlayClass(active: boolean): void {
 		<PipePropertyHud
 			v-if="hasArSession && projectConfig.componentPropertyHud !== undefined"
 			:selected-component="engine.selectedComponent"
+			:annotation-detail="engine.annotationDetail"
 			:fields="projectConfig.componentPropertyHud.fields"
 			@close="store.actions.closePropertyPanel()"
 		/>

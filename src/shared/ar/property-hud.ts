@@ -1,5 +1,5 @@
 import type { ComponentPropertyHudField } from '@/shared/config/project-config.js';
-import type { SelectedComponentState } from '@/localization/core/registration-store.js';
+import type { AnnotationDetailState, SelectedComponentState } from '@/localization/core/registration-store.js';
 
 export interface ComponentPropertyHudRow {
 	key: string;
@@ -16,6 +16,18 @@ export function createComponentPropertyHudRows(
 		key: field.key,
 		label: field.label,
 		value: formatComponentPropertyValue( selectedComponent.properties[ field.key ], field.unit )
+	} ) );
+
+}
+
+export function createAnnotationDetailHudRows(
+	annotationDetail: AnnotationDetailState
+): ComponentPropertyHudRow[] {
+
+	return annotationDetail.fields.map( ( field, index ) => ( {
+		key: `${field.label}-${index}`,
+		label: field.label,
+		value: field.value
 	} ) );
 
 }

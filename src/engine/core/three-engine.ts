@@ -2154,8 +2154,8 @@ export class ThreeEngine {
 				.add( registrationSolution.modelPivotOffset )
 				.multiplyScalar( registrationSolution.modelUnitScale );
 			const distanceMeters = anchor.distanceTo( markerCenter );
-			const maxDistanceMeters = annotation.maxMarkerDistanceMeters ?? 3;
-			if ( distanceMeters > maxDistanceMeters ) {
+			const maxDistanceMeters = annotation.maxMarkerDistanceMeters;
+			if ( maxDistanceMeters !== undefined && distanceMeters > maxDistanceMeters ) {
 				arWarn( 'AnomalyConfigValidationWarning', {
 					code: 'anomaly-too-far-from-marker',
 					anomalyId: annotation.id,

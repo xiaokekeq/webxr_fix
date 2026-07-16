@@ -55,7 +55,7 @@ describe( 'RTK control-point normalization', () => {
 
 	} );
 
-	it( 'anchors water anomalies to configured pipe vertices near the Marker', () => {
+	it( 'keeps water anomalies associated with configured pipes without a default Marker distance limit', () => {
 
 		const config = normalizeDemoModelConfig( JSON.parse( waterNetworkConfigText ) );
 		const marker = config.markers.find( ( item ) => item.id === 'marker-warning-707' );
@@ -76,19 +76,32 @@ describe( 'RTK control-point normalization', () => {
 		);
 		const anomalies = config.annotations.filter( ( annotation ) => annotation.placement?.mode === 'model-local' );
 
-		expect( anomalies ).toHaveLength( 3 );
+		expect( anomalies ).toHaveLength( 4 );
 		for ( const anomaly of anomalies ) {
-			const placement = anomaly.placement!;
-			const position = new THREE.Vector3(
-				placement.modelLocalPosition.x,
-				placement.modelLocalPosition.y,
-				placement.modelLocalPosition.z
-			);
 			expect( anomaly.markerId ).toBe( marker!.id );
 			expect( pipes.pipes.some( ( pipe ) => pipe.code === anomaly.pipeId ) ).toBe( true );
-			expect( position.distanceTo( markerCenterModelLocal ) ).toBeLessThanOrEqual( anomaly.maxMarkerDistanceMeters! );
-			expect( containsModelVertex( waterNetworkObjText, placement.modelLocalPosition, pipeObjectNames[ anomaly.pipeId! ] ) ).toBe( true );
+			expect( anomaly.maxMarkerDistanceMeters ).toBeUndefined();
+			if ( anomaly.id !== 'ANOM-004' ) {
+				expect( containsModelVertex(
+					waterNetworkObjText,
+					anomaly.placement!.modelLocalPosition,
+					pipeObjectNames[ anomaly.pipeId! ]
+				) ).toBe( true );
+			}
 		}
+		const danger = anomalies.find( ( anomaly ) => anomaly.id === 'ANOM-004' )!;
+		const dangerPosition = new THREE.Vector3(
+			danger.placement!.modelLocalPosition.x,
+			danger.placement!.modelLocalPosition.y,
+			danger.placement!.modelLocalPosition.z
+		);
+		expect( danger.severity ).toBe( 'danger' );
+		expect( dangerPosition.distanceTo( markerCenterModelLocal ) ).toBeGreaterThan( 3 );
+		const pipeStart = new THREE.Vector3( -20.5393, -72.0008, -1.0904 );
+		const pipeEnd = new THREE.Vector3( 146.0392, -72.0008, -1.5025 );
+		expect( dangerPosition.distanceTo(
+			pipeStart.clone().lerp( pipeEnd, ( dangerPosition.x - pipeStart.x ) / ( pipeEnd.x - pipeStart.x ) )
+		) ).toBeLessThan( 0.0001 );
 
 		for ( let index = 0; index < anomalies.length; index += 1 ) {
 			for ( let otherIndex = index + 1; otherIndex < anomalies.length; otherIndex += 1 ) {
@@ -98,7 +111,7 @@ describe( 'RTK control-point normalization', () => {
 			}
 		}
 
-	} );
+} );
 
 } );
 

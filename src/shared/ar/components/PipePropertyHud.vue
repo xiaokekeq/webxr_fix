@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { SelectedComponentState } from '@/localization/core/registration-store.js';
+import type { AnnotationDetailState, SelectedComponentState } from '@/localization/core/registration-store.js';
 import type { ComponentPropertyHudField } from '@/shared/config/project-config.js';
-import { createComponentPropertyHudRows } from '@/shared/ar/property-hud.js';
+import { createAnnotationDetailHudRows, createComponentPropertyHudRows } from '@/shared/ar/property-hud.js';
 
 const props = defineProps<{
 	selectedComponent: SelectedComponentState | null;
+	annotationDetail: AnnotationDetailState;
 	fields: ComponentPropertyHudField[];
 }>();
 
@@ -13,28 +14,38 @@ const emit = defineEmits<{
 	close: [];
 }>();
 
-const rows = computed( () => (
-	props.selectedComponent === null
+const showsAnnotation = computed( () => props.annotationDetail.visible );
+const panelTitle = computed( () => showsAnnotation.value
+	? props.annotationDetail.title
+	: props.selectedComponent?.displayName ?? ''
+);
+const panelSubtitle = computed( () => showsAnnotation.value
+	? props.annotationDetail.subtitle
+	: '构件信息'
+);
+const rows = computed( () => showsAnnotation.value
+	? createAnnotationDetailHudRows( props.annotationDetail )
+	: props.selectedComponent === null
 		? []
 		: createComponentPropertyHudRows( props.selectedComponent, props.fields )
-) );
+);
 </script>
 
 <template>
-	<div v-if="selectedComponent !== null" class="pipe-property-hud" aria-live="polite">
+	<div v-if="selectedComponent !== null || annotationDetail.visible" class="pipe-property-hud" aria-live="polite">
 		<section
 			class="pipe-property-card"
 			data-ar-ui="true"
 			role="dialog"
 			aria-modal="false"
-			aria-label="水管构件信息"
+			:aria-label="`${panelTitle}详情`"
 			@pointerdown.stop
 			@click.stop
 		>
 			<header class="pipe-property-header">
 				<div class="pipe-property-heading">
-					<div class="pipe-property-eyebrow">构件信息</div>
-					<h2 :title="selectedComponent.displayName">{{ selectedComponent.displayName }}</h2>
+					<div class="pipe-property-eyebrow">{{ panelSubtitle }}</div>
+					<h2 :title="panelTitle">{{ panelTitle }}</h2>
 				</div>
 				<button
 					type="button"
@@ -78,7 +89,7 @@ const rows = computed( () => (
 	overflow: hidden;
 	border: 1px solid rgba(148, 163, 184, 0.28);
 	border-radius: 18px;
-	background: rgba(21, 61, 113, 0.48);
+	background: rgba(21, 61, 113, 0.245);
 	box-shadow: 0 20px 52px rgba(0, 0, 0, 0.34);
 	backdrop-filter: blur(22px);
 	color: #eff6ff;
