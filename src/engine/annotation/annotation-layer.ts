@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ArCoordinateService } from '@/engine/coordinates/ar-coordinate-service.js';
+import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import {
 	resolveAnnotationStyle,
 	type AnnotationStyleRule,
@@ -29,6 +30,9 @@ export class AnnotationLayer {
 	private styleRules: AnnotationStyleRule[] = [];
 	private entries: AnnotationEntry[] = [];
 	private selectedAnnotationId: string | null = null;
+	private coordinates: ArCoordinateService | null = null;
+	private placedModel: THREE.Group | null = null;
+	private registrationSolution: EngineeringRegistrationSolution | null = null;
 
 	constructor() {
 
@@ -48,26 +52,27 @@ export class AnnotationLayer {
 
 	updateFromCalibration(coordinates: ArCoordinateService): void {
 
+		this.coordinates = coordinates;
+		this.rebuild();
+
+	}
+
+	updateFromModelPlacement(
+		placedModel: THREE.Group | null,
+		registrationSolution: EngineeringRegistrationSolution | null
+	): void {
+
+		this.placedModel = placedModel;
+		this.registrationSolution = registrationSolution;
+		this.rebuild();
+
+	}
+
+	clearModelPlacement(): void {
+
+		this.placedModel = null;
+		this.registrationSolution = null;
 		this.clear();
-		if ( coordinates.hasCalibration() === false ) {
-			return;
-		}
-
-		for ( const annotation of this.annotations ) {
-			if ( annotation.visible === false ) {
-				continue;
-			}
-
-			const anchorAr = coordinates.enuToAr( annotation.anchorEnu, tempAnchorAr );
-			const labelAr = coordinates.enuToAr( resolveLabelEnu( annotation ), tempLabelAr );
-			if ( anchorAr === null || labelAr === null ) {
-				continue;
-			}
-
-			this.entries.push( this.createEntry( annotation, anchorAr.clone(), labelAr.clone() ) );
-		}
-
-
 	}
 
 	clear(): void {
@@ -125,6 +130,55 @@ export class AnnotationLayer {
 
 	}
 
+	private rebuild(): void {
+
+		this.clear();
+		for ( const annotation of this.annotations ) {
+			if ( annotation.visible === false ) {
+				continue;
+			}
+
+			const positions = annotation.placement === undefined
+				? this.resolveEnuPositions( annotation )
+				: this.resolveModelLocalPositions( annotation );
+			if ( positions === null ) {
+				continue;
+			}
+
+			this.entries.push( this.createEntry( annotation, positions.anchor, positions.label ) );
+		}
+
+	}
+
+	private resolveEnuPositions(annotation: EngineeringAnnotation): { anchor: THREE.Vector3; label: THREE.Vector3 } | null {
+
+		if ( this.coordinates === null || this.coordinates.hasCalibration() === false || annotation.anchorEnu === undefined ) {
+			return null;
+		}
+		const anchor = this.coordinates.enuToAr( annotation.anchorEnu, tempAnchorAr );
+		const label = this.coordinates.enuToAr( resolveLabelEnu( annotation ), tempLabelAr );
+		return anchor === null || label === null
+			? null
+			: { anchor: anchor.clone(), label: label.clone() };
+
+	}
+
+	private resolveModelLocalPositions(annotation: EngineeringAnnotation): { anchor: THREE.Vector3; label: THREE.Vector3 } | null {
+
+		if ( this.placedModel === null || this.registrationSolution === null || annotation.placement === undefined ) {
+			return null;
+		}
+		const { modelLocalPosition } = annotation.placement;
+		const anchor = new THREE.Vector3( modelLocalPosition.x, modelLocalPosition.y, modelLocalPosition.z )
+			.add( this.registrationSolution.modelPivotOffset )
+			.multiplyScalar( this.registrationSolution.modelUnitScale );
+		this.placedModel.localToWorld( anchor );
+		const label = anchor.clone();
+		label.y += annotation.leaderHeightMeters ?? 0.9;
+		return { anchor, label };
+
+	}
+
 	private createEntry(
 		annotation: EngineeringAnnotation,
 		anchorAr: THREE.Vector3,
@@ -174,6 +228,10 @@ export class AnnotationLayer {
 }
 
 function resolveLabelEnu(annotation: EngineeringAnnotation): EnuPoint {
+
+	if ( annotation.anchorEnu === undefined ) {
+		return { east: 0, north: 0, up: 0 };
+	}
 
 	if ( annotation.label?.mode === 'absolute' && annotation.label.labelEnu !== undefined ) {
 		return annotation.label.labelEnu;

@@ -12,7 +12,8 @@ import type {
 	AnnotationStyleRule,
 	AnnotationType,
 	EngineeringAnnotation,
-	EnuPoint
+	EnuPoint,
+	ModelLocalAnnotationPlacement
 } from '@/engine/annotation/annotation-types.js';
 import { arError, arWarn } from '@/engine/debug/ar-logger.js';
 
@@ -382,7 +383,7 @@ export function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelC
 
 	const markers = loadMarkerEngineeringConfigs( config.markers );
 	const controlTargets = normalizeSiteConfigControlTargets( config.controlTargets, markers, config.modelId );
-	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints );
+	const annotations = normalizeEngineeringAnnotations( config.annotations, normalizedControlPoints, markers );
 
 	return {
 		modelId: config.modelId,
@@ -424,7 +425,8 @@ export function normalizeDemoModelConfig(config: RawDemoModelConfig): DemoModelC
 
 function normalizeEngineeringAnnotations(
 	rawAnnotations: unknown[] | undefined,
-	controlPoints: Record<string, DemoModelControlPointCorrespondence>
+	controlPoints: Record<string, DemoModelControlPointCorrespondence>,
+	markers: MarkerEngineeringConfig[]
 ): EngineeringAnnotation[] {
 
 	if ( Array.isArray( rawAnnotations ) === false ) {
@@ -435,6 +437,7 @@ function normalizeEngineeringAnnotations(
 	const skippedIds: string[] = [];
 	const seenIds = new Set<string>();
 	const controlPointIds = new Set( Object.keys( controlPoints ) );
+	const markerIds = new Set( markers.map( ( marker ) => marker.id ) );
 
 	for ( const [ index, raw ] of rawAnnotations.entries() ) {
 		const rawRecord = isRecord( raw ) ? raw : null;
@@ -444,6 +447,17 @@ function normalizeEngineeringAnnotations(
 		const normalized = normalizeEngineeringAnnotation( rawRecord, index );
 		if ( normalized === null ) {
 			skippedIds.push( fallbackSkippedId );
+			continue;
+		}
+
+		if ( normalized.placement !== undefined && ( normalized.markerId === undefined || markerIds.has( normalized.markerId ) === false ) ) {
+			arWarn( 'AnnotationConfigValidationWarning', {
+				id: normalized.id,
+				index,
+				code: 'anomaly-marker-not-found',
+				markerId: normalized.markerId ?? null
+			} );
+			skippedIds.push( normalized.id );
 			continue;
 		}
 
@@ -490,6 +504,16 @@ function normalizeEngineeringAnnotation(
 	const id = typeof raw.id === 'string' ? raw.id.trim() : '';
 	const title = typeof raw.title === 'string' ? raw.title.trim() : '';
 	const anchorEnu = normalizeAnnotationEnuPoint( raw.anchorEnu );
+	const placement = normalizeModelLocalAnnotationPlacement( raw.placement );
+	const markerId = typeof raw.markerId === 'string' && raw.markerId.trim().length > 0
+		? raw.markerId.trim()
+		: undefined;
+	const pipeId = typeof raw.pipeId === 'string' && raw.pipeId.trim().length > 0
+		? raw.pipeId.trim()
+		: undefined;
+	const leaderHeightMeters = normalizePositiveNumber( raw.leaderHeightMeters, 0.9 );
+	const interactionDistanceMeters = normalizePositiveNumber( raw.interactionDistanceMeters, 5 );
+	const maxMarkerDistanceMeters = normalizePositiveNumber( raw.maxMarkerDistanceMeters, 3 );
 	const severity = normalizeAnnotationSeverity( raw.severity );
 	const type = normalizeAnnotationType( raw.type );
 	const label = normalizeAnnotationLabel( raw.label );
@@ -498,16 +522,29 @@ function normalizeEngineeringAnnotation(
 		? 'missing id'
 		: title.length === 0
 			? 'missing title'
-			: anchorEnu === null
-				? 'anchorEnu east/north/up must be numbers'
-				: severity === null
+		: placement === null
+			? 'placement.modelLocalPosition x/y/z must be finite numbers'
+			: placement === undefined && anchorEnu === null
+			? 'anchorEnu east/north/up must be numbers'
+			: placement !== undefined && markerId === undefined
+				? 'model-local annotation requires markerId'
+				: placement !== undefined && pipeId === undefined
+					? 'model-local annotation requires pipeId'
+			: severity === null
 					? 'severity must be normal/warning/danger'
 					: type === null
 						? 'type is invalid'
 						: label === null && raw.label !== undefined
 							? 'label config is invalid'
 							: '';
-	if ( reason.length > 0 || anchorEnu === null || severity === null || type === null || ( label === null && raw.label !== undefined ) ) {
+	if (
+		reason.length > 0
+		|| placement === null
+		|| ( placement === undefined && anchorEnu === null )
+		|| severity === null
+		|| type === null
+		|| ( label === null && raw.label !== undefined )
+	) {
 		arWarn( 'AnnotationConfigValidationWarning', {
 			id: id || null,
 			index,
@@ -521,7 +558,13 @@ function normalizeEngineeringAnnotation(
 		type,
 		title,
 		description: typeof raw.description === 'string' ? raw.description : undefined,
-		anchorEnu,
+		anchorEnu: placement === undefined && anchorEnu !== null ? anchorEnu : undefined,
+		markerId,
+		pipeId,
+		placement: placement ?? undefined,
+		leaderHeightMeters: placement === undefined ? undefined : leaderHeightMeters,
+		interactionDistanceMeters: placement === undefined ? undefined : interactionDistanceMeters,
+		maxMarkerDistanceMeters: placement === undefined ? undefined : maxMarkerDistanceMeters,
 		label: label ?? undefined,
 		severity,
 		status: typeof raw.status === 'string' ? raw.status : undefined,
@@ -534,6 +577,37 @@ function normalizeEngineeringAnnotation(
 			? raw.layerId.trim()
 			: 'annotations'
 	};
+
+}
+
+function normalizeModelLocalAnnotationPlacement(value: unknown): ModelLocalAnnotationPlacement | null | undefined {
+
+	if ( value === undefined ) {
+		return undefined;
+	}
+	if ( isRecord( value ) === false || value.mode !== 'model-local' || isRecord( value.modelLocalPosition ) === false ) {
+		return null;
+	}
+	const { x, y, z } = value.modelLocalPosition;
+	if (
+		typeof x !== 'number' || Number.isFinite( x ) === false
+		|| typeof y !== 'number' || Number.isFinite( y ) === false
+		|| typeof z !== 'number' || Number.isFinite( z ) === false
+	) {
+		return null;
+	}
+	return {
+		mode: 'model-local',
+		modelLocalPosition: { x, y, z }
+	};
+
+}
+
+function normalizePositiveNumber(value: unknown, fallback: number): number {
+
+	return typeof value === 'number' && Number.isFinite( value ) && value > 0
+		? value
+		: fallback;
 
 }
 

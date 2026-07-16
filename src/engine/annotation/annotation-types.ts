@@ -20,12 +20,27 @@ export interface EngineeringAnnotationLabel {
 	labelEnu?: EnuPoint;
 }
 
+export interface ModelLocalAnnotationPlacement {
+	mode: 'model-local';
+	modelLocalPosition: {
+		x: number;
+		y: number;
+		z: number;
+	};
+}
+
 export interface EngineeringAnnotation {
 	id: string;
 	type: AnnotationType;
 	title: string;
 	description?: string;
-	anchorEnu: EnuPoint;
+	anchorEnu?: EnuPoint;
+	markerId?: string;
+	pipeId?: string;
+	placement?: ModelLocalAnnotationPlacement;
+	leaderHeightMeters?: number;
+	interactionDistanceMeters?: number;
+	maxMarkerDistanceMeters?: number;
 	label?: EngineeringAnnotationLabel;
 	severity: AnnotationSeverity;
 	status?: string;

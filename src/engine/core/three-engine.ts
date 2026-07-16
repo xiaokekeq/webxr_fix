@@ -54,6 +54,7 @@ import {
 	type WorkspaceMode
 } from '@/localization/core/registration-store.js';
 import {
+	transformSiteEnuToModelLocal,
 	type EngineeringControlPoint,
 	type EngineeringRegistrationSolution
 } from '@/localization/coarse/engineering-registration.js';
@@ -621,6 +622,7 @@ export class ThreeEngine {
 			},
 			resetPlacement: () => {
 				this.placementSession.resetPlacement();
+				this.annotationLayer.clearModelPlacement();
 				this.syncArSessionPhase();
 				this.emit();
 			},
@@ -775,7 +777,7 @@ export class ThreeEngine {
 		this.enclosureShell.prepareModel( bundle.modelTemplate, bundle.demoModelConfig.enclosureShell );
 		this.resolvedMarkerPosesInEnu = this.resolveConfiguredMarkerPoses( bundle.demoModelConfig );
 		this.annotationLayer.setAnnotations(
-			bundle.demoModelConfig.annotations,
+			this.validateModelLocalAnnotations( bundle.demoModelConfig.annotations, bundle.demoModelConfig, bundle.registrationSolution ),
 			bundle.demoModelConfig.annotationStyleRules
 		);
 		this.rebuildModelLayers();
@@ -1992,6 +1994,7 @@ export class ThreeEngine {
 
 		this.correctPlacedModelUpAxis();
 		this.updateModelControlPointPlacementStatus( arFromEnuSolution );
+		this.refreshModelLocalAnnotations();
 		return { ok: true, placedModelUuid: this.placementSession.getArPlacedModel()?.uuid ?? '' };
 
 	}
@@ -2101,6 +2104,111 @@ export class ThreeEngine {
 	private handlePlacementCompleted(): void {
 
 		this.sessionLifecycleRuntime.handlePlacementCompleted();
+		this.refreshModelLocalAnnotations();
+
+	}
+
+	private refreshModelLocalAnnotations(): void {
+
+		this.annotationLayer.updateFromModelPlacement(
+			this.placementSession.getPlacedModel(),
+			this.registrationSolution
+		);
+
+	}
+
+	private validateModelLocalAnnotations(
+		annotations: EngineeringAnnotation[],
+		config: DemoModelConfig,
+		registrationSolution: EngineeringRegistrationSolution
+	): EngineeringAnnotation[] {
+
+		const accepted: EngineeringAnnotation[] = [];
+		const acceptedAnchorsByMarker = new Map<string, THREE.Vector3[]>();
+		for ( const annotation of annotations ) {
+			if ( annotation.placement === undefined ) {
+				accepted.push( annotation );
+				continue;
+			}
+
+			const markerCenter = this.resolveAnnotationMarkerCenterModelLocal(
+				config,
+				annotation.markerId,
+				registrationSolution
+			);
+			const pipeExists = [ ...this.pipesByName.values() ].some(
+				( pipe ) => pipe.code === annotation.pipeId || pipe.name === annotation.pipeId
+			);
+			if ( markerCenter === null || pipeExists === false ) {
+				arWarn( 'AnomalyConfigValidationWarning', {
+					code: markerCenter === null ? 'anomaly-marker-not-found' : 'anomaly-pipe-not-found',
+					anomalyId: annotation.id,
+					markerId: annotation.markerId ?? null,
+					pipeId: annotation.pipeId ?? null
+				} );
+				continue;
+			}
+
+			const { modelLocalPosition } = annotation.placement;
+			const anchor = new THREE.Vector3( modelLocalPosition.x, modelLocalPosition.y, modelLocalPosition.z )
+				.add( registrationSolution.modelPivotOffset )
+				.multiplyScalar( registrationSolution.modelUnitScale );
+			const distanceMeters = anchor.distanceTo( markerCenter );
+			const maxDistanceMeters = annotation.maxMarkerDistanceMeters ?? 3;
+			if ( distanceMeters > maxDistanceMeters ) {
+				arWarn( 'AnomalyConfigValidationWarning', {
+					code: 'anomaly-too-far-from-marker',
+					anomalyId: annotation.id,
+					markerId: annotation.markerId,
+					distanceMeters,
+					maxDistanceMeters
+				} );
+				continue;
+			}
+
+			const anchors = acceptedAnchorsByMarker.get( annotation.markerId ?? '' ) ?? [];
+			if ( anchors.some( ( other ) => other.distanceTo( anchor ) < 0.25 ) ) {
+				arWarn( 'AnomalyConfigValidationWarning', {
+					code: 'anomaly-too-close-to-another-anomaly',
+					anomalyId: annotation.id,
+					markerId: annotation.markerId,
+					minimumSeparationMeters: 0.25
+				} );
+				continue;
+			}
+
+			anchors.push( anchor );
+			acceptedAnchorsByMarker.set( annotation.markerId ?? '', anchors );
+			accepted.push( annotation );
+		}
+
+		return accepted;
+
+	}
+
+	private resolveAnnotationMarkerCenterModelLocal(
+		config: DemoModelConfig,
+		markerId: string | undefined,
+		registrationSolution: EngineeringRegistrationSolution
+	): THREE.Vector3 | null {
+
+		const marker = config.markers.find( ( item ) => item.id === markerId );
+		if ( marker === undefined ) {
+			return null;
+		}
+		const centerEnu = marker.cornersEnu === undefined
+			? marker.centerEnu ?? ( marker.enu === undefined ? undefined : [ marker.enu.east, marker.enu.north, marker.enu.up ?? 0 ] )
+			: marker.cornersEnu.reduce(
+				( center, corner ) => center.add( new THREE.Vector3( corner[ 0 ], corner[ 1 ], corner[ 2 ] ) ),
+				new THREE.Vector3()
+			).multiplyScalar( 1 / marker.cornersEnu.length ).toArray();
+		if ( centerEnu === undefined ) {
+			return null;
+		}
+		return transformSiteEnuToModelLocal(
+			new THREE.Vector3( centerEnu[ 0 ], centerEnu[ 1 ], centerEnu[ 2 ] ),
+			registrationSolution
+		);
 
 	}
 

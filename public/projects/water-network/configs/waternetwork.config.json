@@ -98,5 +98,82 @@
     "realWorldOcclusion": true,
     "opacity": 1,
     "selectable": true
-  }
+  },
+  "annotations": [
+    {
+      "id": "ANOM-001",
+      "type": "warning",
+      "title": "主管异常点",
+      "description": "贴附于蓝色主管模型表面，用于 Marker 附近的异常交互演示。",
+      "markerId": "marker-warning-707",
+      "pipeId": "WN-74-76-001",
+      "placement": {
+        "mode": "model-local",
+        "modelLocalPosition": { "x": -20.5375, "y": -71.8008, "z": -0.344 }
+      },
+      "leaderHeightMeters": 0.9,
+      "interactionDistanceMeters": 5,
+      "maxMarkerDistanceMeters": 4.2,
+      "severity": "danger",
+      "status": "待核查",
+      "source": "inspection",
+      "properties": {
+        "异常编号": "ANOM-001",
+        "管线编号": "WN-74-76-001",
+        "锚定方式": "模型局部坐标"
+      },
+      "visible": true,
+      "layerId": "water-anomalies"
+    },
+    {
+      "id": "ANOM-002",
+      "type": "warning",
+      "title": "支管异常点",
+      "description": "贴附于绿色支管模型表面，用于验证异常点不随相机位置漂移。",
+      "markerId": "marker-warning-707",
+      "pipeId": "WN-74-76-004",
+      "placement": {
+        "mode": "model-local",
+        "modelLocalPosition": { "x": -20.5123, "y": -70.304, "z": -0.0554 }
+      },
+      "leaderHeightMeters": 1.05,
+      "interactionDistanceMeters": 5,
+      "maxMarkerDistanceMeters": 4.2,
+      "severity": "warning",
+      "status": "待核查",
+      "source": "inspection",
+      "properties": {
+        "异常编号": "ANOM-002",
+        "管线编号": "WN-74-76-004",
+        "锚定方式": "模型局部坐标"
+      },
+      "visible": true,
+      "layerId": "water-anomalies"
+    },
+    {
+      "id": "ANOM-003",
+      "type": "warning",
+      "title": "连接管异常点",
+      "description": "贴附于黄色连接管模型表面，作为第三个独立异常交互点。",
+      "markerId": "marker-warning-707",
+      "pipeId": "WN-74-76-002",
+      "placement": {
+        "mode": "model-local",
+        "modelLocalPosition": { "x": -20.5123, "y": -70.304, "z": -0.6612 }
+      },
+      "leaderHeightMeters": 1.2,
+      "interactionDistanceMeters": 5,
+      "maxMarkerDistanceMeters": 4.2,
+      "severity": "normal",
+      "status": "待核查",
+      "source": "inspection",
+      "properties": {
+        "异常编号": "ANOM-003",
+        "管线编号": "WN-74-76-002",
+        "锚定方式": "模型局部坐标"
+      },
+      "visible": true,
+      "layerId": "water-anomalies"
+    }
+  ]
 }
