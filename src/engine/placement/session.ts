@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { arWarn } from '@/engine/debug/ar-logger.js';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
 import { clearPlacedModel, placeModelWithMatrix } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
@@ -67,6 +68,23 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	let arPlacedModel: THREE.Group | null = null;
 	let arPlacementBase: ManualPlacementBase | null = null;
 	let autoPlacementPending = false;
+	// Temporary investigation only: remove every XRDebugProbe before applying the fix.
+	function probePlacementLifecycle(event: string, includeStack = false): void {
+
+		arPlacedModel?.updateMatrixWorld( true );
+		arWarn( '[XRDebugProbe]', {
+			event,
+			modelUuid: arPlacedModel?.uuid ?? null,
+			modelVisible: arPlacedModel?.visible ?? null,
+			modelMatrix: arPlacedModel === null ? null : arPlacedModel.matrix.elements.slice(),
+			modelWorldMatrix: arPlacedModel === null ? null : arPlacedModel.matrixWorld.elements.slice(),
+			modelAnchorVisible: sceneBundle.arModelAnchor.visible,
+			xrPresenting: sceneBundle.renderer.xr.isPresenting,
+			stack: includeStack ? new Error().stack : undefined,
+			timestamp: Date.now()
+		} );
+
+	}
 	function updatePlacementSummary(): void {
 
 		store.patch( { placementSummary: createPlacementSummaryState( arPlacedModel ) } );
@@ -113,6 +131,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		} );
 			updateRegistrationStatusDetail( '状态：模型已按工程坐标显示' );
 		updatePlacementSummary();
+		probePlacementLifecycle( 'placement-commit-base' );
 
 	}
 
@@ -155,6 +174,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		resetPlacement() {
 
+			probePlacementLifecycle( 'placement-reset', true );
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
 			autoPlacementPending = false;
 			arPlacementBase = null;
@@ -255,6 +275,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			} );
 			updateRegistrationStatusDetail( '状态：模型已按工程矩阵显示' );
 			updatePlacementSummary();
+			probePlacementLifecycle( 'placement-commit-engineering' );
 			setStatus( '模型已按工程矩阵显示，未使用 hit-test 决定最终位置。' );
 			autoPlacementPending = false;
 			return true;

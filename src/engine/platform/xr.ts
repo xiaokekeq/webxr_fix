@@ -1,4 +1,4 @@
-import { arError } from '@/engine/debug/ar-logger.js';
+import { arError, arWarn } from '@/engine/debug/ar-logger.js';
 import type {
 	ARSceneBundle,
 	ArSessionStartResult,
@@ -42,13 +42,83 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		onAttemptAutoPlacement,
 		onFrameUpdate
 	} = options;
+	// Temporary investigation only: remove every XRDebugProbe before applying the fix.
+	let probeSession: XRSession | null = null;
+	let probeReferenceSpace: XRReferenceSpace | null = null;
+	let lastProbeTrackingState: 'normal' | 'emulated' | 'unavailable' | null = null;
+	const handleProbeVisibilityChange = (): void => {
+		arWarn( '[XRDebugProbe]', {
+			event: 'session-visibility-change',
+			visibilityState: probeSession?.visibilityState ?? 'unknown',
+			timestamp: Date.now()
+		} );
+	};
+	const handleProbeReferenceSpaceReset = (event: Event): void => {
+		const transform = ( event as Event & { transform?: XRRigidTransform | null } ).transform;
+		arWarn( '[XRDebugProbe]', {
+			event: 'reference-space-reset',
+			transform: transform === undefined || transform === null ? null : Array.from( transform.matrix ),
+			timestamp: Date.now()
+		} );
+	};
+	const bindProbeReferenceSpace = (referenceSpace: XRReferenceSpace | null): void => {
+		if ( referenceSpace === probeReferenceSpace ) return;
+		probeReferenceSpace?.removeEventListener( 'reset', handleProbeReferenceSpaceReset );
+		probeReferenceSpace = referenceSpace;
+		probeReferenceSpace?.addEventListener( 'reset', handleProbeReferenceSpaceReset );
+		arWarn( '[XRDebugProbe]', {
+			event: 'reference-space-change',
+			available: referenceSpace !== null,
+			timestamp: Date.now()
+		} );
+	};
+	const probeTracking = (frame: XRFrame, referenceSpace: XRReferenceSpace | null): void => {
+		const pose = referenceSpace === null ? null : frame.getViewerPose( referenceSpace ) ?? null;
+		const state = pose === null
+			? 'unavailable'
+			: pose.emulatedPosition
+				? 'emulated'
+				: 'normal';
+		if ( state === lastProbeTrackingState ) return;
+		lastProbeTrackingState = state;
+		arWarn( '[XRDebugProbe]', {
+			event: 'tracking-state-change',
+			state,
+			visibilityState: probeSession?.visibilityState ?? 'unknown',
+			timestamp: Date.now()
+		} );
+	};
+	const handleProbeSessionStart = (result: ArSessionStartResult): void => {
+		probeSession = result.session;
+		lastProbeTrackingState = null;
+		probeSession.addEventListener( 'visibilitychange', handleProbeVisibilityChange );
+		arWarn( '[XRDebugProbe]', {
+			event: 'session-start',
+			visibilityState: probeSession.visibilityState,
+			timestamp: Date.now()
+		} );
+		onSessionStart( result );
+	};
+	const handleProbeSessionEnd = (): void => {
+		arWarn( '[XRDebugProbe]', {
+			event: 'session-end',
+			visibilityState: probeSession?.visibilityState ?? 'unknown',
+			timestamp: Date.now()
+		} );
+		probeSession?.removeEventListener( 'visibilitychange', handleProbeVisibilityChange );
+		probeReferenceSpace?.removeEventListener( 'reset', handleProbeReferenceSpaceReset );
+		probeSession = null;
+		probeReferenceSpace = null;
+		lastProbeTrackingState = null;
+		onSessionEnd();
+	};
 	const xrHitTest = createXRHitTestController( {
 		renderer: sceneBundle.renderer,
 		reticle: sceneBundle.reticle,
 		xrButtonWrap,
 		setStatus,
-		onSessionStart,
-		onSessionEnd,
+		onSessionStart: handleProbeSessionStart,
+		onSessionEnd: handleProbeSessionEnd,
 		canReportStatus
 	} );
 	const errorCounts = new Map<string, number>();
@@ -100,6 +170,11 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		renderFrame(_time: number, frame?: XRFrame) {
 
 			if ( sceneBundle.renderer.xr.isPresenting && frame ) {
+				const referenceSpace = sceneBundle.renderer.xr.getReferenceSpace();
+				runFrameStage( 'tracking-probe', () => {
+					bindProbeReferenceSpace( referenceSpace );
+					probeTracking( frame, referenceSpace );
+				} );
 				runFrameStage( 'hit-test', () => xrHitTest.update( frame ) );
 				runFrameStage( 'auto-placement', onAttemptAutoPlacement );
 				runFrameStage( 'frame-update', () => onFrameUpdate( frame ) );
