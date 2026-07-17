@@ -1,4 +1,5 @@
-import { arError, arWarn } from '@/engine/debug/ar-logger.js';
+import { arError } from '@/engine/debug/ar-logger.js';
+import { formatXrDebugPoint, resetXrDebugPanel, showXrDebugProbe } from '@/engine/debug/xr-debug-panel.js';
 import type {
 	ARSceneBundle,
 	ArSessionStartResult,
@@ -47,30 +48,18 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 	let probeReferenceSpace: XRReferenceSpace | null = null;
 	let lastProbeTrackingState: 'normal' | 'emulated' | 'unavailable' | null = null;
 	const handleProbeVisibilityChange = (): void => {
-		arWarn( '[XRDebugProbe]', {
-			event: 'session-visibility-change',
-			visibilityState: probeSession?.visibilityState ?? 'unknown',
-			timestamp: Date.now()
-		} );
+		showXrDebugProbe( `visibility ${probeSession?.visibilityState ?? 'unknown'}` );
 	};
 	const handleProbeReferenceSpaceReset = (event: Event): void => {
 		const transform = ( event as Event & { transform?: XRRigidTransform | null } ).transform;
-		arWarn( '[XRDebugProbe]', {
-			event: 'reference-space-reset',
-			transform: transform === undefined || transform === null ? null : Array.from( transform.matrix ),
-			timestamp: Date.now()
-		} );
+		showXrDebugProbe( `reference reset ${transform === undefined || transform === null ? 'transform=null' : `delta=${formatXrDebugPoint( transform.position )}`}` );
 	};
 	const bindProbeReferenceSpace = (referenceSpace: XRReferenceSpace | null): void => {
 		if ( referenceSpace === probeReferenceSpace ) return;
 		probeReferenceSpace?.removeEventListener( 'reset', handleProbeReferenceSpaceReset );
 		probeReferenceSpace = referenceSpace;
 		probeReferenceSpace?.addEventListener( 'reset', handleProbeReferenceSpaceReset );
-		arWarn( '[XRDebugProbe]', {
-			event: 'reference-space-change',
-			available: referenceSpace !== null,
-			timestamp: Date.now()
-		} );
+		showXrDebugProbe( `reference space ${referenceSpace === null ? 'missing' : 'ready'}` );
 	};
 	const probeTracking = (frame: XRFrame, referenceSpace: XRReferenceSpace | null): void => {
 		const pose = referenceSpace === null ? null : frame.getViewerPose( referenceSpace ) ?? null;
@@ -81,30 +70,18 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 				: 'normal';
 		if ( state === lastProbeTrackingState ) return;
 		lastProbeTrackingState = state;
-		arWarn( '[XRDebugProbe]', {
-			event: 'tracking-state-change',
-			state,
-			visibilityState: probeSession?.visibilityState ?? 'unknown',
-			timestamp: Date.now()
-		} );
+		showXrDebugProbe( `tracking ${state} / ${probeSession?.visibilityState ?? 'unknown'}` );
 	};
 	const handleProbeSessionStart = (result: ArSessionStartResult): void => {
 		probeSession = result.session;
 		lastProbeTrackingState = null;
 		probeSession.addEventListener( 'visibilitychange', handleProbeVisibilityChange );
-		arWarn( '[XRDebugProbe]', {
-			event: 'session-start',
-			visibilityState: probeSession.visibilityState,
-			timestamp: Date.now()
-		} );
+		resetXrDebugPanel();
+		showXrDebugProbe( `session start / ${probeSession.visibilityState}` );
 		onSessionStart( result );
 	};
 	const handleProbeSessionEnd = (): void => {
-		arWarn( '[XRDebugProbe]', {
-			event: 'session-end',
-			visibilityState: probeSession?.visibilityState ?? 'unknown',
-			timestamp: Date.now()
-		} );
+		showXrDebugProbe( `session end / ${probeSession?.visibilityState ?? 'unknown'}` );
 		probeSession?.removeEventListener( 'visibilitychange', handleProbeVisibilityChange );
 		probeReferenceSpace?.removeEventListener( 'reset', handleProbeReferenceSpaceReset );
 		probeSession = null;

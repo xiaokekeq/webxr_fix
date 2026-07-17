@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { arWarn } from '@/engine/debug/ar-logger.js';
+import { formatXrDebugPoint, showXrDebugProbe } from '@/engine/debug/xr-debug-panel.js';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
 import { clearPlacedModel, placeModelWithMatrix } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
@@ -69,20 +69,13 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	let arPlacementBase: ManualPlacementBase | null = null;
 	let autoPlacementPending = false;
 	// Temporary investigation only: remove every XRDebugProbe before applying the fix.
-	function probePlacementLifecycle(event: string, includeStack = false): void {
+	function probePlacementLifecycle(event: string): void {
 
 		arPlacedModel?.updateMatrixWorld( true );
-		arWarn( '[XRDebugProbe]', {
-			event,
-			modelUuid: arPlacedModel?.uuid ?? null,
-			modelVisible: arPlacedModel?.visible ?? null,
-			modelMatrix: arPlacedModel === null ? null : arPlacedModel.matrix.elements.slice(),
-			modelWorldMatrix: arPlacedModel === null ? null : arPlacedModel.matrixWorld.elements.slice(),
-			modelAnchorVisible: sceneBundle.arModelAnchor.visible,
-			xrPresenting: sceneBundle.renderer.xr.isPresenting,
-			stack: includeStack ? new Error().stack : undefined,
-			timestamp: Date.now()
-		} );
+		showXrDebugProbe( arPlacedModel === null
+			? `${event} model=null`
+			: `${event} id=${arPlacedModel.uuid.slice( 0, 8 )} local=${formatXrDebugPoint( arPlacedModel.position )} world=${formatXrDebugPoint( arPlacedModel.getWorldPosition( new THREE.Vector3() ) )} visible=${arPlacedModel.visible}/${sceneBundle.arModelAnchor.visible}`
+		);
 
 	}
 	function updatePlacementSummary(): void {
@@ -174,7 +167,7 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		resetPlacement() {
 
-			probePlacementLifecycle( 'placement-reset', true );
+			probePlacementLifecycle( 'placement-reset' );
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
 			autoPlacementPending = false;
 			arPlacementBase = null;
