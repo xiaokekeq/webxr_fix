@@ -306,6 +306,7 @@ export class ThreeEngine {
 	private pipesByName = new Map<string, PipeRecord>();
 	private lastAppliedMarkerSolutionId: string | null = null;
 	private autoPlacementInFlightSolutionId: string | null = null;
+	private engineeringPlacementInFlight = false;
 	private readonly handleWebglContextLost = ( event: Event ) => {
 		( event as WebGLContextEvent ).preventDefault();
 		arError( '[WebGLContextLost]', { xrPresenting: this.sceneBundle.renderer.xr.isPresenting } );
@@ -319,8 +320,8 @@ export class ThreeEngine {
 		this.xrButtonWrap = document.createElement( 'div' );
 		this.xrButtonWrap.className = 'xr-button-wrap';
 		this.sceneBundle = createARScene( document.createElement( 'div' ) );
-		this.sceneBundle.scene.add( this.localizationDebugLayer.root );
-		this.sceneBundle.scene.add( this.annotationLayer.group );
+		this.sceneBundle.arPlacementAnchor.add( this.localizationDebugLayer.root );
+		this.sceneBundle.arPlacementAnchor.add( this.annotationLayer.group );
 		this.layerVisibility = projectConfig.capabilities.layerControl ? createLayerVisibilityController() : null;
 
 		const statusRuntime = createStatusRuntime( {
@@ -621,6 +622,7 @@ export class ThreeEngine {
 				this.emit();
 			},
 			resetPlacement: () => {
+				this.xrRuntime.clearModelWorldLock();
 				this.placementSession.resetPlacement();
 				this.annotationLayer.clearModelPlacement();
 				this.syncArSessionPhase();
@@ -842,6 +844,7 @@ export class ThreeEngine {
 		}
 
 		this.disposed = true;
+		this.xrRuntime.clearModelWorldLock();
 		this.sceneBundle.renderer.setAnimationLoop( null );
 		this.realDepthProvider.dispose();
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
@@ -1074,6 +1077,7 @@ export class ThreeEngine {
 
 	resetPlacement(): void {
 
+		this.xrRuntime.clearModelWorldLock();
 		this.sessionLifecycleRuntime.resetPlacement();
 
 	}
@@ -1171,6 +1175,14 @@ export class ThreeEngine {
 			this.setStatus( 'AR 会话尚未开启。' );
 			return { ok: false, stage: 'marker', reason: 'ar-session-not-presenting', message: 'AR 会话尚未开启。' };
 		}
+		const placedModel = this.placementSession.getArPlacedModel();
+		if ( placedModel !== null ) {
+			this.setStatus( '模型已显示；如需重新放置，请先重置并重新完成 Marker 校正。' );
+			return { ok: true, placedModelUuid: placedModel.uuid };
+		}
+		if ( this.engineeringPlacementInFlight || this.autoPlacementInFlightSolutionId !== null ) {
+			return { ok: false, stage: 'placement', reason: 'placement-pending', message: '模型正在放置，请稍候。' };
+		}
 
 		const guard = this.validateEngineeringPlacementPreconditions();
 		if ( guard.ok === false ) {
@@ -1179,7 +1191,12 @@ export class ThreeEngine {
 			return { ok: false, stage: placementStageForBlockReason( guard.reason ), reason: guard.reason ?? 'transform-missing', message };
 		}
 
-		return this.placeModelFromCurrentMarkerSolution( guard );
+		this.engineeringPlacementInFlight = true;
+		try {
+			return await this.placeModelFromCurrentMarkerSolution( guard );
+		} finally {
+			this.engineeringPlacementInFlight = false;
+		}
 
 	}
 
@@ -1191,12 +1208,13 @@ export class ThreeEngine {
 			|| this.modelTemplate === null
 			|| this.registrationSolution === null
 			|| this.placementSession.getArPlacedModel() !== null
+			|| this.engineeringPlacementInFlight
 		) {
 			return;
 		}
 
 		const solutionId = `${arFromEnuSolution.sessionId ?? 'none'}:${arFromEnuSolution.timestamp}`;
-		if ( this.lastAppliedMarkerSolutionId === solutionId || this.autoPlacementInFlightSolutionId === solutionId ) {
+		if ( this.lastAppliedMarkerSolutionId === solutionId || this.autoPlacementInFlightSolutionId !== null ) {
 			return;
 		}
 
@@ -1402,11 +1420,15 @@ export class ThreeEngine {
 			: this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => ( { position: point.worldEnu.clone().applyMatrix4( solution.matrix ), label: `RTK-${point.id}` } ) );
 		const placedModel = this.placementSession.getArPlacedModel();
 		placedModel?.updateMatrixWorld( true );
+		this.sceneBundle.arPlacementAnchor.updateWorldMatrix( true, false );
+		const toPlacementLocal = ( position: THREE.Vector3 ): THREE.Vector3 => (
+			this.sceneBundle.arPlacementAnchor.worldToLocal( position )
+		);
 		const model = placedModel === null || this.registrationSolution === null
 			? []
 			: [
-				...this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => ( { position: placedModel.localToWorld( point.modelLocal.clone() ), label: `模型-${point.id}` } ) ),
-				{ position: placedModel.localToWorld( new THREE.Vector3() ), label: '模型原点' }
+				...this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => ( { position: toPlacementLocal( placedModel.localToWorld( point.modelLocal.clone() ) ), label: `模型-${point.id}` } ) ),
+				{ position: toPlacementLocal( placedModel.localToWorld( new THREE.Vector3() ) ), label: '模型原点' }
 			];
 		this.localizationDebugLayer.sync( {
 			siteOrigin: solution === null ? [] : [ { position: solution.siteOriginArPosition.clone(), label: 'RTK工程原点' } ],
@@ -1739,7 +1761,9 @@ export class ThreeEngine {
 
 		placedModel.updateMatrixWorld( true );
 		const errors = this.registrationSolution.controlPoints.slice( 0, 4 ).map( ( point ) => {
-			const expectedAr = point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix );
+			const expectedAr = this.sceneBundle.arPlacementAnchor.localToWorld(
+				point.worldEnu.clone().applyMatrix4( arFromEnuSolution.matrix )
+			);
 			return expectedAr.distanceTo( placedModel.localToWorld( point.modelLocal.clone() ) );
 		} );
 		const rmsError = computeRms( errors );
@@ -1987,8 +2011,18 @@ export class ThreeEngine {
 			return { ok: false, stage: 'marker', reason: 'marker-solution-missing', message };
 		}
 
+		const worldLock = await this.xrRuntime.lockModelToLatestHit();
+		if ( worldLock === 'cancelled' ) {
+			return { ok: false, stage: 'placement', reason: 'placement-cancelled', message: '模型放置已取消。' };
+		}
+		if ( worldLock === 'unavailable' ) {
+			const message = '未能建立现实锚点，请保持 Marker 或稳定平面可见后重试。';
+			this.setStatus( message );
+			return { ok: false, stage: 'placement', reason: 'world-anchor-unavailable', message };
+		}
 		await this.placementWorkflow.placeLocalizedModel();
 		if ( this.placementSession.getArPlacedModel() === null ) {
+			this.xrRuntime.clearModelWorldLock();
 			return { ok: false, stage: 'placement', reason: 'placed-model-missing', message: '模型放置未生成可显示对象。' };
 		}
 
@@ -2214,8 +2248,10 @@ export class ThreeEngine {
 
 	private syncSceneHost(): void {
 
-		this.sceneBundle.arPlacementAnchor.visible = this.sceneBundle.renderer.xr.isPresenting;
-		this.sceneBundle.arModelAnchor.visible = this.sceneBundle.renderer.xr.isPresenting;
+		const presenting = this.sceneBundle.renderer.xr.isPresenting;
+		this.sceneBundle.arModelAnchor.visible = presenting;
+		this.localizationDebugLayer.root.visible = presenting;
+		this.annotationLayer.group.visible = presenting;
 		this.syncAttachmentInfoBoardVisibility();
 		this.sceneHostRuntime.sync();
 

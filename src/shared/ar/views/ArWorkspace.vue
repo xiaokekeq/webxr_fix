@@ -31,6 +31,7 @@ store.configure( applicationContext );
 const canvasHost = ref<HTMLElement | null>( null );
 const xrButtonHost = ref<HTMLElement | null>( null );
 const isEnteringAr = ref( false );
+const isPlacingEngineeringModel = ref( false );
 const activePanelView = ref<InspectPanelView>( 'localization' );
 const markerCalibrationOverlayOpen = ref( false );
 const markerApplyFeedback = ref<{
@@ -209,6 +210,8 @@ const canPlaceEngineeringModel = computed(
 		&& configStatus.value.hasControlTargets
 		&& canUseMarkerCorners.value
 		&& localizationReady.value
+		&& modelPlaced.value === false
+		&& isPlacingEngineeringModel.value === false
 		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
 );
 const placementBlockedText = computed( () => {
@@ -220,6 +223,9 @@ const placementBlockedText = computed( () => {
 	}
 	if ( hasArSession.value === false ) {
 		return '请先进入 AR。';
+	}
+	if ( modelPlaced.value ) {
+		return '模型已显示；如需重新放置，请先重置并重新完成 Marker 校正。';
 	}
 	if ( configStatus.value.hasSiteOrigin === false ) {
 		return '缺少工程原点 siteOrigin。';
@@ -492,7 +498,12 @@ async function handlePlaceEngineeringModel(): Promise<void> {
 		return;
 	}
 
-	await store.actions.placeModel();
+	isPlacingEngineeringModel.value = true;
+	try {
+		await store.actions.placeModel();
+	} finally {
+		isPlacingEngineeringModel.value = false;
+	}
 }
 
 async function handleExitMarkerCalibration(): Promise<void> {
@@ -667,7 +678,7 @@ function setArOverlayClass(active: boolean): void {
 							:disabled="canPlaceEngineeringModel === false"
 							@click="handlePlaceEngineeringModel()"
 						>
-							按校正结果放置模型
+							{{ isPlacingEngineeringModel ? '正在建立现实锚点…' : '按校正结果放置模型' }}
 						</button>
 						<button type="button" class="action-button" @click="store.actions.resetPlacement()">
 							重置模型

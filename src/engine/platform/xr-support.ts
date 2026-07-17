@@ -4,6 +4,7 @@ import type {
 	ArSessionStartResult,
 	SetStatus,
 	XRAnchorHandle,
+	XRAnchorPlacement,
 	XRHitTestController,
 	XRHitTestQuality
 } from '@/features/ar/types/runtime-types.js';
@@ -19,12 +20,20 @@ interface CreateXRHitTestControllerOptions {
 	canReportStatus?: () => boolean;
 }
 
+interface PendingAnchorRequest {
+	promise: Promise<XRAnchorPlacement | null>;
+	resolve(value: XRAnchorPlacement | null): void;
+	timeoutId: ReturnType<typeof setTimeout> | null;
+	generation: number;
+	settled: boolean;
+}
+
 const reticlePosition = new THREE.Vector3();
-const reticleMatrix = new THREE.Matrix4();
 const qualityCentroid = new THREE.Vector3();
 const qualityDelta = new THREE.Vector3();
 const RETICLE_PERSIST_MS = 350;
 const PLACEABLE_HIT_RETENTION_MS = 1600;
+const ANCHOR_CREATE_TIMEOUT_MS = 4000;
 const HIT_QUALITY_WINDOW_MS = 700;
 const MAX_HIT_QUALITY_SAMPLES = 24;
 
@@ -56,9 +65,9 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 	let hitTestSourceRequested = false;
 	let lastSuccessfulHitTime = 0;
 	let lastStableHitPosition: THREE.Vector3 | null = null;
-	let lastStableHitMatrix: THREE.Matrix4 | null = null;
-	let lastHitTestResult: XRHitTestResult | null = null;
-	let anchorSupportDetected = false;
+	let anchorRequestGeneration = 0;
+	let pendingAnchorRequest: PendingAnchorRequest | null = null;
+	let inFlightAnchorRequest: PendingAnchorRequest | null = null;
 	let recentHitSamples: Array<{ position: THREE.Vector3; time: number }> = [];
 	let sessionRequestPending = false;
 	let activeSession: XRSession | null = null;
@@ -137,14 +146,11 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 			return;
 		}
 		lastSuccessfulHitTime = performance.now();
-		lastHitTestResult = firstHit;
-		anchorSupportDetected = typeof ( firstHit as XRHitTestResult & { createAnchor?: () => Promise<XRAnchorHandle> } ).createAnchor === 'function';
 		reticle.visible = true;
 		reticle.matrix.fromArray( pose.transform.matrix );
-		reticleMatrix.fromArray( pose.transform.matrix );
 		reticlePosition.setFromMatrixPosition( reticle.matrix );
 		lastStableHitPosition = reticlePosition.clone();
-		lastStableHitMatrix = reticleMatrix.clone();
+		startPendingAnchorRequest( firstHit, reticle.matrix );
 		pushHitSample( reticlePosition, lastSuccessfulHitTime );
 		if ( canReportStatus?.() !== false ) {
 			setStatus( '已找到可用平面，可继续观察地面或墙面的命中效果。' );
@@ -157,7 +163,6 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		if ( reticle.visible && performance.now() - lastSuccessfulHitTime < RETICLE_PERSIST_MS ) {
 			return;
 		}
-		lastHitTestResult = null;
 		reticle.visible = false;
 		if ( canReportStatus?.() !== false ) {
 			setStatus( '当前未命中平面，请缓慢移动手机并保持墙面或地面在视野中。' );
@@ -185,12 +190,6 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 
 	}
 
-	function getHitMatrix(target: THREE.Matrix4): THREE.Matrix4 | null {
-
-		return lastStableHitMatrix === null ? null : target.copy( lastStableHitMatrix );
-
-	}
-
 	function getHitTestQuality(): XRHitTestQuality | null {
 
 		if ( hasGroundHit() === false ) {
@@ -214,22 +213,78 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 
 	}
 
-	function supportsAnchors(): boolean {
+	function createAnchorFromNextHit(): Promise<XRAnchorPlacement | null> {
 
-		return anchorSupportDetected;
+		if ( pendingAnchorRequest !== null ) return pendingAnchorRequest.promise;
+		if ( inFlightAnchorRequest !== null ) return inFlightAnchorRequest.promise;
+		let resolveRequest!: (value: XRAnchorPlacement | null) => void;
+		const promise = new Promise<XRAnchorPlacement | null>( ( resolve ) => {
+			resolveRequest = resolve;
+		} );
+		const request: PendingAnchorRequest = {
+			promise,
+			resolve: resolveRequest,
+			timeoutId: null,
+			generation: anchorRequestGeneration,
+			settled: false
+		};
+		request.timeoutId = setTimeout( () => {
+			finishAnchorRequest( request, null );
+		}, PLACEABLE_HIT_RETENTION_MS );
+		pendingAnchorRequest = request;
+		return promise;
 
 	}
 
-	async function createAnchorFromLatestHit(): Promise<XRAnchorHandle | null> {
+	function startPendingAnchorRequest(firstHit: XRHitTestResult, initialPoseMatrix: THREE.Matrix4): void {
 
-		const result = lastHitTestResult as ( XRHitTestResult & { createAnchor?: () => Promise<XRAnchorHandle> } ) | null;
-		if ( result?.createAnchor === undefined ) return null;
+		const request = pendingAnchorRequest;
+		if ( request === null ) return;
+		pendingAnchorRequest = null;
+		if ( request.timeoutId !== null ) clearTimeout( request.timeoutId );
+		request.timeoutId = setTimeout( () => {
+			finishAnchorRequest( request, null );
+		}, ANCHOR_CREATE_TIMEOUT_MS );
+		inFlightAnchorRequest = request;
+		const result = firstHit as XRHitTestResult & { createAnchor?: () => Promise<XRAnchorHandle> };
+		if ( result.createAnchor === undefined ) {
+			finishAnchorRequest( request, null );
+			return;
+		}
+		const initialPose = initialPoseMatrix.clone();
 		try {
-			return await result.createAnchor();
+			const anchorPromise = result.createAnchor();
+			void anchorPromise.then( ( anchor ) => {
+				if ( request.settled || request.generation !== anchorRequestGeneration ) {
+					try {
+						anchor.delete?.();
+					} catch {}
+					finishAnchorRequest( request, null );
+					return;
+				}
+				finishAnchorRequest( request, { anchor, initialPoseMatrix: initialPose } );
+			}, ( error ) => {
+				if ( request.settled === false ) {
+					arWarn( '[XRAnchorPlacement]', { created: false, reason: 'createAnchor failed', error } );
+				}
+				finishAnchorRequest( request, null );
+			} );
 		} catch ( error ) {
 			arWarn( '[XRAnchorPlacement]', { created: false, reason: 'createAnchor failed', error } );
-			return null;
+			finishAnchorRequest( request, null );
 		}
+
+	}
+
+	function finishAnchorRequest(request: PendingAnchorRequest, value: XRAnchorPlacement | null): void {
+
+		if ( request.settled ) return;
+		request.settled = true;
+		if ( request.timeoutId !== null ) clearTimeout( request.timeoutId );
+		request.timeoutId = null;
+		if ( pendingAnchorRequest === request ) pendingAnchorRequest = null;
+		if ( inFlightAnchorRequest === request ) inFlightAnchorRequest = null;
+		request.resolve( value );
 
 	}
 
@@ -239,10 +294,16 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		hitTestSourceRequested = false;
 		lastSuccessfulHitTime = 0;
 		lastStableHitPosition = null;
-		lastStableHitMatrix = null;
-		lastHitTestResult = null;
-		anchorSupportDetected = false;
+		cancelPendingAnchorRequest();
 		recentHitSamples = [];
+
+	}
+
+	function cancelPendingAnchorRequest(): void {
+
+		anchorRequestGeneration += 1;
+		if ( pendingAnchorRequest !== null ) finishAnchorRequest( pendingAnchorRequest, null );
+		if ( inFlightAnchorRequest !== null ) finishAnchorRequest( inFlightAnchorRequest, null );
 
 	}
 
@@ -251,10 +312,9 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		update,
 		hasGroundHit,
 		getHitPosition,
-		getHitMatrix,
 		getHitTestQuality,
-		supportsAnchors,
-		createAnchorFromLatestHit,
+		createAnchorFromNextHit,
+		cancelPendingAnchorRequest,
 		async requestSession() {
 
 			if ( renderer.xr.isPresenting || sessionRequestPending || navigator.xr === undefined ) {

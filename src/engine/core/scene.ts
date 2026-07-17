@@ -36,7 +36,7 @@ export function createARScene(canvasContainer: HTMLElement): ARSceneBundle {
 
 	const arModelAnchor = new THREE.Group();
 	arModelAnchor.name = '__ar-model-anchor';
-	scene.add( arModelAnchor );
+	arPlacementAnchor.add( arModelAnchor );
 
 	return { scene, camera, renderer, reticle, arPlacementAnchor, arModelAnchor };
 

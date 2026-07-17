@@ -84,14 +84,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 	}
 
-	function resetArPlacementAnchorTransform(): void {
-
-		sceneBundle.arPlacementAnchor.position.set( 0, 0, 0 );
-		sceneBundle.arPlacementAnchor.quaternion.identity();
-		sceneBundle.arPlacementAnchor.scale.set( 1, 1, 1 );
-		sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
-
-	}
 	function createAdjustedPlacementFromBase(base: ManualPlacementBase): {
 		position: THREE.Vector3;
 		orientation: THREE.Quaternion;
@@ -115,7 +107,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		}
 
 		const adjustedPlacement = createAdjustedPlacementFromBase( arPlacementBase );
-		resetArPlacementAnchorTransform();
 		arPlacedModel = placeAdjustedModel( {
 			modelTemplate,
 			placedModel: arPlacedModel,
@@ -171,7 +162,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
 			autoPlacementPending = false;
 			arPlacementBase = null;
-			resetArPlacementAnchorTransform();
 			propertySelection.clearSelection();
 			updatePlacementSummary();
 			store.patch( { targetGuidance: createDefaultTargetGuidanceState() } );
@@ -253,7 +243,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				arFromEnuSolution,
 				registrationSolution: effectiveRegistrationSolution
 			} );
-			resetArPlacementAnchorTransform();
 			arPlacementBase = null;
 			arPlacedModel = placeModelWithMatrix(
 				modelTemplate,

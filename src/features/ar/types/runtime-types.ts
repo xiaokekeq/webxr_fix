@@ -27,15 +27,19 @@ export interface XRAnchorHandle {
 	delete?(): void;
 }
 
+export interface XRAnchorPlacement {
+	anchor: XRAnchorHandle;
+	initialPoseMatrix: THREE.Matrix4;
+}
+
 export interface XRHitTestController {
 	setup(): void;
 	update(frame: XRFrame): void;
 	hasGroundHit(): boolean;
 	getHitPosition(target: THREE.Vector3): THREE.Vector3 | null;
-	getHitMatrix(target: THREE.Matrix4): THREE.Matrix4 | null;
 	getHitTestQuality(): XRHitTestQuality | null;
-	supportsAnchors(): boolean;
-	createAnchorFromLatestHit(): Promise<XRAnchorHandle | null>;
+	createAnchorFromNextHit(): Promise<XRAnchorPlacement | null>;
+	cancelPendingAnchorRequest(): void;
 	requestSession(): Promise<void>;
 }
 

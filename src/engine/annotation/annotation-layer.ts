@@ -173,6 +173,7 @@ export class AnnotationLayer {
 			.add( this.registrationSolution.modelPivotOffset )
 			.multiplyScalar( this.registrationSolution.modelUnitScale );
 		this.placedModel.localToWorld( anchor );
+		this.group.worldToLocal( anchor );
 		const label = anchor.clone();
 		label.y += annotation.leaderHeightMeters ?? 0.9;
 		return { anchor, label };
