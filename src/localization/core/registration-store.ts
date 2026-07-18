@@ -26,19 +26,6 @@ export interface ManualMarker {
 	};
 }
 
-export interface PropertyPanelState {
-	name: string;
-	meshName?: string;
-	materialName?: string;
-	statusBadge: string;
-	type: string;
-	diameter: string;
-	material: string;
-	depth: string;
-	status: string;
-	remark: string;
-}
-
 export interface RegistrationMetricsState {
 	gpsText: string;
 	enuText: string;
@@ -282,7 +269,6 @@ export interface RegistrationStoreState {
 	layerNames: readonly string[];
 	modelLayers: ModelLayerState[];
 	pipeList: PipeRecord[];
-	propertyPanel: PropertyPanelState;
 	selectedAnnotationId: string | null;
 	selectedComponent: SelectedComponentState | null;
 	inspectionPlacementSource: InspectionPlacementSource;
@@ -340,21 +326,6 @@ export function createRegistrationStore(
 			};
 
 		}
-	};
-
-}
-
-export function createDefaultPropertyPanelState(): PropertyPanelState {
-
-	return {
-		name: '未选择构件',
-		statusBadge: '待选择',
-		type: '-',
-		diameter: '-',
-		material: '-',
-		depth: '-',
-		status: '-',
-		remark: '点击模型构件后可查看属性、位置和备注信息。'
 	};
 
 }

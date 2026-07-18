@@ -11,22 +11,10 @@ export interface ArAnnotationItem {
 	targetObject: THREE.Object3D;
 }
 
-export interface ArAnnotationDetailOverlay {
-	targetObject: THREE.Object3D;
-	title: string;
-	subtitle?: string;
-	fields: Array<{
-		label: string;
-		value: string;
-	}>;
-}
-
 export interface ArAnnotationLabelController {
 	setItems(items: ArAnnotationItem[]): void;
-	setDetail(detail: ArAnnotationDetailOverlay | null): void;
 	update(camera: THREE.Camera): void;
 	handleTap(clientX: number, clientY: number, camera: THREE.Camera): ArAnnotationItem | null;
-	hitDetailPanel(raycaster: THREE.Raycaster): boolean;
 	pick(raycaster: THREE.Raycaster): ArAnnotationItem | null;
 	clear(): void;
 	dispose(): void;
@@ -39,22 +27,12 @@ interface AnnotationLabelEntry {
 	material: THREE.SpriteMaterial;
 }
 
-interface AnnotationDetailEntry {
-	detail: ArAnnotationDetailOverlay;
-	sprite: THREE.Sprite;
-	texture: THREE.CanvasTexture;
-	material: THREE.SpriteMaterial;
-}
-
 const ANNOTATION_LABEL_TAG = '__annotationLabel';
 const DISPLAY_MODE_HELPER_TAG = '__visualizationHelper';
-const MAX_DETAIL_PANEL_WORLD_WIDTH = 0.8;
-const MIN_DETAIL_PANEL_WORLD_WIDTH = 0.24;
 const tempBounds = new THREE.Box3();
 const tempCenter = new THREE.Vector3();
 const tempSize = new THREE.Vector3();
 const tempWorldScale = new THREE.Vector3();
-const tempWorldPosition = new THREE.Vector3();
 
 export function createArAnnotationLabelController(options: {
 	canvas: HTMLCanvasElement;
@@ -63,7 +41,6 @@ export function createArAnnotationLabelController(options: {
 	const raycaster = new THREE.Raycaster();
 	const pointer = new THREE.Vector2();
 	let entries: AnnotationLabelEntry[] = [];
-	let detailEntry: AnnotationDetailEntry | null = null;
 
 	function setItems(items: ArAnnotationItem[]): void {
 
@@ -71,17 +48,6 @@ export function createArAnnotationLabelController(options: {
 		entries = items
 			.map( ( item ) => createLabelEntry( item ) )
 			.filter( ( entry ): entry is AnnotationLabelEntry => entry !== null );
-
-	}
-
-	function setDetail(detail: ArAnnotationDetailOverlay | null): void {
-
-		clearDetailEntry();
-		if ( detail === null ) {
-			return;
-		}
-
-		detailEntry = createDetailEntry( detail );
 
 	}
 
@@ -115,17 +81,9 @@ export function createArAnnotationLabelController(options: {
 
 	}
 
-	function hitDetailPanel(activeRaycaster: THREE.Raycaster): boolean {
-
-		return detailEntry !== null
-			&& activeRaycaster.intersectObject( detailEntry.sprite, true ).length > 0;
-
-	}
-
 	function clear(): void {
 
 		clearLabelEntries();
-		clearDetailEntry();
 
 	}
 
@@ -137,10 +95,8 @@ export function createArAnnotationLabelController(options: {
 
 	return {
 		setItems,
-		setDetail,
 		update,
 		handleTap,
-		hitDetailPanel,
 		pick,
 		clear,
 		dispose
@@ -154,19 +110,6 @@ export function createArAnnotationLabelController(options: {
 			entry.texture.dispose();
 		}
 		entries = [];
-
-	}
-
-	function clearDetailEntry(): void {
-
-		if ( detailEntry === null ) {
-			return;
-		}
-
-		detailEntry.sprite.removeFromParent();
-		detailEntry.material.dispose();
-		detailEntry.texture.dispose();
-		detailEntry = null;
 
 	}
 
@@ -224,63 +167,6 @@ function createLabelEntry(item: ArAnnotationItem): AnnotationLabelEntry | null {
 
 }
 
-function createDetailEntry(detail: ArAnnotationDetailOverlay): AnnotationDetailEntry | null {
-
-	detail.targetObject.updateWorldMatrix( true, true );
-	tempBounds.setFromObject( detail.targetObject );
-	if ( tempBounds.isEmpty() ) {
-		return null;
-	}
-
-	tempBounds.getCenter( tempCenter );
-	tempBounds.getSize( tempSize );
-	detail.targetObject.getWorldScale( tempWorldScale );
-
-	const textureResult = createDetailTexture( detail );
-	const worldWidth = computeDetailPanelWorldWidth( tempSize );
-	const worldHeight = worldWidth / textureResult.aspect;
-	const localWidth = worldWidth / safeScaleComponent( tempWorldScale.x );
-	const localHeight = worldHeight / safeScaleComponent( tempWorldScale.y );
-	const material = new THREE.SpriteMaterial( {
-		map: textureResult.texture,
-		transparent: true,
-		depthWrite: false,
-		toneMapped: false
-	} );
-	const sprite = new THREE.Sprite( material );
-	sprite.name = '__annotation-detail-overlay';
-	sprite.center.set( 0.5, 0 );
-	sprite.renderOrder = 220;
-	sprite.scale.set( localWidth, localHeight, 1 );
-	sprite.raycast = THREE.Sprite.prototype.raycast;
-	sprite.userData[ DISPLAY_MODE_HELPER_TAG ] = true;
-	sprite.userData.__nonSelectableHelper = true;
-	sprite.userData.__excludeFromLayerIndex = true;
-
-	tempWorldPosition.set(
-		tempCenter.x,
-		tempBounds.max.y + Math.max( 0.08, tempSize.y * 0.12, worldHeight * 0.24 ),
-		tempCenter.z
-	);
-	detail.targetObject.add( sprite );
-	sprite.position.copy( detail.targetObject.worldToLocal( tempWorldPosition ) );
-
-	return {
-		detail,
-		sprite,
-		texture: textureResult.texture,
-		material
-	};
-
-}
-
-function computeDetailPanelWorldWidth(size: THREE.Vector3): number {
-
-	const modelHorizontalSpan = Math.max( size.x, size.z );
-	return clamp( modelHorizontalSpan * 1.35, MIN_DETAIL_PANEL_WORLD_WIDTH, MAX_DETAIL_PANEL_WORLD_WIDTH );
-
-}
-
 function createLabelTexture(item: ArAnnotationItem): {
 	texture: THREE.CanvasTexture;
 	aspect: number;
@@ -314,73 +200,6 @@ function createLabelTexture(item: ArAnnotationItem): {
 		context.fillStyle = 'rgba(191, 219, 254, 0.94)';
 		context.font = '52px "Microsoft YaHei", sans-serif';
 		context.fillText( item.subtitle, 76, 226 );
-	}
-
-	const texture = new THREE.CanvasTexture( canvas );
-	texture.colorSpace = THREE.SRGBColorSpace;
-	texture.minFilter = THREE.LinearFilter;
-	texture.magFilter = THREE.LinearFilter;
-	texture.generateMipmaps = false;
-	texture.needsUpdate = true;
-
-	return {
-		texture,
-		aspect: canvas.width / canvas.height
-	};
-
-}
-
-function createDetailTexture(detail: ArAnnotationDetailOverlay): {
-	texture: THREE.CanvasTexture;
-	aspect: number;
-} {
-
-	const fieldCount = Math.max( 1, Math.min( detail.fields.length, 6 ) );
-	const canvas = document.createElement( 'canvas' );
-	canvas.width = 1280;
-	canvas.height = 320 + fieldCount * 88;
-
-	const context = canvas.getContext( '2d' );
-	if ( context === null ) {
-		throw new Error( 'Failed to create annotation detail canvas context.' );
-	}
-
-	context.clearRect( 0, 0, canvas.width, canvas.height );
-	const gradient = context.createLinearGradient( 0, 0, canvas.width, canvas.height );
-	gradient.addColorStop( 0, 'rgba(9, 16, 32, 0.96)' );
-	gradient.addColorStop( 1, 'rgba(20, 33, 61, 0.88)' );
-	drawRoundedRect( context, 24, 24, canvas.width - 48, canvas.height - 48, 52, gradient );
-
-	context.strokeStyle = 'rgba(96, 165, 250, 0.76)';
-	context.lineWidth = 4;
-	roundRectPath( context, 24, 24, canvas.width - 48, canvas.height - 48, 52 );
-	context.stroke();
-
-	context.fillStyle = 'rgba(191, 219, 254, 0.95)';
-	context.font = '44px "Microsoft YaHei", sans-serif';
-	context.fillText( '构件信息', 72, 92 );
-
-	context.fillStyle = '#ffffff';
-	context.font = 'bold 82px "Microsoft YaHei", sans-serif';
-	context.fillText( detail.title, 72, 190 );
-
-	if ( detail.subtitle ) {
-		context.fillStyle = 'rgba(191, 219, 254, 0.9)';
-		context.font = '48px "Microsoft YaHei", sans-serif';
-		context.fillText( detail.subtitle, 72, 258 );
-	}
-
-	let y = detail.subtitle ? 346 : 300;
-	for ( const field of detail.fields.slice( 0, 6 ) ) {
-		context.fillStyle = 'rgba(148, 163, 184, 0.96)';
-		context.font = '42px "Microsoft YaHei", sans-serif';
-		context.fillText( field.label, 72, y );
-
-		context.fillStyle = '#ffffff';
-		context.font = '42px "Microsoft YaHei", sans-serif';
-		wrapText( context, field.value, 270, y, canvas.width - 360, 52, 1 );
-
-		y += 88;
 	}
 
 	const texture = new THREE.CanvasTexture( canvas );
@@ -447,47 +266,6 @@ function drawRoundedRect(
 	context.fillStyle = fillStyle;
 	roundRectPath( context, x, y, width, height, radius );
 	context.fill();
-
-}
-
-function wrapText(
-	context: CanvasRenderingContext2D,
-	text: string,
-	x: number,
-	y: number,
-	maxWidth: number,
-	lineHeight: number,
-	maxLines: number
-): void {
-
-	if ( text.length === 0 ) {
-		return;
-	}
-
-	const characters = Array.from( text );
-	let line = '';
-	let currentY = y;
-	let usedLines = 0;
-
-	for ( const character of characters ) {
-		const nextLine = `${line}${character}`;
-		if ( context.measureText( nextLine ).width > maxWidth && line.length > 0 ) {
-			context.fillText( line, x, currentY );
-			usedLines += 1;
-			if ( usedLines >= maxLines ) {
-				return;
-			}
-			line = character;
-			currentY += lineHeight;
-			continue;
-		}
-
-		line = nextLine;
-	}
-
-	if ( line.length > 0 && usedLines < maxLines ) {
-		context.fillText( line, x, currentY );
-	}
 
 }
 

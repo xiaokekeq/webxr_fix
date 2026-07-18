@@ -31,5 +31,15 @@ export const damProjectConfig: ArProjectConfig = {
 		measurement: true,
 		screenshot: true
 	},
+	componentPropertyHud: {
+		fields: [
+			{ key: 'type', label: '构件类型' },
+			{ key: 'diameter', label: '规格' },
+			{ key: 'material', label: '材质' },
+			{ key: 'depth', label: '埋深' },
+			{ key: 'status', label: '状态' },
+			{ key: 'remark', label: '备注' }
+		]
+	},
 	ui: ui as ProjectUiContent
 };

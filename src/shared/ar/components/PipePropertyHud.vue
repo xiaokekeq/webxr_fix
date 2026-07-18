@@ -32,7 +32,12 @@ const rows = computed( () => showsAnnotation.value
 </script>
 
 <template>
-	<div v-if="selectedComponent !== null || annotationDetail.visible" class="pipe-property-hud" aria-live="polite">
+	<div
+		v-if="selectedComponent !== null || annotationDetail.visible"
+		class="pipe-property-hud"
+		data-ar-ui="true"
+		aria-live="polite"
+	>
 		<section
 			class="pipe-property-card"
 			data-ar-ui="true"
@@ -89,7 +94,7 @@ const rows = computed( () => showsAnnotation.value
 	overflow: hidden;
 	border: 1px solid rgba(148, 163, 184, 0.28);
 	border-radius: 18px;
-	background: rgba(21, 61, 113, 0.245);
+	background: rgba(21, 61, 113, 0.72);
 	box-shadow: 0 20px 52px rgba(0, 0, 0, 0.34);
 	backdrop-filter: blur(22px);
 	color: #eff6ff;

@@ -32,13 +32,38 @@ export interface XRAnchorPlacement {
 	initialPoseMatrix: THREE.Matrix4;
 }
 
+export type XRAnchorPlacementResult =
+	| ( XRAnchorPlacement & { status: 'anchored' } )
+	| { status: 'unsupported' }
+	| { status: 'timeout' }
+	| { status: 'failed'; error: unknown }
+	| { status: 'cancelled' };
+
+export type XRTrackingState = 'normal' | 'emulated' | 'unavailable';
+export type XRSessionVisibilityState = 'visible' | 'visible-blurred' | 'hidden';
+export type XRWorldLockState = 'none' | 'pending' | 'anchored' | 'unanchored' | 'recalibration-required';
+
+export interface XRInteractionState {
+	tracking: XRTrackingState;
+	visibility: XRSessionVisibilityState;
+	worldLock: XRWorldLockState;
+	hudPickingLocked: boolean;
+}
+
+export type XRWorldLockPreparation =
+	| { status: 'anchored'; requestId: number; anchor: XRAnchorHandle; initialPoseMatrix: THREE.Matrix4 }
+	| { status: 'unanchored'; requestId: number }
+	| { status: 'timeout' | 'cancelled'; requestId: number }
+	| { status: 'failed'; requestId: number; error: unknown };
+
 export interface XRHitTestController {
 	setup(): void;
+	dispose(): void;
 	update(frame: XRFrame): void;
 	hasGroundHit(): boolean;
 	getHitPosition(target: THREE.Vector3): THREE.Vector3 | null;
 	getHitTestQuality(): XRHitTestQuality | null;
-	createAnchorFromNextHit(): Promise<XRAnchorPlacement | null>;
+	createAnchorFromNextHit(): Promise<XRAnchorPlacementResult>;
 	cancelPendingAnchorRequest(): void;
 	requestSession(): Promise<void>;
 }

@@ -4,7 +4,6 @@ import * as THREE from 'three';
 import {
 	createDefaultPlacementSummaryState,
 	createDefaultModelScaleSummaryState,
-	createDefaultPropertyPanelState,
 	createDefaultRegistrationMetricsState,
 	createDefaultModelRuntimeLoadStatus,
 	type ModelRuntimeLoadStatus,
@@ -86,7 +85,6 @@ export function createModelSession(options: CreateModelSessionOptions): ModelSes
 			selectedModelId: modelDefinition.id,
 			modelUrl: modelDefinition.modelUrl,
 			pipeList: [],
-			propertyPanel: createDefaultPropertyPanelState(),
 			registrationMetrics: createDefaultRegistrationMetricsState(),
 			modelScaleSummary: createDefaultModelScaleSummaryState(),
 			placementSummary: createDefaultPlacementSummaryState(),

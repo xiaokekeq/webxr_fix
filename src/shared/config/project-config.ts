@@ -25,10 +25,7 @@ export interface ComponentPropertyHudField {
 	unit?: string;
 }
 
-/**
- * Project-level opt-in for the DOM property HUD. Projects without this
- * configuration keep their existing in-scene annotation presentation.
- */
+/** Project fields rendered by the shared DOM property HUD. */
 export interface ComponentPropertyHudConfig {
 	fields: ComponentPropertyHudField[];
 }
@@ -107,7 +104,7 @@ export interface ArProjectConfig {
 	capabilities: ArProjectCapabilities;
 	ui: ProjectUiContent;
 	propertySchemaUrl?: string;
-	componentPropertyHud?: ComponentPropertyHudConfig;
+	componentPropertyHud: ComponentPropertyHudConfig;
 }
 
 export interface ArApplicationContext {

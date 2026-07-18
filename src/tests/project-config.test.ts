@@ -11,7 +11,9 @@ describe( 'project configs', () => {
 		expect( damProjectConfig.dataSource.modelCatalogUrl ).toContain( 'projects/dam/models.json' );
 		expect( damProjectConfig.dataSource.modelCatalogUrl ).not.toContain( 'water-network' );
 		expect( damProjectConfig.capabilities ).toMatchObject( { sectionCut: true, layerControl: true } );
-		expect( damProjectConfig.componentPropertyHud ).toBeUndefined();
+		expect( damProjectConfig.componentPropertyHud.fields.map( ( field ) => field.key ) ).toEqual( [
+			'type', 'diameter', 'material', 'depth', 'status', 'remark'
+		] );
 	} );
 
 	it( 'isolates the water catalog and disables dam-only tools', () => {
@@ -22,6 +24,6 @@ describe( 'project configs', () => {
 		expect( waterNetworkProjectConfig.dataSource.modelCatalogUrl ).toContain( 'projects/water-network/models.json' );
 		expect( waterNetworkProjectConfig.dataSource.modelCatalogUrl ).not.toContain( 'projects/dam/' );
 		expect( waterNetworkProjectConfig.capabilities ).toMatchObject( { sectionCut: false, layerControl: false, xray: false } );
-		expect( waterNetworkProjectConfig.componentPropertyHud?.fields.map( ( field ) => field.key ) ).toContain( 'depth' );
+		expect( waterNetworkProjectConfig.componentPropertyHud.fields.map( ( field ) => field.key ) ).toContain( 'depth' );
 	} );
 } );

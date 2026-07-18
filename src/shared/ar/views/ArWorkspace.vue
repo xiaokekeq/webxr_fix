@@ -90,11 +90,29 @@ const hitTestReady = computed(
 		|| engine.value.arSessionPhase === 'placed'
 );
 const canUseMarkerCorners = computed( () => configStatus.value.activeControlTargetHasCornersEnu );
+const xrSessionInteractive = computed( () => (
+	engine.value.xrInteraction.tracking === 'normal'
+	&& engine.value.xrInteraction.visibility === 'visible'
+	&& engine.value.xrInteraction.worldLock !== 'pending'
+	&& engine.value.xrInteraction.worldLock !== 'recalibration-required'
+) );
+const trackingRecoveryMessage = computed( () => {
+	if ( hasArSession.value === false ) return '';
+	if ( engine.value.xrInteraction.worldLock === 'recalibration-required' ) {
+		return '空间坐标发生变化，请重新校正；模型保持原对象和最后有效位置。';
+	}
+	if ( engine.value.xrInteraction.worldLock === 'pending' ) return '正在建立现实锚点…';
+	if ( engine.value.xrInteraction.tracking !== 'normal' || engine.value.xrInteraction.visibility !== 'visible' ) {
+		return '跟踪恢复中，模型已冻结；放置、校正和模型拾取暂不可用。';
+	}
+	return '';
+} );
 
 const sessionStatusText = computed( () => {
 	if ( hasArSession.value === false ) {
 		return '待进入 AR';
 	}
+	if ( trackingRecoveryMessage.value ) return '跟踪恢复中';
 	if ( engine.value.markerCalibration.active ) {
 		return `采集四角 ${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}`;
 	}
@@ -169,13 +187,14 @@ const showMarkerCalibrationOverlay = computed(
 	() => hasArSession.value && markerCalibrationOverlayOpen.value && engine.value.markerCalibration.active
 );
 const canStartMarkerCalibration = computed(
-	() => hasArSession.value && hitTestReady.value && canUseMarkerCorners.value
+	() => hasArSession.value && xrSessionInteractive.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canCaptureMarkerCorner = computed(
-	() => showMarkerCalibrationOverlay.value && hitTestReady.value && canUseMarkerCorners.value
+	() => showMarkerCalibrationOverlay.value && xrSessionInteractive.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canApplyMarkerCalibration = computed(
 	() => showMarkerCalibrationOverlay.value
+		&& xrSessionInteractive.value
 		&& canUseMarkerCorners.value
 		&& ( configStatus.value.hasMockEngineeringData === false || canApplyMockEngineeringCalibration() )
 		&& engine.value.markerCalibration.capturedCornerCount >= engine.value.markerCalibration.expectedCornerCount
@@ -184,6 +203,7 @@ const markerApplyBlockedReason = computed( () => {
 	if ( hasArSession.value === false ) {
 		return '请先进入 AR 会话。';
 	}
+	if ( xrSessionInteractive.value === false ) return trackingRecoveryMessage.value;
 	if ( markerCalibrationOverlayOpen.value === false ) {
 		return 'Marker 校正面板未打开。';
 	}
@@ -206,6 +226,7 @@ const markerApplyBlockedReason = computed( () => {
 } );
 const canPlaceEngineeringModel = computed(
 	() => hasArSession.value
+		&& xrSessionInteractive.value
 		&& configStatus.value.hasSiteOrigin
 		&& configStatus.value.hasControlTargets
 		&& canUseMarkerCorners.value
@@ -224,6 +245,7 @@ const placementBlockedText = computed( () => {
 	if ( hasArSession.value === false ) {
 		return '请先进入 AR。';
 	}
+	if ( xrSessionInteractive.value === false ) return trackingRecoveryMessage.value;
 	if ( modelPlaced.value ) {
 		return '模型已显示；如需重新放置，请先重置并重新完成 Marker 校正。';
 	}
@@ -561,6 +583,15 @@ function setArOverlayClass(active: boolean): void {
 				<div class="status-chip">状态：{{ sessionStatusText }}</div>
 			</header>
 
+			<div
+				v-if="trackingRecoveryMessage"
+				class="tracking-recovery-banner"
+				data-ar-ui="true"
+				role="status"
+			>
+				{{ trackingRecoveryMessage }}
+			</div>
+
 			<section class="scene-shell">
 				<div ref="canvasHost" class="scene-layer"></div>
 				<div ref="xrButtonHost" class="scene-hidden"></div>
@@ -593,7 +624,7 @@ function setArOverlayClass(active: boolean): void {
 		</div>
 
 		<PipePropertyHud
-			v-if="hasArSession && projectConfig.componentPropertyHud !== undefined"
+			v-if="hasArSession"
 			:selected-component="engine.selectedComponent"
 			:annotation-detail="engine.annotationDetail"
 			:fields="projectConfig.componentPropertyHud.fields"
@@ -821,6 +852,24 @@ function setArOverlayClass(active: boolean): void {
 
 .inspect-page.ar-active {
 	background: transparent;
+}
+
+.tracking-recovery-banner {
+	position: fixed;
+	top: max(84px, calc(env(safe-area-inset-top) + 72px));
+	left: 50%;
+	z-index: 8;
+	width: min(88vw, 520px);
+	transform: translateX(-50%);
+	padding: 10px 14px;
+	border: 1px solid rgba(250, 204, 21, 0.5);
+	border-radius: 12px;
+	background: rgba(30, 41, 59, 0.86);
+	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+	color: #fef08a;
+	font-weight: 700;
+	line-height: 1.45;
+	text-align: center;
 }
 
 :global(html.ar-dom-overlay-active),

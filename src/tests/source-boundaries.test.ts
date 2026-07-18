@@ -38,6 +38,6 @@ describe( 'shared source boundaries', () => {
 		const paths = Object.keys( commonSources );
 		expect( Object.values( commonSources ).filter( ( source ) => /export class ThreeEngine\b/.test( source ) ) ).toHaveLength( 1 );
 		expect( paths.filter( ( path ) => path.endsWith( '/property-selection.ts' ) ) ).toHaveLength( 1 );
-		expect( paths.filter( ( path ) => path.endsWith( '/model-property-resolver.ts' ) ) ).toHaveLength( 1 );
+		expect( paths.filter( ( path ) => path.endsWith( '/property-hud.ts' ) ) ).toHaveLength( 1 );
 	} );
 } );

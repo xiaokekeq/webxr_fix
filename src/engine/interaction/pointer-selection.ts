@@ -28,6 +28,7 @@ interface CreatePointerSelectionSessionOptions {
 		}
 	): boolean;
 	getPlacedModel(): THREE.Group | null;
+	canPickModel(): boolean;
 	getWorkspaceMode(): WorkspaceMode;
 	getPipesByName(): Map<string, PipeRecord>;
 	dragThresholdPx?: number;
@@ -39,7 +40,6 @@ export interface PointerSelectionSession {
 	handleScreenPointerDown(clientX: number, clientY: number): void;
 	handleScreenPointerUp(clientX: number, clientY: number): void;
 	handleArSelect(): void;
-	suppressSelectionFor(durationMs: number): void;
 }
 
 const DEFAULT_DRAG_THRESHOLD_PX = 10;
@@ -57,6 +57,7 @@ export function createPointerSelectionSession(
 		onSelectionCleared,
 		handlePreSelectionRaycast,
 		getPlacedModel,
+		canPickModel,
 		getWorkspaceMode,
 		getPipesByName,
 		dragThresholdPx = DEFAULT_DRAG_THRESHOLD_PX
@@ -67,19 +68,12 @@ export function createPointerSelectionSession(
 	const raycaster = new THREE.Raycaster();
 	const xrRayOrigin = new THREE.Vector3();
 	const xrRayDirection = new THREE.Vector3();
-	let lastScreenSelectionTime = -Infinity;
-	let selectionSuppressedUntil = -Infinity;
 	let hasPendingPointerSelection = false;
-
-	function isSelectionSuppressed(): boolean {
-
-		return performance.now() < selectionSuppressedUntil;
-
-	}
 
 	function handleScreenPointerDown(clientX: number, clientY: number): void {
 
-		if ( isSelectionSuppressed() ) {
+		if ( sceneBundle.renderer.xr.isPresenting || canPickModel() === false ) {
+			hasPendingPointerSelection = false;
 			return;
 		}
 
@@ -90,7 +84,7 @@ export function createPointerSelectionSession(
 
 	function handleScreenPointerUp(clientX: number, clientY: number): void {
 
-		if ( isSelectionSuppressed() ) {
+		if ( sceneBundle.renderer.xr.isPresenting || canPickModel() === false ) {
 			hasPendingPointerSelection = false;
 			return;
 		}
@@ -115,7 +109,6 @@ export function createPointerSelectionSession(
 			? sceneBundle.renderer.xr.getCamera()
 			: sceneBundle.camera;
 		raycaster.setFromCamera( pointer, activeCamera );
-		lastScreenSelectionTime = performance.now();
 		const placedModel = getPlacedModel();
 		if ( handlePreSelectionRaycast?.( {
 			raycaster,
@@ -151,13 +144,7 @@ export function createPointerSelectionSession(
 
 		handleArSelect() {
 
-			if ( isSelectionSuppressed() ) {
-				return;
-			}
-
-			if ( performance.now() - lastScreenSelectionTime < 240 ) {
-				return;
-			}
+			if ( canPickModel() === false ) return;
 
 			const xrCamera = sceneBundle.renderer.xr.getCamera();
 			xrRayOrigin.setFromMatrixPosition( xrCamera.matrixWorld );
@@ -184,15 +171,6 @@ export function createPointerSelectionSession(
 				canvasRect.left + canvasRect.width / 2,
 				canvasRect.top + canvasRect.height / 2,
 				'xr-select'
-			);
-
-		},
-
-		suppressSelectionFor(durationMs) {
-
-			selectionSuppressedUntil = Math.max(
-				selectionSuppressedUntil,
-				performance.now() + durationMs
 			);
 
 		},

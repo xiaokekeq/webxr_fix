@@ -4,7 +4,7 @@ import type {
 	ArSessionStartResult,
 	SetStatus,
 	XRAnchorHandle,
-	XRAnchorPlacement,
+	XRAnchorPlacementResult,
 	XRHitTestController,
 	XRHitTestQuality
 } from '@/features/ar/types/runtime-types.js';
@@ -16,13 +16,13 @@ interface CreateXRHitTestControllerOptions {
 	setStatus: SetStatus;
 	onSessionStart?: (result: ArSessionStartResult) => void;
 	onSessionEnd?: () => void;
-	onSelect?: () => void;
 	canReportStatus?: () => boolean;
+	isHudPickingLocked?: () => boolean;
 }
 
 interface PendingAnchorRequest {
-	promise: Promise<XRAnchorPlacement | null>;
-	resolve(value: XRAnchorPlacement | null): void;
+	promise: Promise<XRAnchorPlacementResult>;
+	resolve(value: XRAnchorPlacementResult): void;
 	timeoutId: ReturnType<typeof setTimeout> | null;
 	generation: number;
 	settled: boolean;
@@ -60,7 +60,8 @@ export async function detectImmersiveArSupport(): Promise<ImmersiveArSupportInfo
 
 export function createXRHitTestController(options: CreateXRHitTestControllerOptions): XRHitTestController {
 
-	const { renderer, reticle, xrButtonWrap, setStatus, onSessionStart, onSessionEnd, onSelect, canReportStatus } = options;
+	const { renderer, reticle, xrButtonWrap, setStatus, onSessionStart, onSessionEnd, canReportStatus, isHudPickingLocked } = options;
+	const domOverlayRoot = typeof document === 'undefined' ? null : document.body;
 	let hitTestSource: XRHitTestSource | null = null;
 	let hitTestSourceRequested = false;
 	let lastSuccessfulHitTime = 0;
@@ -90,7 +91,7 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 			return;
 		}
 		activeSession = session;
-		session.addEventListener( 'select', handleSelect );
+		domOverlayRoot?.addEventListener( 'beforexrselect', handleBeforeXRSelect );
 		const startResult = pendingStartResult ?? createSessionResult( session, true, false, null );
 		pendingStartResult = null;
 		onSessionStart?.( startResult );
@@ -113,7 +114,7 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 	function handleSessionEnd(): void {
 
 		sessionRequestPending = false;
-		activeSession?.removeEventListener( 'select', handleSelect );
+		domOverlayRoot?.removeEventListener( 'beforexrselect', handleBeforeXRSelect );
 		activeSession = null;
 		pendingStartResult = null;
 		reticle.visible = false;
@@ -123,9 +124,11 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 
 	}
 
-	function handleSelect(): void {
+	function handleBeforeXRSelect(event: Event): void {
 
-		onSelect?.();
+		if ( shouldPreventXRSelect( event.target, isHudPickingLocked?.() === true ) ) {
+			event.preventDefault();
+		}
 
 	}
 
@@ -213,12 +216,12 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 
 	}
 
-	function createAnchorFromNextHit(): Promise<XRAnchorPlacement | null> {
+	function createAnchorFromNextHit(): Promise<XRAnchorPlacementResult> {
 
 		if ( pendingAnchorRequest !== null ) return pendingAnchorRequest.promise;
 		if ( inFlightAnchorRequest !== null ) return inFlightAnchorRequest.promise;
-		let resolveRequest!: (value: XRAnchorPlacement | null) => void;
-		const promise = new Promise<XRAnchorPlacement | null>( ( resolve ) => {
+		let resolveRequest!: (value: XRAnchorPlacementResult) => void;
+		const promise = new Promise<XRAnchorPlacementResult>( ( resolve ) => {
 			resolveRequest = resolve;
 		} );
 		const request: PendingAnchorRequest = {
@@ -229,7 +232,7 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 			settled: false
 		};
 		request.timeoutId = setTimeout( () => {
-			finishAnchorRequest( request, null );
+			finishAnchorRequest( request, { status: 'timeout' } );
 		}, PLACEABLE_HIT_RETENTION_MS );
 		pendingAnchorRequest = request;
 		return promise;
@@ -243,12 +246,12 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		pendingAnchorRequest = null;
 		if ( request.timeoutId !== null ) clearTimeout( request.timeoutId );
 		request.timeoutId = setTimeout( () => {
-			finishAnchorRequest( request, null );
+			finishAnchorRequest( request, { status: 'timeout' } );
 		}, ANCHOR_CREATE_TIMEOUT_MS );
 		inFlightAnchorRequest = request;
 		const result = firstHit as XRHitTestResult & { createAnchor?: () => Promise<XRAnchorHandle> };
 		if ( result.createAnchor === undefined ) {
-			finishAnchorRequest( request, null );
+			finishAnchorRequest( request, { status: 'unsupported' } );
 			return;
 		}
 		const initialPose = initialPoseMatrix.clone();
@@ -259,24 +262,30 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 					try {
 						anchor.delete?.();
 					} catch {}
-					finishAnchorRequest( request, null );
+					finishAnchorRequest( request, { status: 'cancelled' } );
 					return;
 				}
-				finishAnchorRequest( request, { anchor, initialPoseMatrix: initialPose } );
+				finishAnchorRequest( request, { status: 'anchored', anchor, initialPoseMatrix: initialPose } );
 			}, ( error ) => {
 				if ( request.settled === false ) {
 					arWarn( '[XRAnchorPlacement]', { created: false, reason: 'createAnchor failed', error } );
 				}
-				finishAnchorRequest( request, null );
+				finishAnchorRequest( request, isUnsupportedAnchorError( error )
+					? { status: 'unsupported' }
+					: { status: 'failed', error }
+				);
 			} );
 		} catch ( error ) {
 			arWarn( '[XRAnchorPlacement]', { created: false, reason: 'createAnchor failed', error } );
-			finishAnchorRequest( request, null );
+			finishAnchorRequest( request, isUnsupportedAnchorError( error )
+				? { status: 'unsupported' }
+				: { status: 'failed', error }
+			);
 		}
 
 	}
 
-	function finishAnchorRequest(request: PendingAnchorRequest, value: XRAnchorPlacement | null): void {
+	function finishAnchorRequest(request: PendingAnchorRequest, value: XRAnchorPlacementResult): void {
 
 		if ( request.settled ) return;
 		request.settled = true;
@@ -302,13 +311,22 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 	function cancelPendingAnchorRequest(): void {
 
 		anchorRequestGeneration += 1;
-		if ( pendingAnchorRequest !== null ) finishAnchorRequest( pendingAnchorRequest, null );
-		if ( inFlightAnchorRequest !== null ) finishAnchorRequest( inFlightAnchorRequest, null );
+		if ( pendingAnchorRequest !== null ) finishAnchorRequest( pendingAnchorRequest, { status: 'cancelled' } );
+		if ( inFlightAnchorRequest !== null ) finishAnchorRequest( inFlightAnchorRequest, { status: 'cancelled' } );
 
 	}
 
 	return {
 		setup,
+		dispose() {
+
+			renderer.xr.removeEventListener( 'sessionstart', handleSessionStart );
+			renderer.xr.removeEventListener( 'sessionend', handleSessionEnd );
+			domOverlayRoot?.removeEventListener( 'beforexrselect', handleBeforeXRSelect );
+			activeSession = null;
+			resetHitState();
+
+		},
 		update,
 		hasGroundHit,
 		getHitPosition,
@@ -349,6 +367,20 @@ export function createXRHitTestController(options: CreateXRHitTestControllerOpti
 		recentHitSamples = recentHitSamples.filter( ( sample ) => now - sample.time <= HIT_QUALITY_WINDOW_MS );
 
 	}
+
+}
+
+export function shouldPreventXRSelect(target: EventTarget | null, hudPickingLocked: boolean): boolean {
+
+	if ( hudPickingLocked ) return true;
+	const candidate = target as { closest?: (selector: string) => Element | null } | null;
+	return typeof candidate?.closest === 'function' && candidate.closest( '[data-ar-ui]' ) !== null;
+
+}
+
+function isUnsupportedAnchorError(error: unknown): boolean {
+
+	return error instanceof DOMException && error.name === 'NotSupportedError';
 
 }
 

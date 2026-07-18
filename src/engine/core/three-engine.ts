@@ -26,11 +26,6 @@ import { createStatusRuntime } from '@/engine/session/status-runtime.js';
 import { createWorkspaceRuntime } from '@/engine/session/workspace-runtime.js';
 import type { DemoModelConfig } from '@/models/config/demo-model-config.js';
 import {
-	resolveModelObjectProperties,
-	resolveModelObjectSelection,
-	type CanvasModelPropertyPanelData
-} from '@/engine/models/model-property-resolver.js';
-import {
 	STATIC_LAYER_NAMES,
 	TIMELINE_STAGES
 } from '@/models/catalog/model-api.js';
@@ -77,7 +72,6 @@ import { TexturedEnclosureShell } from '@/engine/visualization/textured-enclosur
 import { mapHiddenLayerCountToValue, mapLayerPeelingValue } from '@/engine/visualization/adjustment-value-mappers.js';
 import {
 	createArAnnotationLabelController,
-	type ArAnnotationDetailOverlay,
 	type ArAnnotationItem
 } from '@/engine/annotation/ar-annotation-labels.js';
 import { AnnotationLayer } from '@/engine/annotation/annotation-layer.js';
@@ -100,7 +94,7 @@ import type {
 	SiteCalibrationBaseline,
 	VisualControlTarget
 } from '@/features/ar/types/workflow.js';
-import type { ArSessionStartResult } from '@/features/ar/types/runtime-types.js';
+import type { ArSessionStartResult, XRInteractionState } from '@/features/ar/types/runtime-types.js';
 import type { ArSessionContext } from '@/features/ar/types/ar-session-context.js';
 import type { ProjectRepositories } from '@/services/repository-factory.js';
 import type { CreateInspectionRecordInput } from '@/services/repositories/inspection-repository.js';
@@ -152,6 +146,7 @@ export interface ThreeEngineHosts extends SceneHostRuntimeHosts {}
 export interface ThreeEngineSnapshot extends RegistrationStoreState {
 	hasSelection: boolean;
 	currentStatus: string;
+	xrInteraction: XRInteractionState;
 }
 
 export type ModelPlacementResult =
@@ -183,16 +178,6 @@ function createInitialState(projectName = '现场辅助核查'): RegistrationSto
 		pipeList: [],
 		selectedAnnotationId: null,
 		selectedComponent: null,
-		propertyPanel: {
-			name: '未选择构件',
-			statusBadge: '未选中',
-			type: '-',
-			diameter: '-',
-			material: '-',
-			depth: '-',
-			status: '-',
-			remark: '点击模型构件后可查看属性信息与巡查说明。'
-		},
 		inspectionPlacementSource: 'manual-marker',
 		registrationMetrics: {
 			gpsText: '-',
@@ -221,21 +206,22 @@ function createInitialState(projectName = '现场辅助核查'): RegistrationSto
 }
 
 export function createInitialThreeEngineSnapshot(projectName?: string): ThreeEngineSnapshot {
-	return { ...createInitialState( projectName ), hasSelection: false, currentStatus: '正在准备 AR 运行环境' };
+	return {
+		...createInitialState( projectName ),
+		hasSelection: false,
+		currentStatus: '正在准备 AR 运行环境',
+		xrInteraction: {
+			tracking: 'unavailable',
+			visibility: 'hidden',
+			worldLock: 'none',
+			hudPickingLocked: false
+		}
+	};
 }
 
 function hasSelectedPipe(state: RegistrationStoreState): boolean {
 
-	return (
-		state.selectedComponent !== null
-		||
-		state.propertyPanel.name !== '未选择构件'
-		|| state.propertyPanel.type !== '-'
-		|| state.propertyPanel.diameter !== '-'
-		|| state.propertyPanel.material !== '-'
-		|| state.propertyPanel.depth !== '-'
-		|| state.propertyPanel.status !== '-'
-	);
+	return state.selectedComponent !== null || state.annotationDetail.visible;
 
 }
 
@@ -406,7 +392,6 @@ export class ThreeEngine {
 				this.emit();
 			},
 			requestPreferredPlacement: () => {
-				this.pointerSelection.suppressSelectionFor( 1200 );
 				this.placementWorkflow.requestAutoPlacement();
 			},
 			startManualCalibration: ( message ) => {
@@ -421,6 +406,8 @@ export class ThreeEngine {
 			getSiteId: () => this.demoModelConfig?.modelId ?? null,
 			getCurrentSessionId: () => this.currentArSessionId,
 			isPresenting: () => this.sceneBundle.renderer.xr.isPresenting,
+			canInteract: () => this.xrRuntime.canPlaceOrCalibrate(),
+			getInteractionBlockMessage: () => this.xrRuntime.getInteractionBlockMessage(),
 			hasGroundHit: () => this.xrRuntime.getHitTestController().hasGroundHit(),
 			getHitPosition: ( target ) => this.xrRuntime.getHitTestController().getHitPosition( target ),
 			getDemoModelConfig: () => this.getSessionSiteConfig(),
@@ -475,18 +462,19 @@ export class ThreeEngine {
 			getSiteId: () => this.demoModelConfig?.siteId ?? this.currentArSessionContext?.siteId ?? null,
 			getCurrentSessionId: () => this.currentArSessionId,
 			getInspectionTargetId: () => this.activeMarkerLocalizationResult?.markerId ?? this.inspectionMarkerWorkflow.getStableTargetId(),
-			getInspectionStableFrameCount: () => this.inspectionMarkerWorkflow.getStableFrameCount(),
 			getPreferredLocalizationOverride: () => this.getPreferredFormalLocalizationOverride(),
 			getModelTemplate: () => this.modelTemplate,
 			getRegistrationSolution: () => this.registrationSolution,
 			getRuntimeLoadStatus: () => this.store.getState().modelRuntimeLoad,
 			getHitTestController: () => this.xrRuntime.getHitTestController(),
-			getModelOrientationTarget: () => this.modelOrientation,
-				onBeforePlacementRequest: () => {
-					this.propertySelection.clearSelection();
-					this.pointerSelection.suppressSelectionFor( 1200 );
+			canPlaceOrCalibrate: () => this.xrRuntime.canPlaceOrCalibrate(),
+			getInteractionBlockMessage: () => this.xrRuntime.getInteractionBlockMessage(),
+			prepareModelWorldLock: () => this.xrRuntime.prepareModelWorldLock(),
+			commitModelWorldLock: ( preparation ) => this.xrRuntime.commitModelWorldLock( preparation ),
+			cancelModelWorldLock: ( preparation ) => this.xrRuntime.cancelModelWorldLock( preparation ),
+			onBeforePlacementRequest: () => {
+				this.propertySelection.clearSelection();
 			},
-			onPlacementBaseResolved: () => {},
 			applyModelLayerVisibility: () => {
 				this.applyModelLayerVisibility( 'auto-placement' );
 			},
@@ -543,9 +531,6 @@ export class ThreeEngine {
 			setStatus: ( message ) => {
 				this.setStatus( message );
 			},
-			suppressSelection: ( durationMs ) => {
-				this.pointerSelection.suppressSelectionFor( durationMs );
-			},
 			placementSession: this.placementSession,
 			arSessionStateRuntime: this.arSessionStateRuntime,
 			inspectionMarkerWorkflow: this.inspectionMarkerWorkflow,
@@ -563,27 +548,14 @@ export class ThreeEngine {
 				this.emit();
 			},
 			onSelectionApplied: ( selection ) => {
-				if ( this.hasComponentPropertyHud() ) {
-					if ( selection.properties === null ) {
-						this.clearAnnotationDetail();
-						return;
-					}
-
-					this.showComponentPropertyHud(
-						selection.businessObject,
-						selection.componentId,
-						selection.properties
-					);
-					return;
-				}
-
 				if ( selection.properties === null ) {
 					this.clearAnnotationDetail();
 					return;
 				}
 
-				this.showCanvasModelPropertyPanel(
+				this.showComponentPropertyHud(
 					selection.businessObject,
+					selection.componentId,
 					selection.properties
 				);
 			},
@@ -593,10 +565,6 @@ export class ThreeEngine {
 				this.applyModelLayerVisibility( 'selection-cleared' );
 			},
 			handlePreSelectionRaycast: ( selection ) => {
-				if ( this.annotationLabelsController.hitDetailPanel( selection.raycaster ) ) {
-					return true;
-				}
-
 				if ( this.handleBusinessAnnotationPick( selection.raycaster ) ) {
 					return true;
 				}
@@ -609,6 +577,10 @@ export class ThreeEngine {
 				this.handleAnnotationSelection( item );
 				return true;
 			},
+			canPickModel: () => (
+				this.sceneBundle.renderer.xr.isPresenting === false
+				|| this.xrRuntime.canPickModel()
+			),
 			getPlacedModel: () => this.placementSession.getPlacedModel(),
 			getWorkspaceMode: () => this.store.getState().workspaceMode,
 			getPipesByName: () => this.pipesByName
@@ -696,9 +668,14 @@ export class ThreeEngine {
 			canReportStatus: () => (
 				this.placementSession.getArPlacedModel() === null
 				&& this.placementSession.getAutoPlacementPending() === false
+				&& this.engineeringPlacementInFlight === false
+				&& this.autoPlacementInFlightSolutionId === null
+				&& this.xrRuntime.getInteractionState().worldLock !== 'pending'
 			),
+			isHudPickingLocked: () => this.isPropertyHudVisible(),
+			onInteractionStateChange: () => this.emit(),
 			onAttemptAutoPlacement: () => {
-				this.placementWorkflow.attemptAutoPlacement();
+				this.tryAutoPlaceAppliedMarkerSolution();
 			},
 			onFrameUpdate: ( frame ) => {
 				this.safeFrameTask( 'real-depth', () => {
@@ -723,8 +700,6 @@ export class ThreeEngine {
 		this.sceneBundle.renderer.domElement.addEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
 		this.sceneBundle.renderer.domElement.addEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
 		this.sceneBundle.renderer.domElement.addEventListener( 'webglcontextlost', this.handleWebglContextLost );
-		window.addEventListener( 'pointerdown', this.handleGlobalArPointerDown, true );
-		window.addEventListener( 'pointerup', this.handleGlobalArPointerUp, true );
 		window.addEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionend', this.unbindArSelectionSession );
@@ -755,7 +730,8 @@ export class ThreeEngine {
 		return {
 			...state,
 			hasSelection: hasSelectedPipe( state ),
-			currentStatus: this.currentStatus
+			currentStatus: this.currentStatus,
+			xrInteraction: this.xrRuntime.getInteractionState()
 		};
 
 	}
@@ -769,9 +745,7 @@ export class ThreeEngine {
 
 	private activateCoreModelRuntime(bundle: LoadedModelRuntimeBundle): void {
 
-		if ( this.hasComponentPropertyHud() ) {
-			this.prepareComponentPicking( bundle.modelTemplate, bundle.pipesByName );
-		}
+		this.prepareComponentPicking( bundle.modelTemplate, bundle.pipesByName );
 		this.pipesByName = bundle.pipesByName;
 		this.demoModelConfig = bundle.demoModelConfig;
 		this.modelTemplate = bundle.modelTemplate;
@@ -844,14 +818,12 @@ export class ThreeEngine {
 		}
 
 		this.disposed = true;
-		this.xrRuntime.clearModelWorldLock();
+		this.xrRuntime.dispose();
 		this.sceneBundle.renderer.setAnimationLoop( null );
 		this.realDepthProvider.dispose();
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'webglcontextlost', this.handleWebglContextLost );
-		window.removeEventListener( 'pointerdown', this.handleGlobalArPointerDown, true );
-		window.removeEventListener( 'pointerup', this.handleGlobalArPointerUp, true );
 		window.removeEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
@@ -869,7 +841,6 @@ export class ThreeEngine {
 
 	closePropertyPanel(): void {
 
-		this.pointerSelection.suppressSelectionFor( 1000 );
 		this.propertySelection.clearSelection();
 		this.clearAnnotationDetail();
 		this.annotationLayer.setSelected( null );
@@ -1164,7 +1135,6 @@ export class ThreeEngine {
 			return Promise.resolve();
 		}
 		this.syncArSessionContext();
-		this.pointerSelection.suppressSelectionFor( 1200 );
 		return this.xrRuntime.requestSession();
 
 	}
@@ -2011,18 +1981,17 @@ export class ThreeEngine {
 			return { ok: false, stage: 'marker', reason: 'marker-solution-missing', message };
 		}
 
-		const worldLock = await this.xrRuntime.lockModelToLatestHit();
-		if ( worldLock === 'cancelled' ) {
-			return { ok: false, stage: 'placement', reason: 'placement-cancelled', message: '模型放置已取消。' };
+		const placement = await this.placementWorkflow.placeLocalizedModel();
+		if ( placement.status !== 'placed' && placement.status !== 'already-placed' ) {
+			const message = this.xrRuntime.getInteractionBlockMessage()
+				?? ( placement.status === 'timeout'
+					? '现实锚点创建超时，请保持稳定平面可见后重试。'
+					: placement.status === 'failed'
+						? '现实锚点创建失败，本次未放置模型。'
+						: '模型放置未完成，请重试。' );
+			return { ok: false, stage: 'placement', reason: `placement-${placement.status}`, message };
 		}
-		if ( worldLock === 'unavailable' ) {
-			const message = '未能建立现实锚点，请保持 Marker 或稳定平面可见后重试。';
-			this.setStatus( message );
-			return { ok: false, stage: 'placement', reason: 'world-anchor-unavailable', message };
-		}
-		await this.placementWorkflow.placeLocalizedModel();
 		if ( this.placementSession.getArPlacedModel() === null ) {
-			this.xrRuntime.clearModelWorldLock();
 			return { ok: false, stage: 'placement', reason: 'placed-model-missing', message: '模型放置未生成可显示对象。' };
 		}
 
@@ -2334,9 +2303,10 @@ export class ThreeEngine {
 
 	}
 
-	private hasComponentPropertyHud(): boolean {
+	private isPropertyHudVisible(): boolean {
 
-		return this.projectConfig.componentPropertyHud !== undefined;
+		const state = this.store.getState();
+		return state.selectedComponent !== null || state.annotationDetail.visible;
 
 	}
 
@@ -2358,7 +2328,6 @@ export class ThreeEngine {
 			annotationDetail: createDefaultAnnotationDetailState()
 		} );
 		this.annotationLayer.setSelected( null );
-		this.annotationLabelsController.setDetail( null );
 
 	}
 
@@ -2439,62 +2408,6 @@ export class ThreeEngine {
 
 	}
 
-	private showCanvasModelPropertyPanel(
-		businessObject: THREE.Object3D,
-		properties: PipeRecord | null,
-		preferredLayerName?: string
-	): void {
-
-		const bounds = new THREE.Box3().setFromObject( businessObject );
-		const selection = resolveModelObjectSelection( {
-			object: businessObject,
-			properties
-		} );
-		const panelData = resolveModelObjectProperties( {
-			selection,
-			properties,
-			layerName: preferredLayerName
-				?? getLayerLabelForObject( businessObject, this.store.getState().modelLayers )
-				?? undefined,
-			materialName: getObjectMaterialName( businessObject ),
-			bounds
-		} );
-
-		this.store.patch( {
-			selectedAnnotationId: null,
-			selectedComponent: null,
-			annotationDetail: createDefaultAnnotationDetailState()
-		} );
-		this.annotationLayer.setSelected( null );
-		this.annotationLabelsController.setDetail(
-			this.createCanvasModelPropertyOverlay( businessObject, panelData )
-		);
-
-
-	}
-
-	private createCanvasModelPropertyOverlay(
-		targetObject: THREE.Object3D,
-		panelData: CanvasModelPropertyPanelData
-	): ArAnnotationDetailOverlay | null {
-
-		const fields = panelData.sections.flatMap( ( section ) => section.rows.map( ( row ) => ( {
-			label: row.label,
-			value: row.unit === undefined ? row.value : `${row.value}${row.unit}`
-		} ) ) );
-		if ( fields.length === 0 ) {
-			return null;
-		}
-
-		return {
-			targetObject,
-			title: panelData.title,
-			subtitle: `${panelData.modelInstanceName} / ${panelData.modelRole}`,
-			fields
-		};
-
-	}
-
 	private updateAnnotationDetailFromSelection(
 		businessObject: THREE.Object3D,
 		properties: PipeRecord | null,
@@ -2510,9 +2423,6 @@ export class ThreeEngine {
 			selectedComponent: null,
 			annotationDetail: detailState
 		} );
-		this.annotationLabelsController.setDetail(
-			this.createAnnotationDetailOverlay( businessObject, detailState )
-		);
 
 	}
 
@@ -2532,7 +2442,6 @@ export class ThreeEngine {
 			selectedComponent: null,
 			annotationDetail: createDefaultAnnotationDetailState()
 		} );
-		this.annotationLabelsController.setDetail( null );
 		this.annotationLayer.setSelected( null );
 
 	}
@@ -2567,24 +2476,6 @@ export class ThreeEngine {
 				{ label: '状态', value: properties?.status || ( businessObject.visible ? '可见' : '隐藏' ) },
 				{ label: '备注', value: remark }
 			]
-		};
-
-	}
-
-	private createAnnotationDetailOverlay(
-		targetObject: THREE.Object3D,
-		detailState: AnnotationDetailState
-	): ArAnnotationDetailOverlay | null {
-
-		if ( detailState.visible === false || detailState.fields.length === 0 ) {
-			return null;
-		}
-
-		return {
-			targetObject,
-			title: detailState.title,
-			subtitle: detailState.subtitle,
-			fields: detailState.fields
 		};
 
 	}
@@ -2627,41 +2518,6 @@ export class ThreeEngine {
 
 		const session = this.sceneBundle.renderer.xr.getSession();
 		session?.removeEventListener( 'select', this.pointerSelection.handleArSelect );
-
-	};
-
-	private shouldHandleGlobalArPointerEvent(event: PointerEvent): boolean {
-
-		if ( this.sceneBundle.renderer.xr.isPresenting === false ) {
-			return false;
-		}
-
-		const target = event.target;
-		if ( target instanceof Element ) {
-			return target.closest( '[data-ar-ui="true"]' ) === null;
-		}
-
-		return true;
-
-	}
-
-	private handleGlobalArPointerDown = (event: PointerEvent): void => {
-
-		if ( this.shouldHandleGlobalArPointerEvent( event ) === false ) {
-			return;
-		}
-
-		this.pointerSelection.handleScreenPointerDown( event.clientX, event.clientY );
-
-	};
-
-	private handleGlobalArPointerUp = (event: PointerEvent): void => {
-
-		if ( this.shouldHandleGlobalArPointerEvent( event ) === false ) {
-			return;
-		}
-
-		this.pointerSelection.handleScreenPointerUp( event.clientX, event.clientY );
 
 	};
 
@@ -2760,7 +2616,6 @@ export class ThreeEngine {
 			selectedComponent: null,
 			annotationDetail: this.createEngineeringAnnotationDetailState( annotation )
 		} );
-		this.annotationLabelsController.setDetail( null );
 		this.setStatus( `已选择业务标识：${annotation.title}` );
 		this.emit();
 

@@ -48,6 +48,8 @@ interface MarkerCalibrationRuntimeOptions {
 	getSiteId(): string | null;
 	getCurrentSessionId(): string | null;
 	isPresenting(): boolean;
+	canInteract(): boolean;
+	getInteractionBlockMessage(): string | null;
 	hasGroundHit(): boolean;
 	getHitPosition(target: THREE.Vector3): THREE.Vector3 | null;
 	getDemoModelConfig(): DemoModelConfig | null;
@@ -240,6 +242,10 @@ export class MarkerCalibrationRuntime {
 
 	startCurrentSessionCalibration(): void {
 
+		if ( this.options.canInteract() === false ) {
+			this.options.setStatus( this.options.getInteractionBlockMessage() ?? '跟踪恢复中，请保持设备稳定。' );
+			return;
+		}
 		if ( this.options.isPresenting() === false ) {
 			this.options.setStatus( '请先进入当前 AR 会话，再开始 Marker 校正。' );
 			return;
@@ -306,6 +312,10 @@ export class MarkerCalibrationRuntime {
 
 	captureCurrentSessionMarkerCorner(): void {
 
+		if ( this.options.canInteract() === false ) {
+			this.options.setStatus( this.options.getInteractionBlockMessage() ?? '跟踪恢复中，请保持设备稳定。' );
+			return;
+		}
 		if ( this.options.isPresenting() === false ) {
 			this.options.setStatus( '请先进入当前 AR 会话，再采集 Marker 角点。' );
 			return;
@@ -378,6 +388,12 @@ export class MarkerCalibrationRuntime {
 	solveAndApplyCurrentSessionCalibration(): MarkerSolutionApplyResult {
 
 		this.options.clearLastMarkerSolutionApplyResult();
+		if ( this.options.canInteract() === false ) {
+			this.options.setStatus( this.options.getInteractionBlockMessage() ?? '跟踪恢复中，请保持设备稳定。' );
+			const failure = this.createApplyFailure( 'session-validation', 'xr-interaction-suspended' );
+			this.recordApplyResult( failure );
+			return failure;
+		}
 		const applied = this.solveAndApplyCurrentSessionCalibrationBoolean();
 		const result = this.options.getLastMarkerSolutionApplyResult();
 		const resolved = result ?? this.pendingApplyFailure ?? this.createApplyFailure( applied ? 'state-commit' : 'solution-validation', applied ? 'marker-apply-result-missing' : 'marker-solve-or-apply-precondition-failed' );

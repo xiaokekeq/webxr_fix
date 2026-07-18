@@ -36,6 +36,7 @@ describe( 'pointer selection', () => {
 			onInspectSelection: vi.fn(),
 			onSelectionApplied,
 			onSelectionCleared,
+			canPickModel: () => true,
 			getPlacedModel: () => placedModel,
 			getWorkspaceMode: () => 'browse',
 			getPipesByName: () => new Map( [ [ 'Line014', { name: 'Line014' } ] ] )
@@ -89,6 +90,7 @@ describe( 'pointer selection', () => {
 			onInspectSelection: vi.fn(),
 			onSelectionApplied,
 			onSelectionCleared,
+			canPickModel: () => true,
 			getPlacedModel: () => placedModel,
 			getWorkspaceMode: () => 'browse',
 			getPipesByName: () => new Map( [ [ 'Line014', { name: 'Line014', code: 'WN-74-76-001' } ] ] )
@@ -114,6 +116,42 @@ describe( 'pointer selection', () => {
 		propertySelection.clearSelection();
 
 		expect( propertySelection.isSelectedComponent( 'WN-blank-test' ) ).toBe( false );
+
+	} );
+
+	it( 'does not use screen Pointer events for world picking during an XR session', () => {
+
+		const camera = new THREE.PerspectiveCamera( 60, 1, 0.1, 100 );
+		camera.position.set( 0, 0, 5 );
+		camera.lookAt( 0, 0, 0 );
+		camera.updateProjectionMatrix();
+		camera.updateMatrixWorld();
+		const placedModel = new THREE.Group();
+		placedModel.add( new THREE.Mesh( new THREE.BoxGeometry(), new THREE.MeshBasicMaterial() ) );
+		placedModel.updateMatrixWorld( true );
+		const onSelectionApplied = vi.fn();
+		const session = createPointerSelectionSession( {
+			sceneBundle: {
+				camera,
+				renderer: {
+					domElement: { getBoundingClientRect: () => ( { left: 0, top: 0, width: 100, height: 100 } ) },
+					xr: { isPresenting: true, getCamera: () => camera }
+				}
+			} as unknown as ARSceneBundle,
+			propertySelection: createPropertySelectionController( {} ),
+			setStatus: vi.fn(),
+			onInspectSelection: vi.fn(),
+			onSelectionApplied,
+			canPickModel: () => true,
+			getPlacedModel: () => placedModel,
+			getWorkspaceMode: () => 'browse',
+			getPipesByName: () => new Map()
+		} );
+
+		session.handleScreenPointerDown( 50, 50 );
+		session.handleScreenPointerUp( 50, 50 );
+
+		expect( onSelectionApplied ).not.toHaveBeenCalled();
 
 	} );
 

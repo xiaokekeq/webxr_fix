@@ -51,11 +51,24 @@ const primaryAsset = computed( () => {
 
 	return model.assets.find( ( item ) => item.id === model.primaryAssetId ) ?? model.assets[ 0 ];
 } );
+const xrSessionInteractive = computed( () => (
+	engine.value.xrInteraction.tracking === 'normal'
+	&& engine.value.xrInteraction.visibility === 'visible'
+	&& engine.value.xrInteraction.worldLock !== 'pending'
+	&& engine.value.xrInteraction.worldLock !== 'recalibration-required'
+) );
+const trackingRecoveryMessage = computed( () => {
+	if ( hasArSession.value === false ) return '';
+	if ( engine.value.xrInteraction.worldLock === 'recalibration-required' ) return '空间坐标发生变化，请重新校正。';
+	if ( engine.value.xrInteraction.worldLock === 'pending' ) return '正在建立现实锚点…';
+	return xrSessionInteractive.value ? '' : '跟踪恢复中，校正与世界交互暂不可用。';
+} );
 
 const sessionStatusText = computed( () => {
 	if ( hasArSession.value === false ) {
 		return '待进入 AR';
 	}
+	if ( trackingRecoveryMessage.value ) return '跟踪恢复中';
 
 	if ( engine.value.markerCalibration.active ) {
 		return `采集 Marker 四角点 ${engine.value.markerCalibration.capturedCornerCount}/${engine.value.markerCalibration.expectedCornerCount}`;
@@ -171,10 +184,10 @@ const showMarkerCalibrationOverlay = computed(
 );
 const canUseMarkerCorners = computed( () => configStatus.value.activeControlTargetHasCornersEnu );
 const canStartMarkerCalibration = computed(
-	() => hasArSession.value && hitTestReady.value && canUseMarkerCorners.value
+	() => hasArSession.value && xrSessionInteractive.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canCaptureMarkerCorner = computed(
-	() => showMarkerCalibrationOverlay.value && hitTestReady.value && canUseMarkerCorners.value
+	() => showMarkerCalibrationOverlay.value && xrSessionInteractive.value && hitTestReady.value && canUseMarkerCorners.value
 );
 const canApplyMarkerCalibration = computed(
 	() => canCaptureMarkerCorner.value
@@ -353,6 +366,15 @@ function setArOverlayClass(active: boolean): void {
 				<div class="status-chip">状态：{{ sessionStatusText }}</div>
 			</header>
 
+			<div
+				v-if="trackingRecoveryMessage"
+				class="tracking-recovery-banner"
+				data-ar-ui="true"
+				role="status"
+			>
+				{{ trackingRecoveryMessage }}
+			</div>
+
 			<section class="scene-shell">
 				<div ref="canvasHost" class="scene-layer"></div>
 				<div ref="xrButtonHost" class="scene-hidden"></div>
@@ -529,6 +551,23 @@ function setArOverlayClass(active: boolean): void {
 
 .calibration-page.ar-active {
 	background: transparent;
+}
+
+.tracking-recovery-banner {
+	position: fixed;
+	top: max(84px, calc(env(safe-area-inset-top) + 72px));
+	left: 50%;
+	z-index: 8;
+	width: min(88vw, 520px);
+	transform: translateX(-50%);
+	padding: 10px 14px;
+	border: 1px solid rgba(250, 204, 21, 0.5);
+	border-radius: 12px;
+	background: rgba(30, 41, 59, 0.86);
+	color: #fef08a;
+	font-weight: 700;
+	line-height: 1.45;
+	text-align: center;
 }
 
 :global(html.ar-dom-overlay-active),

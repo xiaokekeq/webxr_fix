@@ -2,18 +2,11 @@ import * as THREE from 'three';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
 import { clearPlacedModel, placeModelWithMatrix } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
-import {
-	solveGroundPlaneRigidTransform,
-	type EngineeringControlPoint,
-	type EngineeringRegistrationSolution
-} from '@/localization/coarse/engineering-registration.js';
-import type { ManualPlacementBase } from '@/localization/manual/manual-registration.js';
+import type { EngineeringRegistrationSolution } from '@/localization/coarse/engineering-registration.js';
 import { createDefaultTargetGuidanceState } from '@/localization/core/registration-store.js';
 import { createPlacementSummaryState } from '@/engine/session/view-state.js';
 import {
-	composeModelRawLocalToArMatrix,
-	createPlacementBaseFromArLocalizationSolution,
-	placeAdjustedModel
+	composeModelRawLocalToArMatrix
 } from './runtime.js';
 import type { PropertySelectionController } from '@/engine/interaction/property-selection.js';
 
@@ -33,19 +26,10 @@ interface CreatePlacementSessionOptions {
 export interface PlacementSession {
 	getPlacedModel(): THREE.Group | null;
 	getArPlacedModel(): THREE.Group | null;
-	getPlacementBase(): ManualPlacementBase | null;
 	getAutoPlacementPending(): boolean;
-	markAutoPlacementPending(): void;
 	cancelAutoPlacement(): void;
 	resetPlacement(): void;
 	requestAutoPlacement(modelTemplate: THREE.Group | null): void;
-	attemptLocalizedPlacement(args: {
-		modelTemplate: THREE.Group | null;
-		registrationSolution: EngineeringRegistrationSolution | null;
-		arFromEnuSolutionOverride?: ArFromEnuSolution | null;
-		modelOrientationTarget: THREE.Quaternion;
-		onPlacementBaseResolved?(base: ManualPlacementBase): void;
-	}): void;
 	placeEngineeringModelFromCurrentArFromEnu(args: {
 		modelTemplate: THREE.Group | null;
 		registrationSolution: EngineeringRegistrationSolution | null;
@@ -65,45 +49,10 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	} = options;
 
 	let arPlacedModel: THREE.Group | null = null;
-	let arPlacementBase: ManualPlacementBase | null = null;
 	let autoPlacementPending = false;
 	function updatePlacementSummary(): void {
 
 		store.patch( { placementSummary: createPlacementSummaryState( arPlacedModel ) } );
-
-	}
-
-	function createAdjustedPlacementFromBase(base: ManualPlacementBase): {
-		position: THREE.Vector3;
-		orientation: THREE.Quaternion;
-		scale: number;
-		matrix?: THREE.Matrix4;
-	} {
-
-		return {
-			position: base.position.clone(),
-			orientation: base.orientation.clone(),
-			scale: base.scale,
-			matrix: base.matrix?.clone()
-		};
-
-	}
-
-	function placeFromPlacementBase(modelTemplate: THREE.Group): void {
-
-		if ( arPlacementBase === null ) {
-			return;
-		}
-
-		const adjustedPlacement = createAdjustedPlacementFromBase( arPlacementBase );
-		arPlacedModel = placeAdjustedModel( {
-			modelTemplate,
-			placedModel: arPlacedModel,
-			modelAnchor: sceneBundle.arModelAnchor,
-			adjustedPlacement
-		} );
-			updateRegistrationStatusDetail( '状态：模型已按工程坐标显示' );
-		updatePlacementSummary();
 
 	}
 
@@ -120,21 +69,9 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		},
 
-		getPlacementBase() {
-
-			return arPlacementBase;
-
-		},
-
 		getAutoPlacementPending() {
 
 			return autoPlacementPending;
-
-		},
-
-		markAutoPlacementPending() {
-
-			autoPlacementPending = true;
 
 		},
 
@@ -148,7 +85,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
 			autoPlacementPending = false;
-			arPlacementBase = null;
 			propertySelection.clearSelection();
 			updatePlacementSummary();
 			store.patch( { targetGuidance: createDefaultTargetGuidanceState() } );
@@ -163,44 +99,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 			autoPlacementPending = true;
 			updateRegistrationStatusDetail( '状态：等待 Marker 四角点校正' );
-
-		},
-
-		attemptLocalizedPlacement(args) {
-
-			const {
-				modelTemplate,
-				registrationSolution,
-				arFromEnuSolutionOverride,
-				modelOrientationTarget,
-				onPlacementBaseResolved
-			} = args;
-
-			if (
-				autoPlacementPending === false
-				|| modelTemplate === null
-				|| registrationSolution === null
-			) {
-				return;
-			}
-
-			if ( arFromEnuSolutionOverride === null || arFromEnuSolutionOverride === undefined ) {
-				updateRegistrationStatusDetail( '状态：等待 Marker 四角点定位' );
-				setStatus( '请先完成 Marker 四角点校正后再进行工程放置。' );
-				autoPlacementPending = false;
-				return;
-			}
-
-			arPlacementBase = createPlacementBaseFromArLocalizationSolution( {
-				arFromEnuSolution: arFromEnuSolutionOverride,
-				modelTemplate,
-				registrationSolution,
-				modelOrientationTarget
-			} );
-			onPlacementBaseResolved?.( arPlacementBase );
-			placeFromPlacementBase( modelTemplate );
-			autoPlacementPending = false;
-			setStatus( '模型已按工程坐标显示，未使用 hit-test 决定最终位置。' );
 
 		},
 
@@ -230,7 +128,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 				arFromEnuSolution,
 				registrationSolution: effectiveRegistrationSolution
 			} );
-			arPlacementBase = null;
 			arPlacedModel = placeModelWithMatrix(
 				modelTemplate,
 				arPlacedModel,
