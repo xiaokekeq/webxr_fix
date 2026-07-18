@@ -1,5 +1,4 @@
 import { arError } from '@/engine/debug/ar-logger.js';
-import { formatXrDebugPoint, resetXrDebugPanel, showXrDebugProbe } from '@/engine/debug/xr-debug-panel.js';
 import * as THREE from 'three';
 import type {
 	ARSceneBundle,
@@ -47,13 +46,10 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		onAttemptAutoPlacement,
 		onFrameUpdate
 	} = options;
-	// Temporary investigation UI calls are removed after the device verification pass.
-	let probeSession: XRSession | null = null;
 	let activeReferenceSpace: XRReferenceSpace | null = null;
 	let lastTrackingState: 'normal' | 'emulated' | 'unavailable' | null = null;
 	let modelWorldAnchor: XRAnchorHandle | null = null;
 	let modelWorldAnchorRequestId = 0;
-	let modelWorldAnchorTracked = false;
 	let unanchoredModelInvalidated = false;
 	const initialAnchorPoseInverse = new THREE.Matrix4();
 	const currentAnchorPose = new THREE.Matrix4();
@@ -61,12 +57,7 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 	const worldLockPosition = new THREE.Vector3();
 	const worldLockQuaternion = new THREE.Quaternion();
 	const worldLockScale = new THREE.Vector3();
-	const handleProbeVisibilityChange = (): void => {
-		showXrDebugProbe( `visibility ${probeSession?.visibilityState ?? 'unknown'}` );
-	};
-	const handleReferenceSpaceReset = (event: Event): void => {
-		const transform = ( event as Event & { transform?: XRRigidTransform | null } ).transform;
-		showXrDebugProbe( `reference reset ${transform === undefined || transform === null ? 'transform=null' : `delta=${formatXrDebugPoint( transform.position )}`}` );
+	const handleReferenceSpaceReset = (): void => {
 		if ( modelWorldAnchor === null && sceneBundle.arModelAnchor.children.length > 0 ) {
 			sceneBundle.arPlacementAnchor.visible = false;
 			unanchoredModelInvalidated = true;
@@ -78,7 +69,6 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		activeReferenceSpace?.removeEventListener( 'reset', handleReferenceSpaceReset );
 		activeReferenceSpace = referenceSpace;
 		activeReferenceSpace?.addEventListener( 'reset', handleReferenceSpaceReset );
-		showXrDebugProbe( `reference space ${referenceSpace === null ? 'missing' : 'ready'}` );
 	};
 	const updateTrackingState = (frame: XRFrame, referenceSpace: XRReferenceSpace | null): void => {
 		const pose = referenceSpace === null ? null : frame.getViewerPose( referenceSpace ) ?? null;
@@ -101,22 +91,14 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		}
 		if ( state === previousState ) return;
 		lastTrackingState = state;
-		showXrDebugProbe( `tracking ${state} / ${probeSession?.visibilityState ?? 'unknown'}` );
 	};
-	const handleProbeSessionStart = (result: ArSessionStartResult): void => {
-		probeSession = result.session;
+	const handleSessionStart = (result: ArSessionStartResult): void => {
 		lastTrackingState = null;
-		probeSession.addEventListener( 'visibilitychange', handleProbeVisibilityChange );
-		resetXrDebugPanel();
-		showXrDebugProbe( `session start / ${probeSession.visibilityState}` );
 		onSessionStart( result );
 	};
-	const handleProbeSessionEnd = (): void => {
-		showXrDebugProbe( `session end / ${probeSession?.visibilityState ?? 'unknown'}` );
+	const handleSessionEnd = (): void => {
 		clearModelWorldLock();
-		probeSession?.removeEventListener( 'visibilitychange', handleProbeVisibilityChange );
 		activeReferenceSpace?.removeEventListener( 'reset', handleReferenceSpaceReset );
-		probeSession = null;
 		activeReferenceSpace = null;
 		lastTrackingState = null;
 		onSessionEnd();
@@ -138,7 +120,6 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 			modelWorldAnchor?.delete?.();
 		} catch {}
 		modelWorldAnchor = null;
-		modelWorldAnchorTracked = false;
 		unanchoredModelInvalidated = false;
 		resetPlacementAnchorTransform();
 
@@ -160,7 +141,6 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 			return 'cancelled';
 		}
 		if ( placement === null ) {
-			showXrDebugProbe( 'world anchor unavailable' );
 			return 'unavailable';
 		}
 		const { anchor, initialPoseMatrix } = placement;
@@ -168,7 +148,6 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		modelWorldAnchor = anchor;
 		unanchoredModelInvalidated = false;
 		initialAnchorPoseInverse.copy( initialPoseMatrix ).invert();
-		showXrDebugProbe( `world anchor ready at ${formatXrDebugPoint( new THREE.Vector3().setFromMatrixPosition( initialPoseMatrix ) )}` );
 		return 'locked';
 
 	}
@@ -179,8 +158,6 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		const anchorPose = viewerPose === null ? null : frame.getPose( modelWorldAnchor.anchorSpace, referenceSpace );
 		if ( anchorPose === undefined || anchorPose === null ) {
 			sceneBundle.arPlacementAnchor.visible = false;
-			if ( modelWorldAnchorTracked ) showXrDebugProbe( 'world anchor tracking unavailable' );
-			modelWorldAnchorTracked = false;
 			return;
 		}
 
@@ -192,10 +169,6 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		sceneBundle.arPlacementAnchor.scale.copy( worldLockScale );
 		sceneBundle.arPlacementAnchor.visible = true;
 		sceneBundle.arPlacementAnchor.updateMatrixWorld( true );
-		if ( modelWorldAnchorTracked === false ) {
-			showXrDebugProbe( `world anchor tracking normal delta=${formatXrDebugPoint( worldLockPosition )}` );
-		}
-		modelWorldAnchorTracked = true;
 
 	}
 	const xrHitTest = createXRHitTestController( {
@@ -203,8 +176,8 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 		reticle: sceneBundle.reticle,
 		xrButtonWrap,
 		setStatus,
-		onSessionStart: handleProbeSessionStart,
-		onSessionEnd: handleProbeSessionEnd,
+		onSessionStart: handleSessionStart,
+		onSessionEnd: handleSessionEnd,
 		canReportStatus
 	} );
 	const errorCounts = new Map<string, number>();
@@ -261,7 +234,7 @@ export function createXRSessionRuntime(options: CreateXRSessionRuntimeOptions): 
 
 			if ( sceneBundle.renderer.xr.isPresenting && frame ) {
 				const referenceSpace = sceneBundle.renderer.xr.getReferenceSpace();
-				runFrameStage( 'tracking-probe', () => {
+				runFrameStage( 'tracking-state', () => {
 					bindReferenceSpace( referenceSpace );
 					updateTrackingState( frame, referenceSpace );
 				} );

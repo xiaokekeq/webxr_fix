@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { formatXrDebugPoint, showXrDebugProbe } from '@/engine/debug/xr-debug-panel.js';
 import type { ARSceneBundle } from '@/features/ar/types/runtime-types.js';
 import { clearPlacedModel, placeModelWithMatrix } from '@/engine/core/model.js';
 import type { ArFromEnuSolution } from '@/localization/core/ar-from-enu-solution.js';
@@ -68,16 +67,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 	let arPlacedModel: THREE.Group | null = null;
 	let arPlacementBase: ManualPlacementBase | null = null;
 	let autoPlacementPending = false;
-	// Temporary investigation only: remove every XRDebugProbe before applying the fix.
-	function probePlacementLifecycle(event: string): void {
-
-		arPlacedModel?.updateMatrixWorld( true );
-		showXrDebugProbe( arPlacedModel === null
-			? `${event} model=null`
-			: `${event} id=${arPlacedModel.uuid.slice( 0, 8 )} local=${formatXrDebugPoint( arPlacedModel.position )} world=${formatXrDebugPoint( arPlacedModel.getWorldPosition( new THREE.Vector3() ) )} visible=${arPlacedModel.visible}/${sceneBundle.arModelAnchor.visible}`
-		);
-
-	}
 	function updatePlacementSummary(): void {
 
 		store.patch( { placementSummary: createPlacementSummaryState( arPlacedModel ) } );
@@ -115,7 +104,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 		} );
 			updateRegistrationStatusDetail( '状态：模型已按工程坐标显示' );
 		updatePlacementSummary();
-		probePlacementLifecycle( 'placement-commit-base' );
 
 	}
 
@@ -158,7 +146,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 
 		resetPlacement() {
 
-			probePlacementLifecycle( 'placement-reset' );
 			arPlacedModel = clearPlacedModel( sceneBundle.arModelAnchor, arPlacedModel );
 			autoPlacementPending = false;
 			arPlacementBase = null;
@@ -257,7 +244,6 @@ export function createPlacementSession(options: CreatePlacementSessionOptions): 
 			} );
 			updateRegistrationStatusDetail( '状态：模型已按工程矩阵显示' );
 			updatePlacementSummary();
-			probePlacementLifecycle( 'placement-commit-engineering' );
 			setStatus( '模型已按工程矩阵显示，未使用 hit-test 决定最终位置。' );
 			autoPlacementPending = false;
 			return true;
