@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import zu02Obj from '../../../public/projects/dam/models/zu02/zu02.obj?raw';
+import zu02Obj from '../../../public/projects/dam/models/路中段/zu02/zu02.obj?raw';
 import { resolveModelConformingSurface } from './model-boundary-surface-resolver.js';
 
 describe( 'zu02 conforming shell coverage', () => {

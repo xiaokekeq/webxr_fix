@@ -8,23 +8,39 @@
         "id": "zu01",
         "name": "堤坝左侧场景",
         "role": "context",
-        "modelUrl": "models/zu01/zu01.obj",
-        "materialUrl": "models/zu01/zu01.mtl",
+        "modelUrl": "models/小坡段/zu01/zu01.obj",
+        "materialUrl": "models/小坡段/zu01/zu01.mtl",
+        "assetTransform": { "upAxis": "z", "unitScale": 1 }
+      },
+      {
+        "id": "zu01-surface",
+        "name": "堤坝左侧实景表面",
+        "role": "context",
+        "modelUrl": "models/小坡段/qingxie/Data/BlockR/BlockR.obj",
+        "materialUrl": "models/小坡段/qingxie/Data/BlockR/BlockR.mtl",
         "assetTransform": { "upAxis": "z", "unitScale": 1 }
       },
       {
         "id": "zu02",
         "name": "堤坝中间属性层",
-        "modelUrl": "models/zu02/zu02.obj",
-        "materialUrl": "models/zu02/zu02.mtl",
+        "modelUrl": "models/路中段/zu02/zu02.obj",
+        "materialUrl": "models/路中段/zu02/zu02.mtl",
         "assetTransform": { "upAxis": "z", "unitScale": 1 }
       },
       {
         "id": "zu03",
         "name": "堤坝右侧场景",
         "role": "context",
-        "modelUrl": "models/zu03/zu03.obj",
-        "materialUrl": "models/zu03/zu03.mtl",
+        "modelUrl": "models/大坡段/zu03/zu03.obj",
+        "materialUrl": "models/大坡段/zu03/zu03.mtl",
+        "assetTransform": { "upAxis": "z", "unitScale": 1 }
+      },
+      {
+        "id": "zu03-surface",
+        "name": "堤坝右侧实景表面",
+        "role": "context",
+        "modelUrl": "models/大坡段/qingxie/Data/BlockR/BlockR.obj",
+        "materialUrl": "models/大坡段/qingxie/Data/BlockR/BlockR.mtl",
         "assetTransform": { "upAxis": "z", "unitScale": 1 }
       }
     ],

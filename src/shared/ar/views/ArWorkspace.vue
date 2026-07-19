@@ -7,6 +7,7 @@ import UndergroundDisplayControls from '@/components/ar/UndergroundDisplayContro
 import ArPanelSection from '@/components/ar/ArPanelSection.vue';
 import ArPlacementStatusSection from '@/components/ar/ArPlacementStatusSection.vue';
 import PipePropertyHud from '@/shared/ar/components/PipePropertyHud.vue';
+import ArAnomalyPanel from '@/shared/ar/components/ArAnomalyPanel.vue';
 import { canApplyMockEngineeringCalibration } from '@/engine/session/registration-state-runtime.js';
 import type { UndergroundInspectionTool, UndergroundMaterialMode } from '@/engine/visualization/underground-display-state.js';
 import { useUndergroundDisplayControls } from '@/features/ar/composables/use-underground-display-controls.js';
@@ -620,6 +621,12 @@ function setArOverlayClass(active: boolean): void {
 			:annotation-detail="engine.annotationDetail"
 			:fields="projectConfig.componentPropertyHud.fields"
 			@close="store.actions.closePropertyPanel()"
+		/>
+
+		<ArAnomalyPanel
+			v-if="hasArSession && showMarkerCalibrationOverlay === false"
+			:key="engine.selectedModelId"
+			:annotations="configStatus.annotations"
 		/>
 
 		<nav

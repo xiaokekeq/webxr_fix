@@ -1,0 +1,356 @@
+# File produced by Open Asset Import Library (http://www.assimp.sf.net)
+# (assimp v5.2.0)
+
+newmtl Default_Material
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+
+newmtl BlockR_0.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_0.jpg
+
+newmtl BlockR_1.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_1.jpg
+
+newmtl BlockR_2.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_2.jpg
+
+newmtl BlockR_3.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_3.jpg
+
+newmtl BlockR_4.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_4.jpg
+
+newmtl BlockR_5.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_5.jpg
+
+newmtl BlockR_6.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_6.jpg
+
+newmtl BlockR_7.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_7.jpg
+
+newmtl BlockR_8.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_8.jpg
+
+newmtl BlockR_9.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_9.jpg
+
+newmtl BlockR_10.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_10.jpg
+
+newmtl BlockR_11.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_11.jpg
+
+newmtl BlockR_12.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_12.jpg
+
+newmtl BlockR_13.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_13.jpg
+
+newmtl BlockR_14.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_14.jpg
+
+newmtl BlockR_15.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_15.jpg
+
+newmtl BlockR_16.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_16.jpg
+
+newmtl BlockR_17.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_17.jpg
+
+newmtl BlockR_18.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_18.jpg
+
+newmtl BlockR_19.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_19.jpg
+
+newmtl BlockR_20.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_20.jpg
+
+newmtl BlockR_21.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_21.jpg
+
+newmtl BlockR_22.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_22.jpg
+
+newmtl BlockR_23.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_23.jpg
+
+newmtl BlockR_24.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_24.jpg
+
+newmtl BlockR_25.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_25.jpg
+
+newmtl BlockR_26.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_26.jpg
+
+newmtl BlockR_27.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_27.jpg
+
+newmtl BlockR_28.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_28.jpg
+
+newmtl BlockR_29.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_29.jpg
+
+newmtl BlockR_30.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_30.jpg
+
+newmtl BlockR_31.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_31.jpg
+
+newmtl BlockR_32.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_32.jpg
+
+newmtl BlockR_33.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_33.jpg
+
+newmtl BlockR_34.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_34.jpg
+
+newmtl BlockR_35.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_35.jpg
+
+newmtl BlockR_36.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_36.jpg
+
+newmtl BlockR_37.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_37.jpg
+
+newmtl BlockR_38.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_38.jpg
+
+newmtl BlockR_39.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_39.jpg
+
+newmtl BlockR_40.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_40.jpg
+
+newmtl BlockR_41.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_41.jpg
+
+newmtl BlockR_42.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_42.jpg
+
+newmtl BlockR_43.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_43.jpg
+
+newmtl BlockR_44.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_44.jpg
+
+newmtl BlockR_45.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_45.jpg
+
+newmtl BlockR_46.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_46.jpg
+
+newmtl BlockR_47.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_47.jpg
+
+newmtl BlockR_48.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_48.jpg
+
+newmtl BlockR_49.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_49.jpg
+
+newmtl BlockR_50.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_50.jpg
+
+newmtl BlockR_51.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_51.jpg
+
+newmtl BlockR_52.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_52.jpg
+
+newmtl BlockR_53.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_53.jpg
+
+newmtl BlockR_54.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_54.jpg
+
+newmtl BlockR_55.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_55.jpg
+
+newmtl BlockR_56.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_56.jpg
+
+newmtl BlockR_57.jpg
+Kd 1 1 1
+Ka 1 1 1
+illum 1
+map_Kd BlockR_57.jpg
+

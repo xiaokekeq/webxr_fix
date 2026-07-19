@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import configText from '../../public/projects/dam/configs/dz1207.config.json?raw';
 import pipeText from '../../public/projects/dam/properties/dz1207.pipes.json?raw';
-import primaryObjText from '../../public/projects/dam/models/zu02/zu02.obj?raw';
+import primaryObjText from '../../public/projects/dam/models/路中段/zu02/zu02.obj?raw';
 import { solveEngineeringRegistration } from '@/localization/coarse/engineering-registration.js';
 import {
 	normalizeDemoModelConfig,

@@ -261,6 +261,7 @@ export class RegistrationStateRuntime {
 				sensorCount: demoModelConfig.sensors?.length ?? 0,
 				riskPointCount: demoModelConfig.riskPoints?.length ?? 0,
 				annotationCount: demoModelConfig.annotations.length,
+				annotations: demoModelConfig.annotations,
 				siteOriginText: formatGeodetic(
 					demoModelConfig.siteFrame.origin.lat,
 					demoModelConfig.siteFrame.origin.lon,

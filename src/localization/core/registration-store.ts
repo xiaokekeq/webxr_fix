@@ -1,6 +1,7 @@
 ﻿import type { PipeRecord } from '@/models/types/pipe-record.js';
 import type { ModelCatalogItem } from '@/models/catalog/model-api.js';
 import type { ArWorkflowMode } from '@/features/ar/types/workflow.js';
+import type { EngineeringAnnotation } from '@/engine/annotation/annotation-types.js';
 
 export type WorkspaceMode = 'browse' | 'registration' | 'inspection';
 export type AppMode = 'pre-ar' | 'ar-session';
@@ -163,6 +164,7 @@ export interface EngineeringConfigStatusState {
 	sensorCount: number;
 	riskPointCount: number;
 	annotationCount: number;
+	annotations: EngineeringAnnotation[];
 	siteOriginText: string;
 	placementAnchorText: string;
 	controlTargetSummaries: Array<{
@@ -443,6 +445,7 @@ export function createDefaultEngineeringConfigStatusState(): EngineeringConfigSt
 		sensorCount: 0,
 		riskPointCount: 0,
 		annotationCount: 0,
+		annotations: [],
 		siteOriginText: '-',
 		placementAnchorText: '-',
 		controlTargetSummaries: []
