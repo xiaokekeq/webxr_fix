@@ -580,17 +580,8 @@ function setArOverlayClass(active: boolean): void {
 					<div class="page-title">{{ projectConfig.labels.arTitle }}</div>
 					<div class="page-subtitle">{{ projectConfig.labels.arSubtitle ?? currentModelName }}</div>
 				</div>
-				<div class="status-chip">状态：{{ sessionStatusText }}</div>
+				<div class="status-chip" role="status">状态：{{ sessionStatusText }}</div>
 			</header>
-
-			<div
-				v-if="trackingRecoveryMessage"
-				class="tracking-recovery-banner"
-				data-ar-ui="true"
-				role="status"
-			>
-				{{ trackingRecoveryMessage }}
-			</div>
 
 			<section class="scene-shell">
 				<div ref="canvasHost" class="scene-layer"></div>
@@ -852,24 +843,6 @@ function setArOverlayClass(active: boolean): void {
 
 .inspect-page.ar-active {
 	background: transparent;
-}
-
-.tracking-recovery-banner {
-	position: fixed;
-	top: max(84px, calc(env(safe-area-inset-top) + 72px));
-	left: 50%;
-	z-index: 8;
-	width: min(88vw, 520px);
-	transform: translateX(-50%);
-	padding: 10px 14px;
-	border: 1px solid rgba(250, 204, 21, 0.5);
-	border-radius: 12px;
-	background: rgba(30, 41, 59, 0.86);
-	box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
-	color: #fef08a;
-	font-weight: 700;
-	line-height: 1.45;
-	text-align: center;
 }
 
 :global(html.ar-dom-overlay-active),
