@@ -73,7 +73,7 @@ export function createPointerSelectionSession(
 
 	function handleScreenPointerDown(clientX: number, clientY: number): void {
 
-		if ( sceneBundle.renderer.xr.isPresenting || canPickModel() === false ) {
+		if ( canPickModel() === false ) {
 			hasPendingPointerSelection = false;
 			return;
 		}
@@ -85,7 +85,7 @@ export function createPointerSelectionSession(
 
 	function handleScreenPointerUp(clientX: number, clientY: number): void {
 
-		if ( sceneBundle.renderer.xr.isPresenting || canPickModel() === false ) {
+		if ( canPickModel() === false ) {
 			hasPendingPointerSelection = false;
 			return;
 		}
@@ -106,9 +106,10 @@ export function createPointerSelectionSession(
 		pointer.x = ( ( clientX - rect.left ) / rect.width ) * 2 - 1;
 		pointer.y = - ( ( clientY - rect.top ) / rect.height ) * 2 + 1;
 
-		const activeCamera = sceneBundle.renderer.xr.isPresenting
+		const xrCamera = sceneBundle.renderer.xr.isPresenting
 			? sceneBundle.renderer.xr.getCamera()
-			: sceneBundle.camera;
+			: null;
+		const activeCamera = xrCamera?.cameras?.[ 0 ] ?? sceneBundle.camera;
 		raycaster.setFromCamera( pointer, activeCamera );
 		const placedModel = getPlacedModel();
 		if ( handlePreSelectionRaycast?.( {
@@ -145,7 +146,7 @@ export function createPointerSelectionSession(
 
 		handleArSelect(event) {
 
-			if ( canPickModel() === false ) return;
+			if ( canPickModel() === false || event.inputSource.targetRayMode === 'screen' ) return;
 
 			const referenceSpace = sceneBundle.renderer.xr.getReferenceSpace();
 			const targetRayPose = referenceSpace === null

@@ -697,9 +697,9 @@ export class ThreeEngine {
 		} );
 
 		this.sceneBundle.renderer.setAnimationLoop( this.xrRuntime.renderFrame );
-		this.sceneBundle.renderer.domElement.addEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
-		this.sceneBundle.renderer.domElement.addEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
 		this.sceneBundle.renderer.domElement.addEventListener( 'webglcontextlost', this.handleWebglContextLost );
+		window.addEventListener( 'pointerdown', this.handleGlobalPointerDown, true );
+		window.addEventListener( 'pointerup', this.handleGlobalPointerUp, true );
 		window.addEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.addEventListener( 'sessionend', this.unbindArSelectionSession );
@@ -821,9 +821,9 @@ export class ThreeEngine {
 		this.xrRuntime.dispose();
 		this.sceneBundle.renderer.setAnimationLoop( null );
 		this.realDepthProvider.dispose();
-		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerdown', this.pointerSelection.handlePointerDown );
-		this.sceneBundle.renderer.domElement.removeEventListener( 'pointerup', this.pointerSelection.handlePointerUp );
 		this.sceneBundle.renderer.domElement.removeEventListener( 'webglcontextlost', this.handleWebglContextLost );
+		window.removeEventListener( 'pointerdown', this.handleGlobalPointerDown, true );
+		window.removeEventListener( 'pointerup', this.handleGlobalPointerUp, true );
 		window.removeEventListener( 'resize', this.handleWindowResize );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionstart', this.bindArSelectionSession );
 		this.sceneBundle.renderer.xr.removeEventListener( 'sessionend', this.unbindArSelectionSession );
@@ -2518,6 +2518,27 @@ export class ThreeEngine {
 
 		const session = this.sceneBundle.renderer.xr.getSession();
 		session?.removeEventListener( 'select', this.pointerSelection.handleArSelect );
+
+	};
+
+	private shouldHandleGlobalPointerEvent(event: PointerEvent): boolean {
+
+		const target = event.target;
+		if ( target instanceof Element === false ) return false;
+		if ( target.closest( '[data-ar-ui]' ) !== null ) return false;
+		return this.sceneBundle.renderer.xr.isPresenting || target === this.sceneBundle.renderer.domElement;
+
+	}
+
+	private handleGlobalPointerDown = (event: PointerEvent): void => {
+
+		if ( this.shouldHandleGlobalPointerEvent( event ) ) this.pointerSelection.handlePointerDown( event );
+
+	};
+
+	private handleGlobalPointerUp = (event: PointerEvent): void => {
+
+		if ( this.shouldHandleGlobalPointerEvent( event ) ) this.pointerSelection.handlePointerUp( event );
 
 	};
 

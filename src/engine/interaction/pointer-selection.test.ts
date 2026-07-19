@@ -119,39 +119,48 @@ describe( 'pointer selection', () => {
 
 	} );
 
-	it( 'does not use screen Pointer events for world picking during an XR session', () => {
+	it( 'uses one screen Pointer selection during an XR session', () => {
 
 		const camera = new THREE.PerspectiveCamera( 60, 1, 0.1, 100 );
 		camera.position.set( 0, 0, 5 );
 		camera.lookAt( 0, 0, 0 );
 		camera.updateProjectionMatrix();
 		camera.updateMatrixWorld();
+		const xrCamera = new THREE.ArrayCamera( [ camera ] );
 		const placedModel = new THREE.Group();
-		placedModel.add( new THREE.Mesh( new THREE.BoxGeometry(), new THREE.MeshBasicMaterial() ) );
+		const pipe = new THREE.Mesh( new THREE.BoxGeometry(), new THREE.MeshBasicMaterial() );
+		pipe.name = 'XRPointerPipe';
+		placedModel.add( pipe );
 		placedModel.updateMatrixWorld( true );
 		const onSelectionApplied = vi.fn();
+		const onSelectionCleared = vi.fn();
 		const session = createPointerSelectionSession( {
 			sceneBundle: {
 				camera,
 				renderer: {
 					domElement: { getBoundingClientRect: () => ( { left: 0, top: 0, width: 100, height: 100 } ) },
-					xr: { isPresenting: true, getCamera: () => camera }
+					xr: { isPresenting: true, getCamera: () => xrCamera }
 				}
 			} as unknown as ARSceneBundle,
 			propertySelection: createPropertySelectionController( {} ),
 			setStatus: vi.fn(),
 			onInspectSelection: vi.fn(),
 			onSelectionApplied,
+			onSelectionCleared,
 			canPickModel: () => true,
 			getPlacedModel: () => placedModel,
 			getWorkspaceMode: () => 'browse',
-			getPipesByName: () => new Map()
+			getPipesByName: () => new Map( [ [ 'XRPointerPipe', { name: 'XRPointerPipe' } ] ] )
 		} );
 
 		session.handleScreenPointerDown( 50, 50 );
 		session.handleScreenPointerUp( 50, 50 );
+		session.handleArSelect( {
+			inputSource: { targetRayMode: 'screen' }
+		} as unknown as XRInputSourceEvent );
 
-		expect( onSelectionApplied ).not.toHaveBeenCalled();
+		expect( onSelectionApplied ).toHaveBeenCalledTimes( 1 );
+		expect( onSelectionCleared ).not.toHaveBeenCalled();
 
 	} );
 
