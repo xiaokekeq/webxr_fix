@@ -2338,6 +2338,9 @@ export class ThreeEngine {
 
 		modelTemplate.updateMatrixWorld( true );
 		modelTemplate.traverse( ( object ) => {
+			const isSelectableLayer = object.userData.__layerSelectable === true;
+			if ( isSelectableLayer === false && typeof object.userData.__layerId === 'string' ) return;
+
 			const businessName = getBusinessNameFromObject( object );
 			const properties = pipesByName.get( businessName );
 			if ( properties === undefined ) return;
@@ -2345,7 +2348,9 @@ export class ThreeEngine {
 			const componentId = getPipeComponentId( properties, businessName );
 			object.userData.componentId = componentId;
 			object.userData.pipeId = componentId;
-			this.addComponentPickProxy( object, componentId );
+			if ( isSelectableLayer === false ) {
+				this.addComponentPickProxy( object, componentId );
+			}
 		} );
 
 	}
