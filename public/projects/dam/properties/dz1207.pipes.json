@@ -1,58 +1,58 @@
 {
   "pipes": [
     {
-      "name": "dizhi1207__e32eyy",
-      "type": "terrain-layer",
-      "diameter": "--",
-      "material": "texture-zfzrt1",
+      "name": "baiyoulu",
+      "code": "DAM-ZU02-ROAD",
+      "type": "白油路面",
+      "material": "road",
       "depth": "--",
       "status": "normal",
-      "remark": "dz1207 material group e32eyy"
+      "remark": "zu02 中间模型路面"
     },
     {
-      "name": "dizhi1207__e32e43yy",
-      "type": "terrain-layer",
-      "diameter": "--",
-      "material": "texture-zfzrt",
+      "name": "xingchexianhuang",
+      "code": "DAM-ZU02-LINE-YELLOW",
+      "type": "黄色行车线",
+      "material": "yellow",
       "depth": "--",
       "status": "normal",
-      "remark": "dz1207 material group e32e43yy"
+      "remark": "zu02 中间模型黄色标线"
     },
     {
-      "name": "dizhi1207__e32e43",
-      "type": "terrain-layer",
-      "diameter": "--",
-      "material": "texture-srt",
+      "name": "xingchexianbai",
+      "code": "DAM-ZU02-LINE-WHITE",
+      "type": "白色行车线",
+      "material": "white",
       "depth": "--",
       "status": "normal",
-      "remark": "dz1207 material group e32e43"
+      "remark": "zu02 中间模型白色标线"
     },
     {
-      "name": "dizhi1207__e32e43yyhh",
-      "type": "terrain-layer",
-      "diameter": "--",
-      "material": "texture-fs",
+      "name": "sutiantu02",
+      "code": "DAM-ZU02-FILL",
+      "type": "素填土",
+      "material": "填土",
       "depth": "--",
       "status": "normal",
-      "remark": "dz1207 material group e32e43yyhh"
+      "remark": "zu02 中间模型土层"
     },
     {
-      "name": "dizhi1207__e3yhh",
-      "type": "terrain-layer",
-      "diameter": "--",
-      "material": "texture-cs",
+      "name": "fenzhinaintu02",
+      "code": "DAM-ZU02-SILTY-CLAY",
+      "type": "粉质黏土",
+      "material": "粉质黏土",
       "depth": "--",
       "status": "normal",
-      "remark": "dz1207 material group e3yhh"
+      "remark": "zu02 中间模型土层"
     },
     {
-      "name": "dizhi1207__e3yhhw",
-      "type": "terrain-layer",
-      "diameter": "--",
-      "material": "texture-cs1",
+      "name": "yunizhinaintu02",
+      "code": "DAM-ZU02-MUCKY-CLAY",
+      "type": "淤泥质黏土",
+      "material": "淤泥质黏土",
       "depth": "--",
       "status": "normal",
-      "remark": "dz1207 material group e3yhhw"
+      "remark": "zu02 中间模型同名网格归为同一属性层"
     }
   ]
 }

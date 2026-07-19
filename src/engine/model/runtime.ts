@@ -173,7 +173,7 @@ async function loadRuntimeStage<T>(
 
 function getAssetStage(assetId: string): ModelRuntimeLoadStage {
 
-	// ponytail: current catalog has terrain and stake-marker; add a generic asset stage when a third required asset is introduced.
+	// Visual model pieces share the terrain stage; positioned marker assets keep their dedicated stage.
 	return assetId === 'stake-marker' ? 'asset-stake-marker' : 'asset-terrain';
 
 }
@@ -307,6 +307,17 @@ function composeModelTemplate(options: {
 		compositeRoot.userData.__placeableTemplateTransform = primaryTemplate.userData.__placeableTemplateTransform;
 	}
 
+	for ( const asset of modelDefinition.assets ) {
+		if ( asset.role !== 'context' ) continue;
+		const contextTemplate = loadedAssetTemplates.get( asset.id );
+		if ( contextTemplate === undefined ) {
+			throw new ModelRuntimeLoadError( 'template-compose', modelDefinition.id, asset.id );
+		}
+
+		alignSharedCoordinateTemplate( primaryTemplate, contextTemplate );
+		compositeRoot.add( contextTemplate );
+	}
+
 	for ( const attachment of demoModelConfig.attachments ) {
 		const attachmentTemplate = loadedAssetTemplates.get( attachment.assetId );
 		if ( attachmentTemplate === undefined ) {
@@ -321,6 +332,31 @@ function composeModelTemplate(options: {
 	}
 
 	return compositeRoot;
+
+}
+
+export function alignSharedCoordinateTemplate(
+	primaryTemplate: THREE.Group,
+	contextTemplate: THREE.Group
+): void {
+
+	const primaryTransform = readPlaceableTemplateTransform( primaryTemplate );
+	const contextTransform = readPlaceableTemplateTransform( contextTemplate );
+	if ( primaryTransform === null || contextTransform === null ) {
+		throw new Error( 'Shared-coordinate assets require placeable template transforms.' );
+	}
+	if ( Math.abs( primaryTransform.unitScale - contextTransform.unitScale ) > 1e-9 ) {
+		throw new Error( 'Shared-coordinate assets must use the same unitScale.' );
+	}
+
+	contextTemplate.position
+		.copy( primaryTransform.pivotOffset )
+		.sub( contextTransform.pivotOffset )
+		.multiplyScalar( primaryTransform.unitScale );
+	contextTemplate.traverse( ( object ) => {
+		object.userData.__excludeFromPicking = true;
+		object.userData.__excludeFromLayerIndex = true;
+	} );
 
 }
 

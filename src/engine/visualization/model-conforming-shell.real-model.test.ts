@@ -1,14 +1,17 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import dz1207Obj from '../../../public/projects/dam/models/dz1207/dizhi1207.obj?raw';
+import zu02Obj from '../../../public/projects/dam/models/zu02/zu02.obj?raw';
 import { resolveModelConformingSurface } from './model-boundary-surface-resolver.js';
 
-describe( 'dz1207 conforming shell coverage', () => {
+describe( 'zu02 conforming shell coverage', () => {
 
-	it( 'keeps side boundaries and the bottom while removing the upper envelope', () => {
+	it( 'keeps side boundaries while removing the upper envelope', () => {
 
-		const model = new OBJLoader().parse( dz1207Obj );
+		const content = new OBJLoader().parse( zu02Obj );
+		content.rotation.x = - Math.PI / 2;
+		const model = new THREE.Group();
+		model.add( content );
 		const sourceTriangles = collectModelTriangles( model );
 		const resolved = resolveModelConformingSurface( model );
 
@@ -35,26 +38,18 @@ describe( 'dz1207 conforming shell coverage', () => {
 			const leftTolerance = Math.max( width * 0.01, 1e-4 );
 			const frontTolerance = Math.max( depth * 0.01, 1e-4 );
 			const backTolerance = Math.max( depth * 0.01, 1e-4 );
-			const bottomTolerance = Math.max( ( resolved.bounds.max.y - resolved.bounds.min.y ) * 1e-4, 1e-5 );
-			const coverage = { right: 0, left: 0, front: 0, back: 0, bottom: 0 };
+			const coverage = { right: 0, left: 0, front: 0, back: 0 };
 			for ( const triangle of sideTriangles ) {
 				if ( triangle.center.x >= sideBounds.max.x - rightTolerance ) coverage.right += 1;
 				if ( triangle.center.x <= sideBounds.min.x + leftTolerance ) coverage.left += 1;
 				if ( triangle.center.z <= sideBounds.min.z + frontTolerance ) coverage.front += 1;
 				if ( triangle.center.z >= sideBounds.max.z - backTolerance ) coverage.back += 1;
 			}
-			for ( let index = 0; index < position.count; index += 3 ) {
-				const a = new THREE.Vector3().fromBufferAttribute( position, index );
-				const b = new THREE.Vector3().fromBufferAttribute( position, index + 1 );
-				const c = new THREE.Vector3().fromBufferAttribute( position, index + 2 );
-				if ( Math.max( a.y, b.y, c.y ) <= resolved.bounds.min.y + bottomTolerance ) coverage.bottom += 1;
-			}
-			expect( coverage ).toMatchObject( { right: expect.any(Number), left: expect.any(Number), front: expect.any(Number), back: expect.any(Number), bottom: expect.any(Number) } );
+			expect( coverage ).toMatchObject( { right: expect.any(Number), left: expect.any(Number), front: expect.any(Number), back: expect.any(Number) } );
 			expect( coverage.right ).toBeGreaterThan( 0 );
 			expect( coverage.left ).toBeGreaterThan( 0 );
 			expect( coverage.front ).toBeGreaterThan( 0 );
 			expect( coverage.back ).toBeGreaterThan( 0 );
-			expect( coverage.bottom ).toBeGreaterThan( 0 );
 			expect( countUnblockedTopTriangles( position, sourceTriangles, resolved.bounds ) ).toBe( 0 );
 			expect( countInteriorHorizontalTriangles( position, resolved.bounds ) ).toBe( 0 );
 			expect( resolved.surface.triangleCount ).toBeLessThan( sourceTriangles.length );

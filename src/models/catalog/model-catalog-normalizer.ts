@@ -73,6 +73,7 @@ function normalizeCatalogAssetItem(value: unknown): ModelCatalogAssetItem {
 	return {
 		id: candidate.id,
 		name: typeof candidate.name === 'string' ? candidate.name : undefined,
+		role: candidate.role === 'context' ? 'context' : undefined,
 		modelUrl: candidate.modelUrl,
 		materialUrl: typeof candidate.materialUrl === 'string' ? candidate.materialUrl : undefined,
 		assetTransform: normalizeAssetTransform( candidate.assetTransform )

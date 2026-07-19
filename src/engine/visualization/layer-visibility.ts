@@ -151,9 +151,13 @@ function buildLayerDefinitions(
 	}
 
 	const selectableObjects = listSelectableLayerObjects( modelRoot );
-	const selectableLayers = selectableObjects
+	const layerObjects = selectableObjects.length > 0
+		? selectableObjects
+		: listBusinessLayerObjects( modelRoot, pipesByName );
+	const selectableLayers = layerObjects
 		.map( ( object ) => {
-			const layerId = getLayerIdForObject( object );
+			const businessName = getBusinessNameForObject( object );
+			const layerId = getLayerIdForObject( object ) ?? businessName;
 			if ( layerId === null ) {
 				return null;
 			}
@@ -163,16 +167,17 @@ function buildLayerDefinitions(
 				return null;
 			}
 
-			const businessName = getBusinessNameForObject( object ) ?? layerId;
-			const properties = pipesByName.get( businessName );
+			const resolvedBusinessName = businessName ?? layerId;
+			const properties = pipesByName.get( resolvedBusinessName );
 
 			return {
 				id: layerId,
-				label: createDisplayLayerLabel( layerId, businessName, properties ),
+				label: createDisplayLayerLabel( layerId, resolvedBusinessName, properties ),
 				averageY
 			};
 		} )
-		.filter( ( item ): item is NonNullable<typeof item> => item !== null );
+		.filter( ( item ): item is NonNullable<typeof item> => item !== null )
+		.filter( ( item, index, items ) => items.findIndex( ( candidate ) => candidate.id === item.id ) === index );
 
 	if ( selectableLayers.length > 0 ) {
 		return selectableLayers
@@ -361,6 +366,21 @@ function listSelectableLayerObjects(root: THREE.Object3D): THREE.Object3D[] {
 
 }
 
+function listBusinessLayerObjects(
+	root: THREE.Object3D,
+	pipesByName: Map<string, PipeRecord>
+): THREE.Object3D[] {
+
+	const objects: THREE.Object3D[] = [];
+	root.traverse( ( child ) => {
+		if ( isExcludedFromLayerIndex( child ) ) return;
+		const businessName = getBusinessNameForObject( child );
+		if ( businessName !== null && pipesByName.has( businessName ) ) objects.push( child );
+	} );
+	return objects;
+
+}
+
 function indexObjectsByLayerId(root: THREE.Object3D): LayerObjectGroups {
 
 	tempLayerObjects.clear();
@@ -369,7 +389,7 @@ function indexObjectsByLayerId(root: THREE.Object3D): LayerObjectGroups {
 			return;
 		}
 
-		const layerId = getLayerIdForObject( child );
+		const layerId = getLayerIdForObject( child ) ?? ( child.name.length > 0 ? child.name : null );
 		if ( layerId === null ) {
 			return;
 		}

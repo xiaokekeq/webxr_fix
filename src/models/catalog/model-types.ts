@@ -6,6 +6,7 @@ export interface ModelAssetTransform {
 export interface ModelCatalogAssetItem {
 	id: string;
 	name?: string;
+	role?: 'context';
 	modelUrl: string;
 	materialUrl?: string;
 	assetTransform?: ModelAssetTransform;

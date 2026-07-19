@@ -48,7 +48,11 @@ describe( 'RTK control-point normalization', () => {
 		const config = normalizeDemoModelConfig( JSON.parse( waterNetworkConfigText ) );
 		expect( config.modelControlTargetDiagnostics.modelControlTargetValidationState ).toBe( 'ready' );
 		expect( Object.keys( config.controlPoints ) ).toHaveLength( 3 );
-		expect( config.siteFrame.origin ).toEqual( normalizeDemoModelConfig( JSON.parse( dz1207ConfigText ) ).siteFrame.origin );
+		expect( config.siteFrame.origin ).toEqual( {
+			lat: 31.9400473778,
+			lon: 118.7359443694,
+			alt: 24.33046
+		} );
 		expect( config.markers[ 0 ]?.id ).toBe( 'marker-warning-707' );
 		expect( solveEngineeringRegistration( config ).modelToSite.rmsErrorMeters ).toBeLessThan( 0.05 );
 

@@ -20,8 +20,9 @@ describe( 'model catalog boundaries', () => {
 			normalizeModelCatalogItem( damCatalog[ 0 ] ),
 			'https://example.test/dam/projects/dam/models.json'
 		);
-		expect( item.modelUrl ).toBe( 'https://example.test/dam/projects/dam/models/dz1207/dizhi1207.obj' );
-		expect( item.materialUrl ).toBe( 'https://example.test/dam/projects/dam/models/dz1207/dizhi1207.mtl' );
+		expect( item.modelUrl ).toBe( 'https://example.test/dam/projects/dam/models/zu02/zu02.obj' );
+		expect( item.materialUrl ).toBe( 'https://example.test/dam/projects/dam/models/zu02/zu02.mtl' );
+		expect( item.assets.filter( ( asset ) => asset.role === 'context' ).map( ( asset ) => asset.id ) ).toEqual( [ 'zu01', 'zu03' ] );
 		expect( item.configUrl ).toBe( 'https://example.test/dam/projects/dam/configs/dz1207.config.json' );
 		expect( item.pipesUrl ).toBe( 'https://example.test/dam/projects/dam/properties/dz1207.pipes.json' );
 	} );

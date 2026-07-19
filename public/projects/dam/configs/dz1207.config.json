@@ -1,18 +1,18 @@
 {
   "modelId": "dz1207",
   "siteId": "dz1207",
-  "siteName": "707 堤坝警示牌控制点",
+  "siteName": "三段堤坝实景模型",
   "anchor": {
-    "lng": 118.7359443694,
-    "lat": 31.9400473778,
-    "height": 24.33046,
+    "lng": 118.895612080632,
+    "lat": 32.2299032894952,
+    "height": 11.3296200998407,
     "coordType": "WGS84"
   },
   "siteFrame": {
     "origin": {
-      "lng": 118.7359443694,
-      "lat": 31.9400473778,
-      "height": 24.33046,
+      "lng": 118.895612080632,
+      "lat": 32.2299032894952,
+      "height": 11.3296200998407,
       "coordType": "WGS84"
     },
     "axes": "enu",
@@ -25,85 +25,15 @@
     "minControlPoints": 3
   },
   "markerCalibration": {
-    "maxSelfCheckErrorMeters": 0.4,
+    "maxSelfCheckErrorMeters": 0.2,
     "solveMode": "ground-plane-2d",
-    "note": "Temporary loose threshold for outdoor manual cone-base corner capture; tighten for production."
+    "note": "Road and white-marker corners imported from 标注(1).kml."
   },
-  "annotations": [
-    {
-      "id": "risk-near-707-1",
-      "type": "risk",
-      "title": "疑似渗漏点",
-      "description": "演示 annotation，不是模型控制点。",
-      "anchorEnu": {
-        "east": -7.024,
-        "north": -1.499,
-        "up": 0.18
-      },
-      "label": {
-        "mode": "offset",
-        "offsetMeters": {
-          "east": 0.4,
-          "north": 0.2,
-          "up": 0.6
-        }
-      },
-      "severity": "danger",
-      "source": "demo",
-      "properties": {
-        "风险等级": "高",
-        "巡检状态": "待处理",
-        "说明": "演示 annotation，不是模型控制点"
-      }
-    },
-    {
-      "id": "inspection-note-707",
-      "type": "inspection",
-      "title": "巡检说明点",
-      "description": "用于验证显式配置的业务标识。",
-      "anchorEnu": {
-        "east": -2.604,
-        "north": 2.902,
-        "up": 0.18
-      },
-      "label": {
-        "mode": "offset",
-        "offsetMeters": {
-          "east": 0.2,
-          "north": 0.4,
-          "up": 0.55
-        }
-      },
-      "severity": "warning",
-      "source": "demo",
-      "properties": {
-        "类型": "巡检提示",
-        "说明": "显式 annotations[] 配置生成"
-      }
-    },
-    {
-      "id": "normal-label-707",
-      "type": "label",
-      "title": "堤防观察点",
-      "description": "普通业务标签演示。",
-      "anchorEnu": {
-        "east": 0.043,
-        "north": 0.24,
-        "up": 0.18
-      },
-      "severity": "normal",
-      "source": "demo",
-      "properties": {
-        "状态": "正常",
-        "说明": "蓝色 normal annotation"
-      }
-    }
-  ],
   "modelControlPointOrder": [
-    "707-1",
-    "707-2",
-    "707-3",
-    "707-4"
+    "road-1",
+    "road-4",
+    "road-3",
+    "road-2"
   ],
   "modelControlPointCornerOrder": [
     "leftTop",
@@ -112,119 +42,207 @@
     "leftBottom"
   ],
   "controlPoints": {
-    "707-1": {
-      "name": "模型控制点 707-1",
+    "road-1": {
+      "name": "路面角点 1",
       "cornerRole": "leftTop",
       "modelLocal": {
-        "x": -2.1663,
-        "y": 2.787714,
-        "z": -1.1963
+        "x": 145.4889,
+        "y": -69.9432,
+        "z": -0.2798
       },
       "world": {
-        "lng": 118.7358803583,
-        "lat": 31.9400360222,
-        "height": 24.29345,
+        "lng": 118.895612080632,
+        "lat": 32.2299032894952,
+        "height": 11.3296200998407,
         "coordType": "WGS84"
-      },
-      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
+      }
     },
-    "707-2": {
-      "name": "模型控制点 707-2",
+    "road-4": {
+      "name": "路面角点 4",
       "cornerRole": "rightTop",
       "modelLocal": {
-        "x": 2.5463,
-        "y": 2.787714,
-        "z": -1.1963
+        "x": -20.4671,
+        "y": -69.9865,
+        "z": 0.4337
       },
       "world": {
-        "lng": 118.7359142694,
-        "lat": 31.9400648028,
-        "height": 24.24052,
+        "lng": 118.894375414611,
+        "lat": 32.2309678150557,
+        "height": 11.307420581653,
         "coordType": "WGS84"
-      },
-      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
+      }
     },
-    "707-3": {
-      "name": "模型控制点 707-3",
+    "road-3": {
+      "name": "路面角点 3",
       "cornerRole": "rightBottom",
       "modelLocal": {
-        "x": 2.5463,
-        "y": 2.787714,
-        "z": 1.1963
+        "x": -20.1654,
+        "y": -69.9161,
+        "z": -5.4132
       },
       "world": {
-        "lng": 118.7359345528,
-        "lat": 31.9400473944,
-        "height": 24.29282,
+        "lng": 118.894421796457,
+        "lat": 32.2310026527873,
+        "height": 11.4221748334675,
         "coordType": "WGS84"
-      },
-      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
+      }
     },
-    "707-4": {
-      "name": "模型控制点 707-4",
+    "road-2": {
+      "name": "路面角点 2",
       "cornerRole": "leftBottom",
       "modelLocal": {
-        "x": -2.1663,
-        "y": 2.787714,
-        "z": 1.1963
+        "x": 145.8115,
+        "y": -69.8727,
+        "z": -6.1235
       },
       "world": {
-        "lng": 118.7359008583,
-        "lat": 31.9400187222,
-        "height": 24.31788,
+        "lng": 118.895657798277,
+        "lat": 32.2299373300182,
+        "height": 11.4568866741756,
         "coordType": "WGS84"
-      },
-      "modelLocalSource": "derived from dizhi1207.obj top bounding-box corner; used to align the model bounding-box top plane with the surveyed ground control point"
+      }
     }
   },
   "markers": [
     {
-      "id": "marker-warning-707",
-      "name": "707 警示牌控制标志",
+      "id": "white-marker",
+      "name": "白色地标",
       "enu": [
-        -4.0705,
-        -3.8872,
-        -0.0058
+        -80.957523,
+        87.559447,
+        0.039326
       ],
-      "sizeMeters": 0.297,
+      "centerEnu": [
+        -80.957523,
+        87.559447,
+        0.039326
+      ],
+      "sizeMeters": 0.343,
       "yawDeg": 0,
-      "cornerOrder": [
-        "leftTop",
-        "rightTop",
-        "rightBottom",
-        "leftBottom"
-      ],
       "cornersEnu": [
         [
-          -4.2881,
-          -3.8896,
-          -0.0093
+          -80.979154,
+          87.313911,
+          0.035175
         ],
         [
-          -4.0564,
-          -3.6848,
-          -0.0143
+          -81.192828,
+          87.471054,
+          0.06102
         ],
         [
-          -3.8605,
-          -3.8745,
-          0.0027
+          -80.935776,
+          87.797545,
+          0.042543
         ],
         [
-          -4.0772,
-          -4.1,
-          -0.0024
+          -80.722332,
+          87.655278,
+          0.018566
         ]
       ],
       "plane": "horizontal"
     }
   ],
+  "rtkSurveyDataset": {
+    "siteId": "dz1207",
+    "coordinateSystem": "WGS84",
+    "source": "manual-import",
+    "points": [
+      {
+        "id": "road-1",
+        "name": "路面角点 1",
+        "type": "model-control-point",
+        "geodetic": {
+          "longitude": 118.895612080632,
+          "latitude": 32.2299032894952,
+          "altitude": 11.3296200998407
+        }
+      },
+      {
+        "id": "road-2",
+        "name": "路面角点 2",
+        "type": "model-control-point",
+        "geodetic": {
+          "longitude": 118.895657798277,
+          "latitude": 32.2299373300182,
+          "altitude": 11.4568866741756
+        }
+      },
+      {
+        "id": "road-3",
+        "name": "路面角点 3",
+        "type": "model-control-point",
+        "geodetic": {
+          "longitude": 118.894421796457,
+          "latitude": 32.2310026527873,
+          "altitude": 11.4221748334675
+        }
+      },
+      {
+        "id": "road-4",
+        "name": "路面角点 4",
+        "type": "model-control-point",
+        "geodetic": {
+          "longitude": 118.894375414611,
+          "latitude": 32.2309678150557,
+          "altitude": 11.307420581653
+        }
+      },
+      {
+        "id": "white-marker-1",
+        "name": "白色地标角点 1",
+        "type": "marker-corner",
+        "relatedTargetId": "white-marker",
+        "geodetic": {
+          "longitude": 118.894752939632,
+          "latitude": 32.2306906712601,
+          "altitude": 11.3659090095425
+        }
+      },
+      {
+        "id": "white-marker-2",
+        "name": "白色地标角点 2",
+        "type": "marker-corner",
+        "relatedTargetId": "white-marker",
+        "geodetic": {
+          "longitude": 118.89475566433,
+          "latitude": 32.2306937496762,
+          "altitude": 11.349300920039
+        }
+      },
+      {
+        "id": "white-marker-3",
+        "name": "白色地标角点 3",
+        "type": "marker-corner",
+        "relatedTargetId": "white-marker",
+        "geodetic": {
+          "longitude": 118.894753399803,
+          "latitude": 32.2306950326021,
+          "altitude": 11.3732823823851
+        }
+      },
+      {
+        "id": "white-marker-4",
+        "name": "白色地标角点 4",
+        "type": "marker-corner",
+        "relatedTargetId": "white-marker",
+        "geodetic": {
+          "longitude": 118.894750672667,
+          "latitude": 32.2306920883304,
+          "altitude": 11.3917589455131
+        }
+      }
+    ]
+  },
+  "attachments": [],
+  "annotations": [],
   "placementAnchorEnu": [
     0,
     0,
     0
   ],
-  "placementAnchorMeaning": "site-origin-ground-reference",
+  "placementAnchorMeaning": "road-control-point-1",
   "undergroundDisplay": {
     "defaultMode": "x-ray",
     "xrayOpacity": 0.5,
@@ -235,8 +253,8 @@
   },
   "modelInstances": [
     {
-      "id": "dz1207",
-      "name": "dz1207",
+      "id": "zu02",
+      "name": "堤坝中间属性层",
       "role": "primary",
       "groundClassification": {
         "mode": "whole-model"
@@ -248,6 +266,5 @@
         "selectable": true
       }
     }
-  ],
-  "attachmentsUrl": "../properties/dz1207.attachments.json"
+  ]
 }
