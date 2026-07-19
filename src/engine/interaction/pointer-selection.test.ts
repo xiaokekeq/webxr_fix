@@ -155,4 +155,52 @@ describe( 'pointer selection', () => {
 
 	} );
 
+	it( 'uses the XR input target ray instead of the camera center', () => {
+
+		const camera = new THREE.PerspectiveCamera( 60, 1, 0.1, 100 );
+		camera.position.set( 0, 0, 5 );
+		camera.updateMatrixWorld();
+		const pipe = new THREE.Mesh( new THREE.BoxGeometry(), new THREE.MeshBasicMaterial() );
+		pipe.name = 'OffsetPipe';
+		pipe.position.x = 1;
+		const placedModel = new THREE.Group();
+		placedModel.add( pipe );
+		placedModel.updateMatrixWorld( true );
+		const referenceSpace = {} as XRReferenceSpace;
+		const onSelectionApplied = vi.fn();
+		const session = createPointerSelectionSession( {
+			sceneBundle: {
+				camera,
+				renderer: {
+					domElement: { getBoundingClientRect: () => ( { left: 0, top: 0, width: 100, height: 100 } ) },
+					xr: {
+						isPresenting: true,
+						getCamera: () => camera,
+						getReferenceSpace: () => referenceSpace
+					}
+				}
+			} as unknown as ARSceneBundle,
+			propertySelection: createPropertySelectionController( {} ),
+			setStatus: vi.fn(),
+			onInspectSelection: vi.fn(),
+			onSelectionApplied,
+			canPickModel: () => true,
+			getPlacedModel: () => placedModel,
+			getWorkspaceMode: () => 'browse',
+			getPipesByName: () => new Map( [ [ 'OffsetPipe', { name: 'OffsetPipe' } ] ] )
+		} );
+		const transform = {
+			position: { x: 1, y: 0, z: 5 },
+			orientation: { x: 0, y: 0, z: 0, w: 1 }
+		};
+
+		session.handleArSelect( {
+			frame: { getPose: () => ( { transform } ) },
+			inputSource: { targetRaySpace: {} }
+		} as unknown as XRInputSourceEvent );
+
+		expect( onSelectionApplied ).toHaveBeenCalledTimes( 1 );
+
+	} );
+
 } );

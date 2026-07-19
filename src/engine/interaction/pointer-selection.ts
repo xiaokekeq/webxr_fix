@@ -39,7 +39,7 @@ export interface PointerSelectionSession {
 	handlePointerUp(event: PointerEvent): void;
 	handleScreenPointerDown(clientX: number, clientY: number): void;
 	handleScreenPointerUp(clientX: number, clientY: number): void;
-	handleArSelect(): void;
+	handleArSelect(event: XRInputSourceEvent): void;
 }
 
 const DEFAULT_DRAG_THRESHOLD_PX = 10;
@@ -68,6 +68,7 @@ export function createPointerSelectionSession(
 	const raycaster = new THREE.Raycaster();
 	const xrRayOrigin = new THREE.Vector3();
 	const xrRayDirection = new THREE.Vector3();
+	const xrRayOrientation = new THREE.Quaternion();
 	let hasPendingPointerSelection = false;
 
 	function handleScreenPointerDown(clientX: number, clientY: number): void {
@@ -142,13 +143,24 @@ export function createPointerSelectionSession(
 		handleScreenPointerDown,
 		handleScreenPointerUp,
 
-		handleArSelect() {
+		handleArSelect(event) {
 
 			if ( canPickModel() === false ) return;
 
-			const xrCamera = sceneBundle.renderer.xr.getCamera();
-			xrRayOrigin.setFromMatrixPosition( xrCamera.matrixWorld );
-			xrRayDirection.set( 0, 0, -1 ).transformDirection( xrCamera.matrixWorld );
+			const referenceSpace = sceneBundle.renderer.xr.getReferenceSpace();
+			const targetRayPose = referenceSpace === null
+				? null
+				: event.frame.getPose( event.inputSource.targetRaySpace, referenceSpace );
+			if ( targetRayPose === null || targetRayPose === undefined ) {
+				const xrCamera = sceneBundle.renderer.xr.getCamera();
+				xrRayOrigin.setFromMatrixPosition( xrCamera.matrixWorld );
+				xrRayDirection.set( 0, 0, -1 ).transformDirection( xrCamera.matrixWorld );
+			} else {
+				const { position, orientation } = targetRayPose.transform;
+				xrRayOrigin.set( position.x, position.y, position.z );
+				xrRayOrientation.set( orientation.x, orientation.y, orientation.z, orientation.w );
+				xrRayDirection.set( 0, 0, -1 ).applyQuaternion( xrRayOrientation );
+			}
 			raycaster.set( xrRayOrigin, xrRayDirection );
 			const canvasRect = sceneBundle.renderer.domElement.getBoundingClientRect();
 			const placedModel = getPlacedModel();
