@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
-import { alignSharedCoordinateTemplate, shouldSplitAssetIntoBusinessLayers } from './runtime.js';
+import {
+	alignSharedCoordinateTemplate,
+	clipSharedCoordinateSurfaceToOwnerFootprint,
+	shouldSplitAssetIntoBusinessLayers
+} from './runtime.js';
 
 function createTemplate(pivotOffset: THREE.Vector3, pointPosition: THREE.Vector3) {
 
@@ -56,6 +60,30 @@ describe( 'shared-coordinate model assets', () => {
 		expect( primary.point.material.clippingPlanes ).toHaveLength( 1 );
 		expect( context.point.material.opacity ).toBe( 1 );
 		expect( context.point.material.clippingPlanes ).toBeNull();
+
+	} );
+
+	it( 'keeps a side surface inside its matching owner footprint', () => {
+
+		const owner = createTemplate( new THREE.Vector3(), new THREE.Vector3() );
+		owner.point.scale.set( 4, 1, 4 );
+		const surface = new THREE.Group();
+		surface.userData.__placeableTemplateTransform = {
+			unitScale: 2,
+			pivotOffset: new THREE.Vector3()
+		};
+		surface.scale.setScalar( 2 );
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [
+			- 1, 0, - 1, 1, 0, - 1, 0, 0, 1,
+			10, 0, 10, 12, 0, 10, 11, 0, 12
+		], 3 ) );
+		const mesh = new THREE.Mesh( geometry, new THREE.MeshBasicMaterial() );
+		surface.add( mesh );
+
+		clipSharedCoordinateSurfaceToOwnerFootprint( owner.template, surface );
+
+		expect( mesh.geometry.getIndex()?.count ).toBe( 3 );
 
 	} );
 

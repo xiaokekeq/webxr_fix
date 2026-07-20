@@ -312,6 +312,8 @@ function composeModelTemplate(options: {
 		compositeRoot.userData.__placeableTemplateTransform = primaryTemplate.userData.__placeableTemplateTransform;
 	}
 
+	clipSideSurfacesToOwners( modelDefinition, loadedAssetTemplates );
+
 	for ( const asset of modelDefinition.assets ) {
 		if ( asset.role !== 'context' ) continue;
 		const contextTemplate = loadedAssetTemplates.get( asset.id );
@@ -337,6 +339,86 @@ function composeModelTemplate(options: {
 	}
 
 	return compositeRoot;
+
+}
+
+function clipSideSurfacesToOwners(
+	modelDefinition: ModelCatalogItem,
+	loadedAssetTemplates: Map<string, THREE.Group>
+): void {
+
+	for ( const asset of modelDefinition.assets ) {
+		if ( asset.role !== 'context' || asset.id.endsWith( '-surface' ) === false ) continue;
+		const owner = loadedAssetTemplates.get( asset.id.slice( 0, - '-surface'.length ) );
+		const surface = loadedAssetTemplates.get( asset.id );
+		if ( owner !== undefined && surface !== undefined ) {
+			clipSharedCoordinateSurfaceToOwnerFootprint( owner, surface );
+		}
+	}
+
+}
+
+export function clipSharedCoordinateSurfaceToOwnerFootprint(
+	ownerTemplate: THREE.Group,
+	surfaceTemplate: THREE.Group
+): void {
+
+	const root = new THREE.Group();
+	root.add( ownerTemplate, surfaceTemplate );
+	alignSharedCoordinateTemplate( ownerTemplate, surfaceTemplate );
+	root.updateMatrixWorld( true );
+	const footprint = new THREE.Box3().setFromObject( ownerTemplate );
+	const aPosition = new THREE.Vector3();
+	const bPosition = new THREE.Vector3();
+	const cPosition = new THREE.Vector3();
+	const center = new THREE.Vector3();
+
+	surfaceTemplate.traverse( ( object ) => {
+		if ( object instanceof THREE.Mesh === false ) return;
+		const geometry = object.geometry;
+		const positions = geometry.getAttribute( 'position' );
+		const sourceIndex = geometry.getIndex();
+		const groups = geometry.groups.length > 0
+			? geometry.groups
+			: [ { start: 0, count: sourceIndex?.count ?? positions.count, materialIndex: 0 } ];
+		const keptIndices: number[] = [];
+		const keptGroups: THREE.BufferGeometry['groups'] = [];
+
+		for ( const group of groups ) {
+			const start = keptIndices.length;
+			const end = group.start + group.count;
+			for ( let offset = group.start; offset + 2 < end; offset += 3 ) {
+				const a = sourceIndex?.getX( offset ) ?? offset;
+				const b = sourceIndex?.getX( offset + 1 ) ?? offset + 1;
+				const c = sourceIndex?.getX( offset + 2 ) ?? offset + 2;
+				center
+					.copy( aPosition.fromBufferAttribute( positions, a ) )
+					.add( bPosition.fromBufferAttribute( positions, b ) )
+					.add( cPosition.fromBufferAttribute( positions, c ) )
+					.multiplyScalar( 1 / 3 )
+					.applyMatrix4( object.matrixWorld );
+				if ( center.x < footprint.min.x || center.x > footprint.max.x
+					|| center.z < footprint.min.z || center.z > footprint.max.z ) continue;
+				keptIndices.push( a, b, c );
+			}
+			if ( keptIndices.length > start ) {
+				keptGroups.push( {
+					start,
+					count: keptIndices.length - start,
+					materialIndex: group.materialIndex
+				} );
+			}
+		}
+
+		geometry.setIndex( keptIndices );
+		geometry.clearGroups();
+		for ( const group of keptGroups ) geometry.addGroup( group.start, group.count, group.materialIndex );
+		geometry.computeBoundingBox();
+		geometry.computeBoundingSphere();
+	} );
+
+	root.remove( ownerTemplate, surfaceTemplate );
+	surfaceTemplate.position.set( 0, 0, 0 );
 
 }
 
