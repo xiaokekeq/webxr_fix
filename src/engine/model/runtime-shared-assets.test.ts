@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { MaterialStateRuntime } from '@/engine/visualization/material-state-runtime.js';
-import { alignSharedCoordinateTemplate } from './runtime.js';
+import { alignSharedCoordinateTemplate, shouldSplitAssetIntoBusinessLayers } from './runtime.js';
 
 function createTemplate(pivotOffset: THREE.Vector3, pointPosition: THREE.Vector3) {
 
@@ -22,6 +22,13 @@ function createTemplate(pivotOffset: THREE.Vector3, pointPosition: THREE.Vector3
 }
 
 describe( 'shared-coordinate model assets', () => {
+
+	it( 'keeps context assets out of primary business-layer splitting', () => {
+
+		expect( shouldSplitAssetIntoBusinessLayers( { role: 'context' } ) ).toBe( false );
+		expect( shouldSplitAssetIntoBusinessLayers( {} ) ).toBe( true );
+
+	} );
 
 	it( 'keeps a common source point aligned after each asset was independently centered', () => {
 

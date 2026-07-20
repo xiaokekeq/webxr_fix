@@ -1,9 +1,7 @@
 ﻿import * as THREE from 'three';
 import type { PipeRecord } from '@/models/types/pipe-record.js';
 import type { DemoModelAttachment, DemoModelConfig } from '@/models/config/demo-model-config.js';
-import {
-	type ModelCatalogItem
-} from '@/models/catalog/model-api.js';
+import type { ModelCatalogAssetItem, ModelCatalogItem } from '@/models/catalog/model-api.js';
 import {
 	attachModelSourceMetadata,
 	readModelSourceMetadata,
@@ -263,12 +261,19 @@ async function loadCatalogAssetTemplates(
 				setStatus,
 				1,
 				asset.materialUrl,
-				asset.assetTransform
+				asset.assetTransform,
+				shouldSplitAssetIntoBusinessLayers( asset )
 			), undefined, asset )
 		} ) )
 	);
 
 	return new Map( assetEntries.map( ( entry ) => [ entry.id, entry.template ] ) );
+
+}
+
+export function shouldSplitAssetIntoBusinessLayers(asset: Pick<ModelCatalogAssetItem, 'role'>): boolean {
+
+	return asset.role !== 'context';
 
 }
 

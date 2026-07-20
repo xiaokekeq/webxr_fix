@@ -62,13 +62,14 @@ export async function loadModelTemplate(
 	setStatus: SetStatus,
 	perModelScaleFactor = 1,
 	materialUrl?: string,
-	assetTransform?: ModelAssetTransform
+	assetTransform?: ModelAssetTransform,
+	splitObjBusinessLayers = true
 ): Promise<THREE.Group> {
 
 	setStatus( '正在加载模型...' );
 
 	if ( isObjModelUrl( url ) ) {
-		return await loadObjModelTemplate( url, setStatus, perModelScaleFactor, materialUrl, assetTransform );
+		return await loadObjModelTemplate( url, setStatus, perModelScaleFactor, materialUrl, assetTransform, splitObjBusinessLayers );
 	}
 
 	if ( isFbxModelUrl( url ) ) {
@@ -166,7 +167,8 @@ async function loadObjModelTemplate(
 	setStatus: SetStatus,
 	perModelScaleFactor: number,
 	materialUrl?: string,
-	assetTransform?: ModelAssetTransform
+	assetTransform?: ModelAssetTransform,
+	splitObjBusinessLayers = true
 ): Promise<THREE.Group> {
 
 	try {
@@ -186,7 +188,7 @@ async function loadObjModelTemplate(
 		loader.load(
 			fileName,
 			async ( object ) => {
-				normalizeObjModelStructure( object );
+				if ( splitObjBusinessLayers ) normalizeObjModelStructure( object );
 				await waitForModelTextures( object );
 				const { template, report } = createPlaceableTemplate( object, perModelScaleFactor, assetTransform );
 					attachModelSourceMetadata( template, extractModelSourceMetadata( object, 'obj' ) );
